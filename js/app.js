@@ -399,15 +399,25 @@ async function startAR() {
     return;
   }
 
-  const sessionInit = {
-    requiredFeatures: ['hit-test', 'dom-overlay'],
-    optionalFeatures: ['anchors', 'depth-sensing'],
-    domOverlay: { root: document.getElementById('overlay') },
+  // depth-sensing (окклюзия) в WebXR пока поддерживается не везде.
+// Важно: если XRWebGLBinding отсутствует, Three.js может упасть при попытке читать depth.
+// Поэтому подключаем depth-sensing ТОЛЬКО когда он реально доступен в браузере.
+const canUseDepthSensing = (typeof XRWebGLBinding !== 'undefined');
+
+const sessionInit = {
+  requiredFeatures: ['hit-test', 'dom-overlay'],
+  optionalFeatures: [
+    'anchors',
+    ...(canUseDepthSensing ? ['depth-sensing'] : []),
+  ],
+  domOverlay: { root: document.getElementById('overlay') },
+  ...(canUseDepthSensing ? {
     depthSensing: {
-      usagePreference: ['cpu-optimized'],
+      usagePreference: ['cpu-optimized', 'gpu-optimized'],
       dataFormatPreference: ['luminance-alpha', 'float32'],
     },
-  };
+  } : {}),
+};
 
   let session;
   try {
@@ -434,11 +444,31 @@ async function startAR() {
   // фактическую поддержку проверим через наличие requestAnchor
   state.anchorsSupported = typeof session.requestAnchor === 'function';
 
+  // depth-sensing / окклюзия: включаем UI только если функция реально есть в браузере и включена в сессии
+  state.depthSupported = false;
+  try {
+    const enabled = session.enabledFeatures ? Array.from(session.enabledFeatures) : [];
+    state.depthSupported = canUseDepthSensing && enabled.includes('depth-sensing');
+  } catch (_) {
+    state.depthSupported = false;
+  }
+  // если depth не поддерживается — выключаем переключатель и не пытаемся читать глубину
+  if (!state.depthSupported) {
+    state.occlusionEnabled = false;
+    if (UI.toggleOcclusion) UI.toggleOcclusion.checked = false;
+  }
+
+
   // depth
   state.depthSupported = !!(sessionInit.optionalFeatures.includes('depth-sensing'));
   state.depthSupported = state.depthSupported && (typeof XRFrame !== 'undefined') && true; // best effort (реально проверим в кадре)
 
   resetSceneForAR();
+
+  // В AR по умолчанию прячем каталог, чтобы он не перекрывал камеру.
+  UI.catalogDrawer.style.display = 'none';
+  UI.btnToggleCatalog.textContent = 'Показать';
+
 
   setStatus('Сканируйте пол: наведите камеру на пол, дождитесь маркера.');
   state.floorLocked = false;
@@ -936,8 +966,11 @@ UI.toggleOcclusion.addEventListener('change', () => {
 
 // Resize
 window.addEventListener('resize', () => {
+  // Во время XR-сессии размер управляется WebXR. Менять size нельзя (Three.js предупредит и может лагать).
+  if (renderer.xr && renderer.xr.isPresenting) return;
+
   const w = window.innerWidth, h = window.innerHeight;
-  renderer.setSize(w, h);
+  renderer.setSize(w, h, false);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
 });
