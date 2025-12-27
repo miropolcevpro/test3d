@@ -80,6 +80,16 @@ function fmtArea(m2) {
   return `${m2.toFixed(2).replace('.', ',')} м²`;
 }
 
+
+function updateArBottomStripVar() {
+  try {
+    const bar = UI.finalBar;
+    const h = (bar && !bar.hasAttribute('hidden')) ? bar.getBoundingClientRect().height : 0;
+    document.documentElement.style.setProperty('--ar-bottom-strip', `${Math.ceil(h)}px`);
+  } catch (_) {}
+}
+
+
 // ------------------------
 // App state
 // ------------------------
@@ -565,6 +575,7 @@ async function startAR() {
   // Show bottom pattern strip in AR (like in the native app)
   show(UI.finalBar, true);
   show(UI.finalColors, false);
+  updateArBottomStripVar();
   // main add button area visible at start
   show(UI.arBottomCenter, false);
   show(UI.btnArAdd, false);
@@ -670,6 +681,11 @@ function addPointAtWorld(worldPos) {
   state.points.push(local);
   state.closed = false;
   rebuildMarkersAndLine(false);
+  pointsGroup.visible = true;
+  if (line) line.visible = true;
+  if (UI.measureLayer) UI.measureLayer.style.display = 'block';
+  show(UI.finalColors, false);
+  updateArBottomStripVar();
   rebuildFill();
   updateAreaUI();
 
@@ -726,6 +742,8 @@ function closeHole() {
   show(UI.btnArAdd, false);
   show(UI.arBottomCenter, false);
   show(UI.postCloseBar, true);
+  show(UI.finalColors, false);
+  updateArBottomStripVar();
   rebuildFill();
   updateAreaUI();
 }
@@ -744,7 +762,10 @@ function closeContour() {
   show(UI.btnArOk, false);
   show(UI.arBottomCenter, false);
   show(UI.postCloseBar, true);
-}
+  show(UI.finalColors, false);
+  updateArBottomStripVar();
+} 
+
 
 function resetAll(keepFloor = false) {
   state.points = [];
@@ -787,12 +808,18 @@ function resetAll(keepFloor = false) {
     show(UI.finalColors, false);
   } else {
     show(UI.finalBar, false);
+  show(UI.finalColors, false);
+  updateArBottomStripVar();
   }
   show(UI.btnArAdd, true);
   show(UI.btnArOk, false);
   show(UI.arBottomCenter, false);
   show(UI.btnArAdd, false);
   show(UI.btnArOk, false);
+  pointsGroup.visible = true;
+  if (line) line.visible = true;
+  if (UI.measureLayer) UI.measureLayer.style.display = 'block';
+  updateArBottomStripVar();
   updateAreaUI();
   clearMeasureLabels();
 }
@@ -931,6 +958,10 @@ function ensureMeasureEl(i) {
 }
 
 function updateMeasureLabels(xrCam) {
+  if (state.phase === 'ar_final') {
+    clearMeasureLabels();
+    return;
+  }
   if (!state.floorLocked) {
     clearMeasureLabels();
     return;
@@ -977,11 +1008,19 @@ function updateMeasureLabels(xrCam) {
 
 function updateAreaUI() {
   if (!UI.arArea) return;
-  if (!state.closed) {
-    UI.arArea.textContent = state.points.length >= 3 ? fmtArea(computeAreaM2()) : '—';
-  } else {
-    UI.arArea.textContent = fmtArea(computeAreaM2());
+
+  const areaText = (state.points.length >= 3) ? fmtArea(computeAreaM2()) : '—';
+
+  // In final visualization, show only total area in the header (less distraction)
+  if (state.phase === 'ar_final') {
+    if (UI.arProductTitle) UI.arProductTitle.textContent = `Площадь: ${areaText}`;
+    UI.arArea.textContent = '';
+    return;
   }
+
+  // Otherwise show product name + current area (as in the reference flow)
+  if (UI.arProductTitle && state.selectedTile) UI.arProductTitle.textContent = state.selectedTile.name;
+  UI.arArea.textContent = state.closed ? fmtArea(computeAreaM2()) : areaText;
 }
 
 // ------------------------
@@ -1244,6 +1283,8 @@ UI.btnArOk?.addEventListener('click', () => {
 });
 
 UI.btnEditShape?.addEventListener('click', () => {
+  show(UI.finalColors, false);
+  updateArBottomStripVar();
   // return to drawing mode, keep points
   state.closed = false;
   state.phase = 'ar_draw';
@@ -1263,6 +1304,8 @@ UI.btnEditShape?.addEventListener('click', () => {
 });
 
 UI.btnCutout?.addEventListener('click', () => {
+  show(UI.finalColors, false);
+  updateArBottomStripVar();
   // cutout mode
   state.phase = 'ar_cut';
   state.holePoints = [];
@@ -1279,6 +1322,11 @@ UI.btnCutout?.addEventListener('click', () => {
   show(UI.scanHint, true);
 
   rebuildMarkersAndLine(true);
+  pointsGroup.visible = true;
+  if (line) line.visible = true;
+  if (UI.measureLayer) UI.measureLayer.style.display = 'block';
+  show(UI.finalColors, false);
+  updateArBottomStripVar();
 });
 
 UI.btnDone?.addEventListener('click', () => {
@@ -1287,6 +1335,13 @@ UI.btnDone?.addEventListener('click', () => {
   show(UI.arBottomCenter, false);
   show(UI.finalBar, true);
   show(UI.finalColors, true);
+
+  // Hide guides (points/lines/distances) in final visualization
+  pointsGroup.visible = false;
+  if (line) line.visible = false;
+  if (UI.measureLayer) UI.measureLayer.style.display = 'none';
+  clearMeasureLabels();
+  updateArBottomStripVar();
 
   rebuildFill();
   updateAreaUI();
@@ -1304,7 +1359,9 @@ UI.btnDone?.addEventListener('click', () => {
 });
 
 window.addEventListener('resize', () => {
-  if (!state.xrSession) {
+  if (state.xrSession) {
+    updateArBottomStripVar();
+  } else {
     renderer.setSize(window.innerWidth, window.innerHeight);
   }
   camera.aspect = window.innerWidth / window.innerHeight;
