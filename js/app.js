@@ -252,6 +252,20 @@ function makeTileMaterial(texture) {
   return mat;
 }
 
+// ------------------------
+// Input helpers (tap-to-place)
+// ------------------------
+function isEventOnUI(target){
+  if(!target || !target.closest) return false;
+  return !!target.closest('.topbar, .leftDrawer, .tools, .modal, .toast, .bottombar, .fallback');
+}
+function distXZ(a,b){
+  const dx = a.x - b.x;
+  const dz = a.z - b.z;
+  return Math.hypot(dx, dz);
+}
+
+
 function setStatus(text) {
   UI.statusText.textContent = text;
 }
@@ -571,39 +585,48 @@ function calibrateFloor() {
 
 UI.btnCalibrate.addEventListener('click', calibrateFloor);
 
-function addPointAtCenterRay() {
+function addPointFromReticle() {
   if (!state.floorLocked) {
     alert('Сначала нажмите «Зафиксировать пол».');
     return;
   }
   if (!state.xrSession) return;
+  if (!state.reticleVisible || !reticle.visible) return;
 
-  const origin = new THREE.Vector3();
-  const dir = new THREE.Vector3();
-  camera.getWorldPosition(origin);
-  camera.getWorldDirection(dir);
+  // Берём позицию reticle (hit-test) и принудительно кладём на плоскость пола.
+  const hitWorld = reticle.position.clone();
+  hitWorld.y = state.floorY;
 
-  // пересечение с плоскостью y=floorY
-  if (Math.abs(dir.y) < 1e-4) return;
-  const t = (state.floorY - origin.y) / dir.y;
-  if (t <= 0) return;
-  const hit = origin.add(dir.multiplyScalar(t));
+  // Переводим в локальные координаты anchorGroup
+  const local = anchorGroup.worldToLocal(hitWorld);
 
-  // переводим в локальные координаты anchorGroup
-  const local = anchorGroup.worldToLocal(hit.clone());
+  // защита от дублей (слишком близко)
+  if (state.points.length) {
+    const d = distXZ(state.points[state.points.length - 1], local);
+    if (d < 0.04) return; // < 4 см
+  }
 
   state.points.push(local);
   state.closed = false;
   rebuildMarkersAndLine();
+  rebuildFill();
+
   setStatus(`Точка добавлена: ${state.points.length}`);
 
-  // кнопка замыкания активна при >=3
   if (state.points.length >= 3) {
     UI.btnClose.classList.remove('hidden');
   }
 }
 
-UI.btnAddPoint.addEventListener('click', addPointAtCenterRay);
+UI.btnAddPoint.addEventListener('click', addPointFromReticle);
+
+// Добавление точки тапом по экрану (в AR), если пользователь нажимает НЕ по элементам UI
+window.addEventListener('pointerup', (e) => {
+  if (!state.xrSession) return;
+  if (isEventOnUI(e.target)) return;
+  addPointFromReticle();
+});
+
 
 function undoPoint() {
   if (!state.points.length) return;
@@ -689,8 +712,9 @@ function rebuildFill() {
   const geom = new THREE.ShapeGeometry(shape, 1);
   geom.rotateX(-Math.PI / 2);
 
-  // чуть приподнимем, чтобы не z-fight
-  geom.translate(0, 0.002, 0);
+  // чуть приподнимем, чтобы не z-fight (и положим на уровень пола)
+  const baseY = state.points.reduce((s,p)=>s+p.y,0) / state.points.length;
+  geom.translate(0, baseY + 0.002, 0);
 
   if (!tileMaterial) {
     // fallback material (shouldn't happen)
@@ -716,6 +740,7 @@ function rebuildBorder() {
   const h = 0.008;
 
   const pts = state.points;
+  const baseY = pts.reduce((s,p)=>s+p.y,0) / pts.length;
   for (let i = 0; i < pts.length; i++) {
     const a = pts[i];
     const b = pts[(i + 1) % pts.length];
@@ -726,7 +751,7 @@ function rebuildBorder() {
 
     const geo = new THREE.BoxGeometry(len, h, state.borderWidth);
     const m = new THREE.Mesh(geo, mat);
-    const mid = new THREE.Vector3((a.x + b.x) / 2, 0.006, (a.z + b.z) / 2);
+    const mid = new THREE.Vector3((a.x + b.x) / 2, baseY + 0.006, (a.z + b.z) / 2);
     m.position.copy(mid);
 
     const ang = Math.atan2(dz, dx);
@@ -897,6 +922,8 @@ renderer.setAnimationLoop((t, frame) => {
   renderer.render(scene, camera);
 });
 
+const __tmpUp = new THREE.Vector3();
+
 function updateXR(frame) {
   // hit test (центр экрана)
   let gotHit = false;
@@ -908,7 +935,16 @@ function updateXR(frame) {
         reticle.visible = true;
         reticle.matrix.fromArray(pose.transform.matrix);
         reticle.matrix.decompose(reticle.position, reticle.quaternion, reticle.scale);
-        gotHit = true;
+        // Фильтр: ретикл должен быть на полу (горизонтальная поверхность), иначе игнорируем (стены/мебель)
+        __tmpUp.set(0, 1, 0).applyQuaternion(reticle.quaternion);
+        if (__tmpUp.y < 0.75) {
+          reticle.visible = false;
+          gotHit = false;
+        } else {
+          // Если пол зафиксирован — принудительно кладём маркер на плоскость пола
+          if (state.floorLocked) reticle.position.y = state.floorY;
+          gotHit = true;
+        }
       }
     }
   }
