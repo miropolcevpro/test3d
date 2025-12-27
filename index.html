@@ -5,6 +5,19 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <title>WebAR Визуализатор плитки</title>
   <link rel="stylesheet" href="css/style.css" />
+
+  <!--
+    IMPORTANT (ESM): three/examples modules (OrbitControls etc.) import from bare specifier "three".
+    On GitHub Pages / plain HTML we must provide an import map.
+  -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.161.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/"
+      }
+    }
+  </script>
 </head>
 <body>
   <div id="app">
