@@ -135,6 +135,14 @@ const state = {
   points: /** @type {THREE.Vector3[]} */ ([]),
   holes: /** @type {THREE.Vector3[][]} */ ([]),
   holePoints: /** @type {THREE.Vector3[]} */ ([]),
+  // edit-shape (move existing points)
+  editIndex: null,
+  editDragging: false,
+  editPickables: /** @type {THREE.Object3D[]} */ ([]),
+  outerMarkers: /** @type {THREE.Mesh[]} */ ([]),
+  firstRing: null,
+  _editDirty: false,
+  _editLastRebuildTs: 0,
   closed: false,
 };
 
@@ -891,6 +899,9 @@ function resetAll(keepFloor = false) {
 // ------------------------
 function rebuildMarkersAndLine(closed = false) {
   pointsGroup.clear();
+  state.outerMarkers = [];
+  state.editPickables = [];
+  state.firstRing = null;
 
   const markerMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
   const markerGeo = new THREE.SphereGeometry(0.018, 18, 12);
@@ -901,6 +912,10 @@ function rebuildMarkersAndLine(closed = false) {
     m.position.copy(p);
     m.position.y += 0.002;
     pointsGroup.add(m);
+    m.name = 'outerMarker';
+    m.userData = { kind: 'outer', index: i };
+    state.outerMarkers[i] = m;
+    state.editPickables.push(m);
 
     if (i === 0) {
       const ring = new THREE.Mesh(
@@ -908,6 +923,7 @@ function rebuildMarkersAndLine(closed = false) {
         new THREE.MeshBasicMaterial({ color: 0x2f6cff, transparent: true, opacity: 0.85 })
       );
       ring.name = 'firstRing';
+      state.firstRing = ring;
       ring.position.copy(p);
       ring.position.y += 0.001;
       pointsGroup.add(ring);
@@ -1178,6 +1194,35 @@ function updateXR(frame) {
   }
   if (!reticleOk) reticle.visible = false;
 
+  // Edit-shape: move selected point by projecting it onto the floor reticle
+  if (state.phase === 'ar_edit' && state.floorLocked && state.editIndex != null && reticle.visible) {
+    const i = state.editIndex;
+    if (state.points[i]) {
+      // clamp to floor
+      state.points[i].x = reticle.position.x;
+      state.points[i].z = reticle.position.z;
+      state.points[i].y = state.floorY;
+
+      state._editDirty = true;
+    }
+  }
+
+  // Throttled rebuild while dragging (line + mask + area). Markers are rebuilt too to keep everything consistent.
+  if (state.phase === 'ar_edit' && state._editDirty) {
+    const now = performance.now();
+    if (!state._editLastRebuildTs || (now - state._editLastRebuildTs) > 70) {
+      state._editDirty = false;
+      state._editLastRebuildTs = now;
+
+      const keepSel = state.editIndex;
+      rebuildMarkersAndLine(true);
+      rebuildFill();
+      updateAreaUI();
+      if (keepSel != null) __setEditSelection(keepSel);
+    }
+  }
+
+
   // Scan grid: show only while scanning AND only when we have a valid projected reticle
   if (!state.floorLocked && state.phase === 'ar_scan') {
     scanGrid.visible = reticle.visible;
@@ -1300,6 +1345,71 @@ UI.overlay?.addEventListener('pointerdown', (e) => {
   state.lastUiTapTs = performance.now();
 }, true);
 
+
+// ------------------------
+// Edit-shape: point dragging (outer contour)
+// ------------------------
+const __editRaycaster = new THREE.Raycaster();
+const __editNdc = new THREE.Vector2();
+
+function __pickOuterMarker(clientX, clientY) {
+  if (!state.xrSession) return null;
+  if (!state.editPickables || !state.editPickables.length) return null;
+
+  const xrCam = renderer.xr.getCamera(camera);
+  const cam = (xrCam.cameras && xrCam.cameras.length) ? xrCam.cameras[0] : xrCam;
+
+  __editNdc.x = (clientX / window.innerWidth) * 2 - 1;
+  __editNdc.y = -(clientY / window.innerHeight) * 2 + 1;
+
+  __editRaycaster.setFromCamera(__editNdc, cam);
+  const hits = __editRaycaster.intersectObjects(state.editPickables, false);
+  if (!hits.length) return null;
+
+  const obj = hits[0].object;
+  const ud = obj.userData || {};
+  if (ud.kind === 'outer' && Number.isFinite(ud.index)) return ud.index;
+  return null;
+}
+
+function __setEditSelection(idx) {
+  state.editIndex = (idx == null ? null : idx);
+  state.editDragging = (state.editIndex != null);
+
+  // Подсветка через масштаб (материал общий, цвет не трогаем)
+  if (state.outerMarkers && state.outerMarkers.length) {
+    for (let i = 0; i < state.outerMarkers.length; i++) {
+      const m = state.outerMarkers[i];
+      if (!m) continue;
+      const s = (state.editIndex === i) ? 1.6 : 1.0;
+      m.scale.set(s, s, s);
+    }
+  }
+}
+
+// Тап по сцене в режиме редактирования: выбрать/отпустить точку
+UI.overlay?.addEventListener('pointerdown', (e) => {
+  if (!state.xrSession) return;
+  if (state.phase !== 'ar_edit') return;
+
+  // Игнорируем клики по UI-кнопкам
+  const t = e.target;
+  if (t && (t.closest('button') || t.closest('#postCloseBar') || t.closest('#finalBar') || t.closest('.tabBar') || t.closest('.detailBottom'))) {
+    return;
+  }
+
+  const idx = __pickOuterMarker(e.clientX, e.clientY);
+  if (idx == null) {
+    // клик в пустоту - отпустить
+    if (state.editIndex != null) __setEditSelection(null);
+    return;
+  }
+
+  if (state.editIndex === idx) __setEditSelection(null);
+  else __setEditSelection(idx);
+
+  e.preventDefault();
+}, { passive: false });
 UI.catalogSearch?.addEventListener('input', () => {
   const q = UI.catalogSearch.value.trim().toLowerCase();
   if (!q) renderCatalog(state.tiles);
@@ -1333,30 +1443,39 @@ UI.btnArOk?.addEventListener('click', () => {
 });
 
 UI.btnEditShape?.addEventListener('click', () => {
-  // return to drawing mode, keep points
+  // Режим "Изменить фигуру": перемещение уже выставленных точек (как в приложении)
+  // Важно: меняем только режим редактирования, сценарий/экраны не трогаем.
   show(UI.finalColors, false);
   if (typeof updateArBottomStripVar === 'function') updateArBottomStripVar();
 
-  state.closed = false;
-  state.phase = 'ar_draw';
-  // In the reference app, changing the outer shape resets any existing cutouts.
+  // При изменении внешней фигуры сбрасываем вырезы (как было в v7)
   state.holes = [];
   state.holePoints = [];
 
-  show(UI.postCloseBar, false);
-  show(UI.btnArAdd, true);
-  show(UI.btnArOk, state.points.length >= 3);
-  show(UI.arBottomCenter, true);
+  state.phase = 'ar_edit';
+  state.closed = true;
 
-  rebuildMarkersAndLine(false);
-  // restore guides (they may be hidden after "Готово")
+  // В edit-режиме не добавляем новые точки — только двигаем существующие
+  show(UI.btnArAdd, false);
+  show(UI.btnArOk, false);
+  show(UI.arBottomCenter, false);
+
+  // Оставляем панель "Следующий шаг" на месте: пользователь может нажать "Готово"
+  show(UI.postCloseBar, true);
+
+  // Показать маркеры/линию/замеры
   pointsGroup.visible = true;
   if (line) line.visible = true;
   if (UI.measureLayer) UI.measureLayer.style.display = 'block';
 
-  if (fillMesh) { anchorGroup.remove(fillMesh); fillMesh.geometry.dispose(); fillMesh = null; }
-  clearMeasureLabels();
+  // Пересобрать маркеры как pickable и отрисовать маску
+  rebuildMarkersAndLine(true);
+  rebuildFill();
   updateAreaUI();
+
+  // Снять выделение
+  state.editIndex = null;
+  state.editDragging = false;
 });
 
 UI.btnCutout?.addEventListener('click', () => {
