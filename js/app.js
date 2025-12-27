@@ -284,8 +284,13 @@ function updateUIVisibility() {
   ];
   tools.forEach(el => show(el, inAR));
 
-  // окклюзия — только если доступна
-  show(UI.toggleOcclusionWrap, inAR && state.depthSupported);
+  // Окклюзия: показываем переключатель всегда (как настройку),
+  // но фактически работает только если AR-сессия запрошена с depth-sensing.
+  show(UI.toggleOcclusionWrap, true);
+  if (UI.toggleOcclusion) {
+    // во время AR не даём менять (для изменения нужна перезагрузка сессии)
+    UI.toggleOcclusion.disabled = inAR;
+  }
 
   // панель подсказки/фоллбек
   show(UI.fallbackPanel, !inAR);
@@ -399,19 +404,23 @@ async function startAR() {
     return;
   }
 
-  // depth-sensing (окклюзия) в WebXR пока поддерживается не везде.
-// Важно: если XRWebGLBinding отсутствует, Three.js может упасть при попытке читать depth.
-// Поэтому подключаем depth-sensing ТОЛЬКО когда он реально доступен в браузере.
-const canUseDepthSensing = (typeof XRWebGLBinding !== 'undefined');
+  // depth-sensing (окклюзия) в WebXR работает нестабильно в некоторых комбинациях Chrome/Android.
+  // В three.js была известная проблема с getDepthInformation()==null в версиях >= r161,
+  // исправленная в более новых релизах. Поэтому:
+  // 1) включаем запрос depth-sensing ТОЛЬКО если пользователь явно включил тумблер
+  // 2) и если XRWebGLBinding вообще существует в браузере.
+  const wantsDepth = !!UI.toggleOcclusion?.checked;
+  try { localStorage.setItem('occlusionWanted', wantsDepth ? '1' : '0'); } catch (_) {}
+  const canRequestDepth = wantsDepth && (typeof XRWebGLBinding !== 'undefined');
 
 const sessionInit = {
   requiredFeatures: ['hit-test', 'dom-overlay'],
   optionalFeatures: [
     'anchors',
-    ...(canUseDepthSensing ? ['depth-sensing'] : []),
+    ...(canRequestDepth ? ['depth-sensing'] : []),
   ],
   domOverlay: { root: document.getElementById('overlay') },
-  ...(canUseDepthSensing ? {
+  ...(canRequestDepth ? {
     depthSensing: {
       usagePreference: ['cpu-optimized', 'gpu-optimized'],
       dataFormatPreference: ['luminance-alpha', 'float32'],
@@ -444,24 +453,25 @@ const sessionInit = {
   // фактическую поддержку проверим через наличие requestAnchor
   state.anchorsSupported = typeof session.requestAnchor === 'function';
 
-  // depth-sensing / окклюзия: включаем UI только если функция реально есть в браузере и включена в сессии
+  // depth-sensing / окклюзия: считаем поддержанной только если сессия реально включила feature.
+  // Важно: даже при наличии enabledFeatures, getDepthInformation() может возвращать null — это обработаем в кадре.
   state.depthSupported = false;
+  state.occlusionEnabled = false;
   try {
     const enabled = session.enabledFeatures ? Array.from(session.enabledFeatures) : [];
-    state.depthSupported = canUseDepthSensing && enabled.includes('depth-sensing');
+    state.depthSupported = enabled.includes('depth-sensing');
   } catch (_) {
     state.depthSupported = false;
   }
-  // если depth не поддерживается — выключаем переключатель и не пытаемся читать глубину
-  if (!state.depthSupported) {
-    state.occlusionEnabled = false;
-    if (UI.toggleOcclusion) UI.toggleOcclusion.checked = false;
+  // Включаем окклюзию только если пользователь хотел и feature реально включилась.
+  state.occlusionEnabled = wantsDepth && state.depthSupported;
+  if (UI.toggleOcclusion) {
+    UI.toggleOcclusion.checked = wantsDepth;
+    // во время AR блокируем (изменение требует перезапуска сессии)
+    UI.toggleOcclusion.disabled = true;
   }
 
-
-  // depth
-  state.depthSupported = !!(sessionInit.optionalFeatures.includes('depth-sensing'));
-  state.depthSupported = state.depthSupported && (typeof XRFrame !== 'undefined') && true; // best effort (реально проверим в кадре)
+  if (tileMaterial) tileMaterial.uniforms.uUseOcclusion.value = state.occlusionEnabled ? 1 : 0;
 
   resetSceneForAR();
 
@@ -516,6 +526,9 @@ function endAR(userInitiated = true) {
   controls.enabled = true;
   previewPlane.visible = true;
   previewGrid.visible = true;
+
+  // после выхода из AR снова разрешаем менять настройку окклюзии
+  if (UI.toggleOcclusion) UI.toggleOcclusion.disabled = false;
 }
 
 function resetSceneForAR() {
@@ -904,15 +917,16 @@ function updateXR(frame) {
     reticle.visible = false;
   }
 
-  // depth (best-effort)
-  if (state.xrSession) {
+  // depth (best-effort) — только если сессия запущена с depth-sensing.
+  if (state.xrSession && state.depthSupported) {
     const xrCam = renderer.xr.getCamera(camera);
     const views = frame.getViewerPose(state.referenceSpace)?.views;
     if (views && views.length) {
       try {
         const depthInfo = frame.getDepthInformation?.(views[0]);
         if (depthInfo && depthInfo.width && depthInfo.height) {
-          state.depthSupported = true;
+          // getDepthInformation может иногда вернуться null даже при включённом feature.
+          // Если сюда попали — глубина действительно доступна в этом кадре.
 
           const w = depthInfo.width, h = depthInfo.height;
           const key = `${w}x${h}`;
@@ -960,13 +974,24 @@ function updateXR(frame) {
 
 // occlusion toggle
 UI.toggleOcclusion.addEventListener('change', () => {
-  state.occlusionEnabled = UI.toggleOcclusion.checked;
-  if (tileMaterial) tileMaterial.uniforms.uUseOcclusion.value = state.occlusionEnabled ? 1 : 0;
+  const want = !!UI.toggleOcclusion.checked;
+  // Запоминаем настройку на следующий запуск AR.
+  try { localStorage.setItem('occlusionWanted', want ? '1' : '0'); } catch (_) {}
+
+  // Во время AR переключатель заблокирован (изменение требует перезапуска сессии),
+  // но в preview обновим состояние/шейдер.
+  if (!state.xrSession) {
+    state.occlusionEnabled = want && state.depthSupported;
+    if (tileMaterial) tileMaterial.uniforms.uUseOcclusion.value = state.occlusionEnabled ? 1 : 0;
+  }
 });
 
 // Resize
 window.addEventListener('resize', () => {
-  // Во время XR-сессии размер управляется WebXR. Менять size нельзя (Three.js предупредит и может лагать).
+  // Во время XR-сессии размер управляется WebXR. Менять size нельзя.
+  // Некоторые браузеры могут бросать resize ещё до того, как isPresenting станет true,
+  // поэтому дополнительно проверяем наличие активной сессии.
+  if (state.xrSession) return;
   if (renderer.xr && renderer.xr.isPresenting) return;
 
   const w = window.innerWidth, h = window.innerHeight;
@@ -977,6 +1002,13 @@ window.addEventListener('resize', () => {
 
 // Initial UI
 (async function init() {
+  // Настройка окклюзии запоминается. ВАЖНО: глубина/окклюзия в WebXR всё ещё нестабильны
+  // на разных версиях Chrome/Android, поэтому по умолчанию выключена.
+  try {
+    const want = localStorage.getItem('occlusionWanted') === '1';
+    if (UI.toggleOcclusion) UI.toggleOcclusion.checked = want;
+  } catch (_) {}
+
   state.xrSupported = await checkXrSupport();
   updateUIVisibility();
   setStatus(state.xrSupported ? 'Готово. Можно запускать AR.' : 'AR недоступен: нужен Chrome на Android.');
