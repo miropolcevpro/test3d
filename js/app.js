@@ -110,6 +110,8 @@ const state = {
   phase: 'catalog', // catalog|detail|ar_scan|ar_draw|ar_mask|ar_cut|ar_final
   floorLocked: false,
   floorY: 0,
+  scanYs: [],
+  scanFloorY: null,
   reticleVisible: false,
   snapArmed: false,
 
@@ -541,6 +543,8 @@ async function startAR() {
   // enter AR UI
   setActiveScreen('ar');
   state.phase = 'ar_scan';
+  state.scanYs = [];
+  state.scanFloorY = null;
   resetAll(true);
   UI.scanHint.classList.remove('hidden');
   show(UI.scanHint, true);
@@ -573,6 +577,10 @@ function cleanupXR() {
   state.depthTexture = null;
   state.depthData = null;
 
+  // scan floor samples
+  state.scanYs = [];
+  state.scanFloorY = null;
+
   reticle.visible = false;
   scanGrid.visible = false;
 
@@ -601,7 +609,7 @@ function ensureFloorLocked() {
   if (state.floorLocked) return;
   if (!reticle.visible) return;
   state.floorLocked = true;
-  state.floorY = reticle.position.y;
+  state.floorY = (state.scanFloorY ?? reticle.position.y);
 
   // lock scanning grid to the floor (and then hide it — it is only for scanning)
   scanGrid.position.set(reticle.position.x, state.floorY + 0.001, reticle.position.z);
@@ -609,7 +617,32 @@ function ensureFloorLocked() {
 
   // hide scan hint
   show(UI.scanHint, false);
-  state.phase = 'ar_draw';
+  
+state.phase = 'ar_draw';
+}
+
+// Return intersection of XR camera center ray with locked floor plane (world space)
+function getCenterRayFloorPoint(outVec) {
+  if (!state.xrSession || !state.floorLocked) return null;
+  const xrCam = renderer.xr.getCamera(camera);
+  const cam = (xrCam.cameras && xrCam.cameras.length) ? xrCam.cameras[0] : xrCam;
+
+  const origin = outVec || new THREE.Vector3();
+  cam.getWorldPosition(origin);
+
+  const q = new THREE.Quaternion();
+  cam.getWorldQuaternion(q);
+
+  const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(q).normalize();
+  const dy = dir.y;
+  if (Math.abs(dy) < 1e-4) return null;
+
+  const t = (state.floorY - origin.y) / dy;
+  if (!(t > 0 && isFinite(t))) return null;
+
+  origin.addScaledVector(dir, t);
+  origin.y = state.floorY;
+  return origin;
 }
 
 function addPointAtWorld(worldPos) {
@@ -658,8 +691,15 @@ function addPointAtWorld(worldPos) {
 
 function addPointFromReticle() {
   if (!state.xrSession) return;
-  if (!reticle.visible) return;
-  addPointAtWorld(reticle.position);
+
+  // auto-lock floor on first action (prefer scanFloorY)
+  ensureFloorLocked();
+  if (!state.floorLocked) return;
+
+  // Prefer floor-ray intersection to avoid wall hits
+  const p = getCenterRayFloorPoint(__tmpWorldPoint) || (reticle.visible ? reticle.position.clone() : null);
+  if (!p) return;
+  addPointAtWorld(p);
 }
 
 function addHolePointLocal(local) {
@@ -962,6 +1002,7 @@ function updateAreaUI() {
 // XR frame update
 // ------------------------
 const __tmpUp = new THREE.Vector3();
+const __tmpWorldPoint = new THREE.Vector3();
 
 function updateXR(frame) {
   // center hit test
@@ -976,7 +1017,8 @@ function updateXR(frame) {
         reticle.matrix.decompose(reticle.position, reticle.quaternion, reticle.scale);
 
         __tmpUp.set(0, 1, 0).applyQuaternion(reticle.quaternion);
-        if (__tmpUp.y < 0.75) {
+        const upThresh = state.floorLocked ? 0.75 : 0.92;
+        if (__tmpUp.y < upThresh) {
           reticle.visible = false;
           gotHit = false;
         } else {
@@ -985,12 +1027,35 @@ function updateXR(frame) {
         }
 
         if (!state.floorLocked) {
+          // collect floor Y samples for better stability (avoid grid floating)
+          state.scanYs.push(reticle.position.y);
+          if (state.scanYs.length > 60) state.scanYs.shift();
+
+          // robust estimate: use 20th percentile to ignore occasional high hits (tables) but not chase noise
+          const ys = state.scanYs.slice().sort((a,b)=>a-b);
+          const idx = Math.max(0, Math.min(ys.length - 1, Math.floor(ys.length * 0.2)));
+          state.scanFloorY = ys[idx];
+
+          const gridY = state.scanFloorY ?? reticle.position.y;
           scanGrid.visible = true;
-          scanGrid.position.set(reticle.position.x, reticle.position.y + 0.001, reticle.position.z);
+          scanGrid.position.set(reticle.position.x, gridY + 0.001, reticle.position.z);
           // keep grid horizontal
           scanGrid.rotation.set(0, 0, 0);
         }
       }
+    }
+  }
+  // After floor is locked, keep reticle strictly on the locked floor plane (prevents wall placements)
+  if (state.floorLocked) {
+    const p = getCenterRayFloorPoint(__tmpWorldPoint);
+    if (p) {
+      reticle.visible = true;
+      reticle.position.copy(p);
+      reticle.quaternion.set(0, 0, 0, 1);
+      gotHit = true;
+    } else {
+      reticle.visible = false;
+      gotHit = false;
     }
   }
 
@@ -1011,7 +1076,8 @@ function updateXR(frame) {
           pose.transform.orientation.w
         );
         __tmpUp.set(0, 1, 0).applyQuaternion(q);
-        if (__tmpUp.y < 0.75) continue;
+        const upThresh = state.floorLocked ? 0.75 : 0.92;
+        if (__tmpUp.y < upThresh) continue;
 
         state.transientHitPoses.set(tr.inputSource, pose);
       }
