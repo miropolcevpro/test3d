@@ -1,89 +1,133 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { loadTiles, clamp, downloadJsonFile, nowIso, uid } from './utils.js';
+import { loadTiles, clamp } from './utils.js';
 
+// ------------------------
+// UI
+// ------------------------
 const UI = {
-  statusText: document.getElementById('statusText'),
-  btnStartAR: document.getElementById('btnStartAR'),
-  btnExitAR: document.getElementById('btnExitAR'),
-  btnCalibrate: document.getElementById('btnCalibrate'),
-  btnAddPoint: document.getElementById('btnAddPoint'),
-  btnUndo: document.getElementById('btnUndo'),
-  btnClose: document.getElementById('btnClose'),
-  btnClear: document.getElementById('btnClear'),
-  btnScreenshot: document.getElementById('btnScreenshot'),
-  btnSaveProject: document.getElementById('btnSaveProject'),
-  btnProjects: document.getElementById('btnProjects'),
-  btnCloseProjects: document.getElementById('btnCloseProjects'),
-  projectsModal: document.getElementById('projectsModal'),
-  projectsList: document.getElementById('projectsList'),
+  overlay: document.getElementById('overlay'),
+  canvas: document.getElementById('xrCanvas'),
 
-  catalogDrawer: document.getElementById('catalogDrawer'),
-  btnToggleCatalog: document.getElementById('btnToggleCatalog'),
-  catalogList: document.getElementById('catalogList'),
+  // Screens
+  screenCatalog: document.getElementById('screenCatalog'),
+  screenDetail: document.getElementById('screenDetail'),
+  screenAR: document.getElementById('screenAR'),
+
+  // Catalog
   catalogSearch: document.getElementById('catalogSearch'),
+  catalogCards: document.getElementById('catalogCards'),
 
-  fallbackPanel: document.getElementById('fallbackPanel'),
-  btnShowHelp: document.getElementById('btnShowHelp'),
-  help: document.getElementById('help'),
+  // Detail
+  btnDetailBack: document.getElementById('btnDetailBack'),
+  detailTitle: document.getElementById('detailTitle'),
+  detailHero: document.getElementById('detailHero'),
+  detailName: document.getElementById('detailName'),
+  detailSub: document.getElementById('detailSub'),
+  detailTech: document.getElementById('detailTech'),
+  layoutRow: document.getElementById('layoutRow'),
+  colorRow: document.getElementById('colorRow'),
+  btnViewAR: document.getElementById('btnViewAR'),
 
-  selectedTileChip: document.getElementById('selectedTileChip'),
-  tileSizeChip: document.getElementById('tileSizeChip'),
+  // AR
+  btnArBack: document.getElementById('btnArBack'),
+  btnArReset: document.getElementById('btnArReset'),
+  arProductTitle: document.getElementById('arProductTitle'),
+  arArea: document.getElementById('arArea'),
+  scanHint: document.getElementById('scanHint'),
+  measureLayer: document.getElementById('measureLayer'),
+  btnArAdd: document.getElementById('btnArAdd'),
+  btnArOk: document.getElementById('btnArOk'),
+  postCloseBar: document.getElementById('postCloseBar'),
+  btnEditShape: document.getElementById('btnEditShape'),
+  btnCutout: document.getElementById('btnCutout'),
+  btnDone: document.getElementById('btnDone'),
+  finalBar: document.getElementById('finalBar'),
+  finalPatterns: document.getElementById('finalPatterns'),
+  finalColors: document.getElementById('finalColors'),
 
+  // Hidden tech
   layoutSelect: document.getElementById('layoutSelect'),
-  layoutWrap: document.getElementById('layoutWrap'),
-
-  toggleOcclusionWrap: document.getElementById('toggleOcclusionWrap'),
   toggleOcclusion: document.getElementById('toggleOcclusion'),
-
-  borderWrap: document.getElementById('borderWrap'),
-  toggleBorder: document.getElementById('toggleBorder'),
-  borderWidth: document.getElementById('borderWidth'),
-  borderWidthLabel: document.getElementById('borderWidthLabel'),
 };
 
-const canvas = document.getElementById('xrCanvas');
+function show(el, on = true) {
+  if (!el) return;
+  if (on) el.removeAttribute('hidden');
+  else el.setAttribute('hidden', '');
+}
+
+function setActiveScreen(name) {
+  const map = {
+    catalog: UI.screenCatalog,
+    detail: UI.screenDetail,
+    ar: UI.screenAR,
+  };
+  for (const k of Object.keys(map)) {
+    const el = map[k];
+    if (!el) continue;
+    const isActive = k === name;
+    el.classList.toggle('screen--active', isActive);
+    show(el, isActive);
+  }
+}
+
+function fmtMeters(m) {
+  return `${m.toFixed(2).replace('.', ',')} м`;
+}
+function fmtArea(m2) {
+  return `${m2.toFixed(2).replace('.', ',')} м²`;
+}
 
 // ------------------------
-// Состояние приложения
+// App state
 // ------------------------
 const state = {
-  xrSupported: false,
+  tiles: [],
+  selectedTile: null,
+  layout: 'straight', // straight | diagonal | stagger
+
+  // WebXR
   xrSession: null,
   referenceSpace: null,
   viewerSpace: null,
   hitTestSource: null,
+  transientHitTestSource: null,
+  transientHitPoses: new Map(),
+  lastUiTapTs: 0,
   anchorsSupported: false,
   anchor: null,
 
+  // depth
   depthSupported: false,
   depthInfoSize: null,
   depthTexture: null,
   depthData: null,
   occlusionEnabled: false,
 
+  // tracking / drawing
+  phase: 'catalog', // catalog|detail|ar_scan|ar_draw|ar_mask|ar_cut|ar_final
   floorLocked: false,
   floorY: 0,
   reticleVisible: false,
+  snapArmed: false,
 
-  points: /** @type {THREE.Vector3[]} */([]),
+  points: /** @type {THREE.Vector3[]} */ ([]),
+  holes: /** @type {THREE.Vector3[][]} */ ([]),
+  holePoints: /** @type {THREE.Vector3[]} */ ([]),
   closed: false,
-
-  selectedTile: null,
-  layout: 'straight',
-
-  borderEnabled: false,
-  borderWidth: 0.08,
 };
 
+const SNAP_DIST_M = 0.10;
+
 // ------------------------
-// Three.js сцена
+// Three.js scene
 // ------------------------
 const renderer = new THREE.WebGLRenderer({
-  canvas,
+  canvas: UI.canvas,
   antialias: true,
   alpha: true,
-  preserveDrawingBuffer: true, // для скриншота
+  preserveDrawingBuffer: true,
 });
 renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -95,8 +139,7 @@ scene.background = null;
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.01, 50);
 camera.position.set(0, 1.2, 2.2);
 
-const hemi = new THREE.HemisphereLight(0xffffff, 0x202030, 1.0);
-scene.add(hemi);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x202030, 1.0));
 const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
 dirLight.position.set(1, 3, 2);
 scene.add(dirLight);
@@ -107,7 +150,7 @@ scene.add(world);
 const anchorGroup = new THREE.Group();
 world.add(anchorGroup);
 
-// reticle
+// Reticle
 const reticle = new THREE.Mesh(
   new THREE.RingGeometry(0.06, 0.085, 40, 1).rotateX(-Math.PI / 2),
   new THREE.MeshBasicMaterial({ color: 0x2f6cff, transparent: true, opacity: 0.9 })
@@ -115,15 +158,27 @@ const reticle = new THREE.Mesh(
 reticle.visible = false;
 world.add(reticle);
 
-// Preview plane (3D режим без AR)
+// Scanning grid (visual hint)
+const scanGrid = new THREE.Mesh(
+  new THREE.PlaneGeometry(1.8, 1.8).rotateX(-Math.PI / 2),
+  new THREE.MeshBasicMaterial({
+    color: 0x2f6cff,
+    transparent: true,
+    opacity: 0.18,
+    depthWrite: false,
+  })
+);
+scanGrid.visible = false;
+world.add(scanGrid);
+
+// Desktop fallback preview
 const previewPlane = new THREE.Mesh(
   new THREE.PlaneGeometry(3, 3, 1, 1).rotateX(-Math.PI / 2),
-  new THREE.MeshStandardMaterial({ color: 0x666666 })
+  new THREE.MeshStandardMaterial({ color: 0x2b2f38 })
 );
 previewPlane.position.set(0, 0, 0);
 world.add(previewPlane);
-
-const previewGrid = new THREE.GridHelper(3, 12, 0x3a6cff, 0x666666);
+const previewGrid = new THREE.GridHelper(3, 12, 0x3a6cff, 0x3a3a3a);
 previewGrid.position.y = 0.0005;
 world.add(previewGrid);
 
@@ -135,20 +190,21 @@ controls.maxPolarAngle = Math.PI * 0.48;
 controls.minDistance = 0.6;
 controls.maxDistance = 6;
 
-// Полигональная линия и меш
-let pointsGroup = new THREE.Group();
+// Drawing objects
+const pointsGroup = new THREE.Group();
 anchorGroup.add(pointsGroup);
-
 let line = null;
 let fillMesh = null;
-let borderGroup = null;
 
-// Материал заливки (shader)
+// Materials
 let tileMaterial = null;
+const maskMaterial = new THREE.MeshBasicMaterial({
+  color: 0x5aa7ff,
+  transparent: true,
+  opacity: 0.30,
+  depthWrite: false,
+});
 
-// ------------------------
-// Shader Material для плитки с раскладкой + (опционально) окклюзией
-// ------------------------
 function makeTileMaterial(texture) {
   texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
   texture.colorSpace = THREE.SRGBColorSpace;
@@ -187,16 +243,13 @@ function makeTileMaterial(texture) {
         vViewPos = mv.xyz;
         vClipPos = projectionMatrix * mv;
 
-        // world normal
         vNormalW = normalize((modelMatrix * vec4(normal,0.0)).xyz);
 
-        // uv из координат XZ (плоскость пола)
         vec2 uv = vec2(pos.x / uTileSize.x, pos.z / uTileSize.y);
 
         if (uLayoutMode == 1) {
           uv = rot(0.78539816339) * uv; // 45°
         } else if (uLayoutMode == 2) {
-          // вразбежку: каждый второй "ряд" сдвиг на 0.5
           float row = floor(uv.y);
           uv.x += 0.5 * mod(row, 2.0);
         }
@@ -224,7 +277,6 @@ function makeTileMaterial(texture) {
       vec2 safeFract(vec2 v){ return v - floor(v); }
 
       void main(){
-        // depth-based occlusion (best-effort)
         if (uUseOcclusion == 1 && uDepthValid == 1) {
           vec3 ndc = (vClipPos.xyz / vClipPos.w);
           vec2 suv = ndc.xy * 0.5 + 0.5;
@@ -253,149 +305,159 @@ function makeTileMaterial(texture) {
 }
 
 // ------------------------
-// Input helpers (tap-to-place)
+// Geometry helpers
 // ------------------------
-function isEventOnUI(target){
-  if(!target || !target.closest) return false;
-  return !!target.closest('.topbar, .leftDrawer, .tools, .modal, .toast, .bottombar, .fallback');
-}
-function distXZ(a,b){
+function distXZ(a, b) {
   const dx = a.x - b.x;
   const dz = a.z - b.z;
   return Math.hypot(dx, dz);
 }
 
-
-function setStatus(text) {
-  UI.statusText.textContent = text;
-}
-
-function setChips() {
-  if (state.selectedTile) {
-    UI.selectedTileChip.textContent = `Плитка: ${state.selectedTile.name}`;
-    const s = state.selectedTile.tileSizeM;
-    UI.tileSizeChip.textContent = `Размер: ${s.w.toFixed(2)}×${s.h.toFixed(2)} м`;
-  } else {
-    UI.selectedTileChip.textContent = `Плитка: —`;
-    UI.tileSizeChip.textContent = `Размер: —`;
+function polyArea2(points) {
+  // points: Vector3[] in local space, use x,z
+  let s = 0;
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    s += (a.x * b.z - b.x * a.z);
   }
+  return s * 0.5;
 }
 
-function show(el, on = true) {
-  el.classList.toggle('hidden', !on);
-}
-
-function updateUIVisibility() {
-  const inAR = !!state.xrSession;
-  show(UI.btnStartAR, !inAR);
-  show(UI.btnExitAR, inAR);
-
-  // инструменты доступны только в AR
-  const tools = [
-    UI.btnCalibrate, UI.btnAddPoint, UI.btnUndo, UI.btnClose, UI.btnClear,
-    UI.btnScreenshot, UI.btnSaveProject, UI.btnProjects,
-    UI.layoutWrap, UI.borderWrap
-  ];
-  tools.forEach(el => show(el, inAR));
-
-  // Окклюзия: показываем переключатель всегда (как настройку),
-  // но фактически работает только если AR-сессия запрошена с depth-sensing.
-  show(UI.toggleOcclusionWrap, true);
-  if (UI.toggleOcclusion) {
-    // во время AR не даём менять (для изменения нужна перезагрузка сессии)
-    UI.toggleOcclusion.disabled = inAR;
+function computeAreaM2() {
+  if (state.points.length < 3) return 0;
+  let outer = Math.abs(polyArea2(state.points));
+  let holes = 0;
+  for (const h of state.holes) {
+    if (h.length >= 3) holes += Math.abs(polyArea2(h));
   }
-
-  // панель подсказки/фоллбек
-  show(UI.fallbackPanel, !inAR);
-
-  // show help button always in fallback
+  return Math.max(0, outer - holes);
 }
 
-function updateBorderLabel() {
-  UI.borderWidthLabel.textContent = `${state.borderWidth.toFixed(2)}м`;
-}
-
-// ------------------------
-// Каталог
-// ------------------------
-let catalogData = await loadTiles();
-let tiles = catalogData.tiles ?? [];
-state.selectedTile = tiles[0] ?? null;
-setChips();
-
-const textureLoader = new THREE.TextureLoader();
-const textureCache = new Map();
-
-async function getTexture(url) {
-  if (textureCache.has(url)) return textureCache.get(url);
-  const tex = await new Promise((resolve, reject) => {
-    textureLoader.load(url, resolve, undefined, reject);
+function setLayout(layout) {
+  state.layout = layout;
+  if (UI.layoutSelect) UI.layoutSelect.value = layout;
+  if (tileMaterial) {
+    tileMaterial.uniforms.uLayoutMode.value = layout === 'straight' ? 0 : (layout === 'diagonal' ? 1 : 2);
+  }
+  // UI: pattern tabs
+  UI.finalPatterns?.querySelectorAll('.patternTab').forEach(btn => {
+    btn.classList.toggle('patternTab--active', btn.dataset.layout === layout);
   });
-  textureCache.set(url, tex);
-  return tex;
-}
-
-function renderCatalog(list) {
-  UI.catalogList.innerHTML = '';
-  list.forEach(t => {
-    const card = document.createElement('div');
-    card.className = 'card';
-    card.innerHTML = `
-      <img class="card__img" src="${t.preview}" alt="${escapeHtml(t.name)}" />
-      <div class="card__body">
-        <div class="card__title">${escapeHtml(t.name)}</div>
-        <div class="card__meta">${t.tileSizeM.w.toFixed(2)}×${t.tileSizeM.h.toFixed(2)} м</div>
-      </div>
-    `;
-    card.addEventListener('click', () => selectTile(t.id));
-    UI.catalogList.appendChild(card);
+  UI.layoutRow?.querySelectorAll('.layoutCard').forEach(btn => {
+    btn.classList.toggle('layoutCard--active', btn.dataset.layout === layout);
   });
 }
 
-async function selectTile(id) {
-  const t = tiles.find(x => x.id === id);
+async function selectTile(tileId) {
+  const t = state.tiles.find(x => x.id === tileId);
   if (!t) return;
   state.selectedTile = t;
-  setChips();
-  setStatus('Загрузка текстуры…');
-  const tex = await getTexture(t.texture);
 
-  if (!tileMaterial) {
-    tileMaterial = makeTileMaterial(tex);
-  } else {
-    tileMaterial.uniforms.uTex.value = tex;
-  }
+  const tex = await new THREE.TextureLoader().loadAsync(t.texture);
+  tileMaterial = makeTileMaterial(tex);
   tileMaterial.uniforms.uTileSize.value.set(t.tileSizeM.w, t.tileSizeM.h);
+  setLayout(state.layout);
 
-  // preview plane
+  // desktop preview
   previewPlane.material.map = tex;
   previewPlane.material.needsUpdate = true;
   previewPlane.material.map.repeat.set(3 / t.tileSizeM.w, 3 / t.tileSizeM.h);
 
-  // если есть заливка — обновим материал/uv
-  if (fillMesh) fillMesh.material = tileMaterial;
+  // update detail hero
+  if (UI.detailHero) {
+    UI.detailHero.style.backgroundImage = `url(${t.preview})`;
+  }
 
-  setStatus('Готово');
+  // update selected in color rows
+  const updateSwatches = (wrap) => {
+    wrap?.querySelectorAll('[data-tile-id]').forEach(el => {
+      el.classList.toggle('swatch--active', String(tileId) === el.dataset.tileId);
+    });
+  };
+  updateSwatches(UI.colorRow);
+  updateSwatches(UI.finalColors);
+
+  // update AR title
+  if (UI.arProductTitle) UI.arProductTitle.textContent = t.name;
 }
 
-renderCatalog(tiles);
-await selectTile(state.selectedTile?.id ?? 1);
+// ------------------------
+// Catalog + Detail rendering
+// ------------------------
+function renderCatalog(list) {
+  if (!UI.catalogCards) return;
+  UI.catalogCards.innerHTML = '';
+  list.forEach(tile => {
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'catalogCard';
+    card.style.backgroundImage = `url(${tile.preview})`;
 
-UI.catalogSearch.addEventListener('input', () => {
-  const q = UI.catalogSearch.value.trim().toLowerCase();
-  if (!q) renderCatalog(tiles);
-  else renderCatalog(tiles.filter(t => t.name.toLowerCase().includes(q)));
-});
+    const title = document.createElement('div');
+    title.className = 'catalogCardTitle';
+    title.textContent = tile.name.replace(/^Плитка\s+/, '').replace(/«|»/g, '').toUpperCase();
 
-UI.btnToggleCatalog.addEventListener('click', () => {
-  const hidden = UI.catalogDrawer.style.display === 'none';
-  UI.catalogDrawer.style.display = hidden ? 'flex' : 'none';
-  UI.btnToggleCatalog.textContent = hidden ? 'Скрыть' : 'Показать';
-});
+    card.appendChild(title);
+    card.addEventListener('click', () => openDetail(tile.id));
+    UI.catalogCards.appendChild(card);
+  });
+}
+
+function openDetail(tileId) {
+  const t = state.tiles.find(x => x.id === tileId);
+  if (!t) return;
+
+  // Fill UI
+  UI.detailTitle.textContent = 'КАТАЛОГ';
+  UI.detailName.textContent = t.name;
+  UI.detailSub.textContent = `${t.tileSizeM.w.toFixed(2)}×${t.tileSizeM.h.toFixed(2)} м`;
+  UI.detailHero.style.backgroundImage = `url(${t.preview})`;
+
+  // tech
+  UI.detailTech.innerHTML = '';
+  const kv = {
+    'Размер': `${t.tileSizeM.w.toFixed(2)}×${t.tileSizeM.h.toFixed(2)} м`,
+    'Рекомендовано': (t.recommendedLayouts || []).slice(0, 3).join(', ') || '—',
+  };
+  for (const [k, v] of Object.entries(kv)) {
+    const row = document.createElement('div');
+    row.className = 'kvRow';
+    row.innerHTML = `<div class="kvK">${k}</div><div class="kvV">${v}</div>`;
+    UI.detailTech.appendChild(row);
+  }
+
+  // Layout buttons
+  UI.layoutRow.querySelectorAll('.layoutCard').forEach(btn => {
+    btn.onclick = () => setLayout(btn.dataset.layout);
+  });
+  setLayout(state.layout);
+
+  // Color row (first 8 tiles)
+  renderColorRow(UI.colorRow, state.tiles.slice(0, 8));
+
+  selectTile(tileId);
+  setActiveScreen('detail');
+  state.phase = 'detail';
+}
+
+function renderColorRow(container, tiles) {
+  if (!container) return;
+  container.innerHTML = '';
+  tiles.forEach(t => {
+    const sw = document.createElement('button');
+    sw.type = 'button';
+    sw.className = 'swatch';
+    sw.dataset.tileId = String(t.id);
+    sw.style.backgroundImage = `url(${t.preview})`;
+    sw.title = t.name;
+    sw.addEventListener('click', () => selectTile(t.id));
+    container.appendChild(sw);
+  });
+}
 
 // ------------------------
-// XR helpers
+// XR setup
 // ------------------------
 async function checkXrSupport() {
   if (!navigator.xr) return false;
@@ -408,46 +470,36 @@ async function checkXrSupport() {
 
 async function startAR() {
   if (!navigator.xr) {
-    alert('WebXR недоступен в этом браузере. Откройте проект в Chrome на Android.');
+    alert('WebXR недоступен в этом браузере. Откройте сайт в Chrome на Android.');
     return;
   }
-
   const supported = await checkXrSupport();
   if (!supported) {
-    alert('Этот браузер/устройство не поддерживает immersive-ar. Нужен Chrome на Android с ARCore.');
+    alert('immersive-ar не поддерживается. Нужен Chrome на Android с ARCore.');
     return;
   }
 
-  // depth-sensing (окклюзия) в WebXR работает нестабильно в некоторых комбинациях Chrome/Android.
-  // В three.js была известная проблема с getDepthInformation()==null в версиях >= r161,
-  // исправленная в более новых релизах. Поэтому:
-  // 1) включаем запрос depth-sensing ТОЛЬКО если пользователь явно включил тумблер
-  // 2) и если XRWebGLBinding вообще существует в браузере.
   const wantsDepth = !!UI.toggleOcclusion?.checked;
-  try { localStorage.setItem('occlusionWanted', wantsDepth ? '1' : '0'); } catch (_) {}
   const canRequestDepth = wantsDepth && (typeof XRWebGLBinding !== 'undefined');
 
-const sessionInit = {
-  requiredFeatures: ['hit-test', 'dom-overlay'],
-  optionalFeatures: [
-    'anchors',
-    ...(canRequestDepth ? ['depth-sensing'] : []),
-  ],
-  domOverlay: { root: document.getElementById('overlay') },
-  ...(canRequestDepth ? {
-    depthSensing: {
-      usagePreference: ['cpu-optimized', 'gpu-optimized'],
-      dataFormatPreference: ['luminance-alpha', 'float32'],
-    },
-  } : {}),
-};
+  const sessionInit = {
+    requiredFeatures: ['hit-test', 'dom-overlay'],
+    optionalFeatures: ['anchors', ...(canRequestDepth ? ['depth-sensing'] : [])],
+    domOverlay: { root: UI.overlay },
+    ...(canRequestDepth ? {
+      depthSensing: {
+        usagePreference: ['cpu-optimized', 'gpu-optimized'],
+        dataFormatPreference: ['luminance-alpha', 'float32'],
+      },
+    } : {}),
+  };
 
   let session;
   try {
     session = await navigator.xr.requestSession('immersive-ar', sessionInit);
   } catch (e) {
     console.error(e);
-    alert('Не удалось запустить AR-сессию. Проверьте разрешения камеры и поддержку ARCore.');
+    alert('Не удалось запустить AR-сессию. Проверьте разрешения камеры.');
     return;
   }
 
@@ -455,477 +507,430 @@ const sessionInit = {
   renderer.xr.setReferenceSpaceType('local');
   await renderer.xr.setSession(session);
 
-  // ref spaces
   state.referenceSpace = await session.requestReferenceSpace('local');
   state.viewerSpace = await session.requestReferenceSpace('viewer');
 
-  // hit test
   state.hitTestSource = await session.requestHitTestSource({ space: state.viewerSpace });
 
+  // IMPORTANT:
+  // In the reference app, points are placed ONLY by pressing the on-screen "+" button
+  // (using the reticle / center hit-test). We intentionally do NOT place points on
+  // general screen taps (XR "select"), to avoid accidental points.
+  state.transientHitTestSource = null;
+  state.transientHitPoses = new Map();
+  state._onXRSelect = null;
+
   // anchors
-  state.anchorsSupported = sessionInit.optionalFeatures.includes('anchors');
-  // фактическую поддержку проверим через наличие requestAnchor
   state.anchorsSupported = typeof session.requestAnchor === 'function';
 
-  // depth-sensing / окклюзия: считаем поддержанной только если сессия реально включила feature.
-  // Важно: даже при наличии enabledFeatures, getDepthInformation() может возвращать null — это обработаем в кадре.
+  // depth
   state.depthSupported = false;
   state.occlusionEnabled = false;
   try {
     const enabled = session.enabledFeatures ? Array.from(session.enabledFeatures) : [];
     state.depthSupported = enabled.includes('depth-sensing');
-  } catch (_) {
-    state.depthSupported = false;
-  }
-  // Включаем окклюзию только если пользователь хотел и feature реально включилась.
-  state.occlusionEnabled = wantsDepth && state.depthSupported;
-  if (UI.toggleOcclusion) {
-    UI.toggleOcclusion.checked = wantsDepth;
-    // во время AR блокируем (изменение требует перезапуска сессии)
-    UI.toggleOcclusion.disabled = true;
-  }
+  } catch (_) {}
 
-  if (tileMaterial) tileMaterial.uniforms.uUseOcclusion.value = state.occlusionEnabled ? 1 : 0;
+  session.addEventListener('end', () => {
+    cleanupXR();
+  });
 
-  resetSceneForAR();
+  // enter AR UI
+  setActiveScreen('ar');
+  state.phase = 'ar_scan';
+  resetAll(true);
+  UI.scanHint.classList.remove('hidden');
+  show(UI.scanHint, true);
 
-  // В AR по умолчанию прячем каталог, чтобы он не перекрывал камеру.
-  UI.catalogDrawer.style.display = 'none';
-  UI.btnToggleCatalog.textContent = 'Показать';
-
-
-  setStatus('Сканируйте пол: наведите камеру на пол, дождитесь маркера.');
-  state.floorLocked = false;
-  state.points = [];
-  state.closed = false;
-
-  show(UI.help, false);
-  updateUIVisibility();
-
-  session.addEventListener('end', () => endAR(false));
-
-  // показать кнопку фиксации пола
-  show(UI.btnCalibrate, true);
-  show(UI.btnAddPoint, true);
-  show(UI.btnUndo, true);
-  show(UI.btnClose, true);
-  show(UI.btnClear, true);
-  show(UI.btnScreenshot, true);
-  show(UI.btnSaveProject, true);
-  show(UI.btnProjects, true);
-  show(UI.layoutWrap, true);
-  show(UI.borderWrap, true);
-
-  state.reticleVisible = false;
+  // grid visible while scanning
+  scanGrid.visible = true;
 }
 
-function endAR(userInitiated = true) {
-  const session = state.xrSession;
+function cleanupXR() {
   state.xrSession = null;
   state.referenceSpace = null;
   state.viewerSpace = null;
   state.hitTestSource = null;
-  state.anchor = null;
-  state.floorLocked = false;
+  state.transientHitTestSource = null;
+  state.transientHitPoses = new Map();
+
+  // depth
+  state.depthSupported = false;
+  state.depthInfoSize = null;
+  state.depthTexture = null;
+  state.depthData = null;
+
   reticle.visible = false;
-  state.reticleVisible = false;
+  scanGrid.visible = false;
 
-  if (session && userInitiated) session.end().catch(() => {});
-  renderer.xr.setSession(null);
-
-  setStatus('AR завершён');
-  updateUIVisibility();
-
-  // восстановим preview режим
-  controls.enabled = true;
-  previewPlane.visible = true;
-  previewGrid.visible = true;
-
-  // после выхода из AR снова разрешаем менять настройку окклюзии
-  if (UI.toggleOcclusion) UI.toggleOcclusion.disabled = false;
+  // UI
+  setActiveScreen('detail');
+  state.phase = 'detail';
 }
 
-function resetSceneForAR() {
-  // AR: выключаем орбит-контролы, preview-плоскость
-  controls.enabled = false;
-  previewPlane.visible = false;
-  previewGrid.visible = false;
-
-  // очистить разметку
-  clearAll();
+async function stopAR() {
+  const s = state.xrSession;
+  if (!s) return;
+  try {
+    if (state._onXRSelect) s.removeEventListener('select', state._onXRSelect);
+  } catch (_) {}
+  try { await s.end(); } catch (_) {}
 }
 
-UI.btnStartAR.addEventListener('click', startAR);
-UI.btnExitAR.addEventListener('click', () => endAR(true));
-
 // ------------------------
-// Пол: фиксация, точки, контур
+// Floor lock + points
 // ------------------------
-function calibrateFloor() {
-  if (!state.reticleVisible) {
-    alert('Сначала наведите камеру на пол и дождитесь маркера.');
-    return;
-  }
-  state.floorY = reticle.position.y;
+function ensureFloorLocked() {
+  if (state.floorLocked) return;
+  if (!reticle.visible) return;
   state.floorLocked = true;
+  state.floorY = reticle.position.y;
 
-  // Попытка создать anchor
-  if (state.xrSession && state.anchorsSupported) {
-    const frame = renderer.xr.getFrame();
-    const refSpace = state.referenceSpace;
-    if (frame && refSpace) {
-      const pose = frame.getPose(reticle.userData.xrSpace, refSpace);
-      // В three.js мы не имеем xrSpace напрямую. Поэтому best-effort:
-      // создаём "якорь" как просто позицию в мире (без API anchor), если API неудобно.
-    }
-  }
+  // place scan grid on floor
+  scanGrid.position.set(reticle.position.x, state.floorY + 0.001, reticle.position.z);
+  scanGrid.quaternion.copy(reticle.quaternion);
 
-  setStatus('Пол зафиксирован. Ставьте точки на полу.');
+  // hide scan hint
+  show(UI.scanHint, false);
+  state.phase = 'ar_draw';
 }
 
-UI.btnCalibrate.addEventListener('click', calibrateFloor);
-
-function addPointFromReticle() {
-  if (!state.floorLocked) {
-    alert('Сначала нажмите «Зафиксировать пол».');
-    return;
-  }
+function addPointAtWorld(worldPos) {
   if (!state.xrSession) return;
-  if (!state.reticleVisible || !reticle.visible) return;
 
-  // Берём позицию reticle (hit-test) и принудительно кладём на плоскость пола.
-  const hitWorld = reticle.position.clone();
+  // auto-lock floor on first action
+  ensureFloorLocked();
+  if (!state.floorLocked) return;
+
+  // Clamp on floor
+  const hitWorld = worldPos.clone();
   hitWorld.y = state.floorY;
 
-  // Переводим в локальные координаты anchorGroup
+  // Convert to local space (anchorGroup)
   const local = anchorGroup.worldToLocal(hitWorld);
 
-  // защита от дублей (слишком близко)
+  // If cutting a hole
+  if (state.phase === 'ar_cut') {
+    addHolePointLocal(local);
+    return;
+  }
+
+  // protect duplicates
   if (state.points.length) {
     const d = distXZ(state.points[state.points.length - 1], local);
-    if (d < 0.04) return; // < 4 см
+    if (d < 0.04) return;
+  }
+
+  // magnet close
+  if (!state.closed && state.points.length >= 3) {
+    const d0 = distXZ(state.points[0], local);
+    if (d0 < SNAP_DIST_M) {
+      closeContour();
+      return;
+    }
   }
 
   state.points.push(local);
   state.closed = false;
-  rebuildMarkersAndLine();
+  rebuildMarkersAndLine(false);
   rebuildFill();
+  updateAreaUI();
 
-  setStatus(`Точка добавлена: ${state.points.length}`);
-
-  if (state.points.length >= 3) {
-    UI.btnClose.classList.remove('hidden');
-  }
+  if (state.points.length >= 3) show(UI.btnArOk, true);
 }
 
-UI.btnAddPoint.addEventListener('click', addPointFromReticle);
-
-// Добавление точки тапом по экрану (в AR), если пользователь нажимает НЕ по элементам UI
-window.addEventListener('pointerup', (e) => {
+function addPointFromReticle() {
   if (!state.xrSession) return;
-  if (isEventOnUI(e.target)) return;
-  addPointFromReticle();
-});
-
-
-function undoPoint() {
-  if (!state.points.length) return;
-  state.points.pop();
-  state.closed = false;
-  rebuildMarkersAndLine();
-  rebuildFill();
+  if (!reticle.visible) return;
+  addPointAtWorld(reticle.position);
 }
 
-UI.btnUndo.addEventListener('click', undoPoint);
+function addHolePointLocal(local) {
+  // local already clamped to floor
+  if (state.holePoints.length) {
+    const d = distXZ(state.holePoints[state.holePoints.length - 1], local);
+    if (d < 0.04) return;
+  }
+
+  if (state.holePoints.length >= 3) {
+    const d0 = distXZ(state.holePoints[0], local);
+    if (d0 < SNAP_DIST_M) {
+      closeHole();
+      return;
+    }
+  }
+
+  state.holePoints.push(local);
+  rebuildMarkersAndLine(state.closed);
+  rebuildFill();
+  updateAreaUI();
+
+  if (state.holePoints.length >= 3) show(UI.btnArOk, true);
+}
+
+function closeHole() {
+  if (state.holePoints.length < 3) return;
+  // store hole and exit cut mode
+  state.holes.push(state.holePoints.map(p => p.clone()));
+  state.holePoints = [];
+  state.phase = 'ar_mask';
+  // hide cutout hint and restore default scan hint text
+  try {
+    const t = UI.scanHint?.querySelector('.scanTitle');
+    const s = UI.scanHint?.querySelector('.scanText');
+    if (t) t.textContent = 'СКАНИРУЙТЕ ПОВЕРХНОСТЬ';
+    if (s) {
+      s.textContent = 'Плавно двигайте телефон влево-вправо и направляйте камеру на пол. Разметка работает после фиксации плоскости.';
+    }
+  } catch (_) {}
+  show(UI.scanHint, false);
+  show(UI.btnArOk, false);
+  show(UI.btnArAdd, false);
+  show(UI.postCloseBar, true);
+  rebuildFill();
+  updateAreaUI();
+}
 
 function closeContour() {
-  if (state.points.length < 3) {
-    alert('Нужно минимум 3 точки.');
-    return;
-  }
+  if (state.points.length < 3) return;
   state.closed = true;
+  state.phase = 'ar_mask';
+
   rebuildMarkersAndLine(true);
   rebuildFill();
-  setStatus('Контур замкнут. Плитка применена.');
+  updateAreaUI();
+
+  // UI
+  show(UI.btnArAdd, false);
+  show(UI.btnArOk, false);
+  show(UI.postCloseBar, true);
 }
 
-UI.btnClose.addEventListener('click', closeContour);
-
-function clearAll() {
+function resetAll(keepFloor = false) {
   state.points = [];
+  state.holes = [];
+  state.holePoints = [];
   state.closed = false;
-  if (line) { anchorGroup.remove(line); line.geometry.dispose(); line.material.dispose(); line = null; }
-  if (fillMesh) { anchorGroup.remove(fillMesh); fillMesh.geometry.dispose(); /* material is shared */ fillMesh = null; }
-  if (borderGroup) { anchorGroup.remove(borderGroup); borderGroup.traverse(o => { if (o.isMesh) o.geometry.dispose(); }); borderGroup = null; }
 
+  if (!keepFloor) {
+    state.floorLocked = false;
+    state.floorY = 0;
+    state.phase = 'ar_scan';
+    show(UI.scanHint, true);
+    scanGrid.visible = true;
+  } else {
+    state.phase = state.xrSession ? (state.floorLocked ? 'ar_draw' : 'ar_scan') : state.phase;
+  }
+
+  // remove line/fill
   pointsGroup.clear();
+  if (line) {
+    anchorGroup.remove(line);
+    line.geometry.dispose();
+    line.material.dispose();
+    line = null;
+  }
+  if (fillMesh) {
+    anchorGroup.remove(fillMesh);
+    fillMesh.geometry.dispose();
+    fillMesh = null;
+  }
+
+  // UI
+  show(UI.postCloseBar, false);
+  show(UI.finalBar, false);
+  show(UI.btnArAdd, true);
+  show(UI.btnArOk, false);
+  updateAreaUI();
+  clearMeasureLabels();
 }
 
-UI.btnClear.addEventListener('click', () => { clearAll(); setStatus('Очищено'); });
-
-// markers + line
+// ------------------------
+// Markers / line / fill
+// ------------------------
 function rebuildMarkersAndLine(closed = false) {
   pointsGroup.clear();
 
   const markerMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
   const markerGeo = new THREE.SphereGeometry(0.018, 18, 12);
 
-  state.points.forEach((p, i) => {
+  const allOuter = state.points;
+  allOuter.forEach((p, i) => {
     const m = new THREE.Mesh(markerGeo, markerMat);
     m.position.copy(p);
     m.position.y += 0.002;
     pointsGroup.add(m);
 
-    // подпись первой точки
     if (i === 0) {
       const ring = new THREE.Mesh(
         new THREE.RingGeometry(0.03, 0.042, 24).rotateX(-Math.PI / 2),
         new THREE.MeshBasicMaterial({ color: 0x2f6cff, transparent: true, opacity: 0.85 })
       );
+      ring.name = 'firstRing';
       ring.position.copy(p);
       ring.position.y += 0.001;
       pointsGroup.add(ring);
     }
   });
 
-  // линия
-  if (line) { anchorGroup.remove(line); line.geometry.dispose(); line.material.dispose(); line = null; }
-  if (state.points.length >= 2) {
-    const pts = state.points.slice();
-    if (closed) pts.push(state.points[0].clone());
-    const geom = new THREE.BufferGeometry().setFromPoints(pts.map(v => new THREE.Vector3(v.x, v.y + 0.001, v.z)));
-    const mat = new THREE.LineBasicMaterial({ color: 0x9bb8ff, transparent: true, opacity: 0.9 });
+  // Hole markers (in cut mode)
+  if (state.phase === 'ar_cut') {
+    const holeMat = new THREE.MeshBasicMaterial({ color: 0x5aa7ff });
+    state.holePoints.forEach((p, i) => {
+      const m = new THREE.Mesh(markerGeo, holeMat);
+      m.position.copy(p);
+      m.position.y += 0.002;
+      pointsGroup.add(m);
+      if (i === 0) {
+        const ring = new THREE.Mesh(
+          new THREE.RingGeometry(0.028, 0.038, 22).rotateX(-Math.PI / 2),
+          new THREE.MeshBasicMaterial({ color: 0x5aa7ff, transparent: true, opacity: 0.85 })
+        );
+        ring.name = 'holeFirstRing';
+        ring.position.copy(p);
+        ring.position.y += 0.001;
+        pointsGroup.add(ring);
+      }
+    });
+  }
+
+  // Line
+  if (line) {
+    anchorGroup.remove(line);
+    line.geometry.dispose();
+    line.material.dispose();
+    line = null;
+  }
+
+  const pts = state.points.slice();
+  if (pts.length >= 2) {
+    const drawPts = pts.slice();
+    if (closed) drawPts.push(pts[0].clone());
+
+    const geom = new THREE.BufferGeometry().setFromPoints(drawPts.map(v => new THREE.Vector3(v.x, v.y + 0.001, v.z)));
+    const mat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.75 });
     line = new THREE.Line(geom, mat);
     anchorGroup.add(line);
   }
 }
 
-// fill mesh
 function rebuildFill() {
-  if (fillMesh) { anchorGroup.remove(fillMesh); fillMesh.geometry.dispose(); fillMesh = null; }
-  if (!state.closed || state.points.length < 3) {
-    rebuildBorder();
-    return;
+  if (fillMesh) {
+    anchorGroup.remove(fillMesh);
+    fillMesh.geometry.dispose();
+    fillMesh = null;
   }
+
+  const isClosed = state.closed && state.points.length >= 3;
+  if (!isClosed) return;
+
   const pts2 = state.points.map(p => new THREE.Vector2(p.x, p.z));
   const shape = new THREE.Shape(pts2);
+
+  // holes
+  for (const hole of state.holes) {
+    if (hole.length < 3) continue;
+    const hp2 = hole.map(p => new THREE.Vector2(p.x, p.z));
+    const path = new THREE.Path(hp2);
+    shape.holes.push(path);
+  }
+
   const geom = new THREE.ShapeGeometry(shape, 1);
   geom.rotateX(-Math.PI / 2);
 
-  // чуть приподнимем, чтобы не z-fight (и положим на уровень пола)
-  const baseY = state.points.reduce((s,p)=>s+p.y,0) / state.points.length;
+  // lift a bit to avoid z-fighting
+  const baseY = state.floorY;
   geom.translate(0, baseY + 0.002, 0);
 
-  if (!tileMaterial) {
-    // fallback material (shouldn't happen)
-    tileMaterial = makeTileMaterial(new THREE.Texture());
-  }
-  fillMesh = new THREE.Mesh(geom, tileMaterial);
+  const mat = (state.phase === 'ar_final') ? tileMaterial : maskMaterial;
+  if (!mat) return;
+
+  fillMesh = new THREE.Mesh(geom, mat);
   fillMesh.renderOrder = 2;
   anchorGroup.add(fillMesh);
-
-  rebuildBorder();
 }
 
-function rebuildBorder() {
-  if (borderGroup) {
-    anchorGroup.remove(borderGroup);
-    borderGroup.traverse(o => { if (o.isMesh) o.geometry.dispose(); });
-    borderGroup = null;
-  }
-  if (!state.borderEnabled || !state.closed || state.points.length < 3) return;
+// ------------------------
+// Measurements overlay
+// ------------------------
+const measureEls = [];
 
-  borderGroup = new THREE.Group();
-  const mat = new THREE.MeshStandardMaterial({ color: 0x20252f, roughness: 0.9, metalness: 0.0, transparent: true, opacity: 0.95 });
-  const h = 0.008;
+function clearMeasureLabels() {
+  measureEls.splice(0, measureEls.length);
+  if (UI.measureLayer) UI.measureLayer.innerHTML = '';
+}
+
+function ensureMeasureEl(i) {
+  if (!UI.measureLayer) return null;
+  if (measureEls[i]) return measureEls[i];
+  const el = document.createElement('div');
+  el.className = 'measureLabel';
+  UI.measureLayer.appendChild(el);
+  measureEls[i] = el;
+  return el;
+}
+
+function updateMeasureLabels(xrCam) {
+  if (!state.floorLocked) {
+    clearMeasureLabels();
+    return;
+  }
 
   const pts = state.points;
-  const baseY = pts.reduce((s,p)=>s+p.y,0) / pts.length;
-  for (let i = 0; i < pts.length; i++) {
+  if (pts.length < 2) {
+    clearMeasureLabels();
+    return;
+  }
+
+  const segCount = state.closed ? pts.length : (pts.length - 1);
+
+  // remove extra
+  for (let i = segCount; i < measureEls.length; i++) {
+    measureEls[i]?.remove();
+  }
+  measureEls.length = segCount;
+
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+
+  for (let i = 0; i < segCount; i++) {
     const a = pts[i];
     const b = pts[(i + 1) % pts.length];
-    const dx = b.x - a.x;
-    const dz = b.z - a.z;
-    const len = Math.hypot(dx, dz);
-    if (len < 0.02) continue;
+    const d = distXZ(a, b);
 
-    const geo = new THREE.BoxGeometry(len, h, state.borderWidth);
-    const m = new THREE.Mesh(geo, mat);
-    const mid = new THREE.Vector3((a.x + b.x) / 2, baseY + 0.006, (a.z + b.z) / 2);
-    m.position.copy(mid);
+    const mid = new THREE.Vector3((a.x + b.x) / 2, state.floorY + 0.02, (a.z + b.z) / 2);
+    const midW = anchorGroup.localToWorld(mid.clone());
 
-    const ang = Math.atan2(dz, dx);
-    m.rotation.y = -ang;
-    borderGroup.add(m);
+    const v = midW.clone().project(xrCam);
+    const x = (v.x * 0.5 + 0.5) * w;
+    const y = (-v.y * 0.5 + 0.5) * h;
+
+    const el = ensureMeasureEl(i);
+    if (!el) continue;
+
+    const visible = v.z >= -1 && v.z <= 1;
+    el.style.display = visible ? 'block' : 'none';
+    el.textContent = fmtMeters(d);
+    el.style.transform = `translate(-50%, -50%) translate(${x}px, ${y}px)`;
   }
-
-  anchorGroup.add(borderGroup);
 }
 
-// Layout, border controls
-UI.layoutSelect.addEventListener('change', () => {
-  state.layout = UI.layoutSelect.value;
-  if (tileMaterial) tileMaterial.uniforms.uLayoutMode.value = state.layout === 'straight' ? 0 : (state.layout === 'diagonal' ? 1 : 2);
-});
-
-UI.toggleBorder.addEventListener('change', () => {
-  state.borderEnabled = UI.toggleBorder.checked;
-  rebuildBorder();
-});
-
-UI.borderWidth.addEventListener('input', () => {
-  state.borderWidth = clamp(parseFloat(UI.borderWidth.value), 0.01, 0.4);
-  updateBorderLabel();
-  rebuildBorder();
-});
-updateBorderLabel();
-
-// Screenshot
-UI.btnScreenshot.addEventListener('click', () => {
-  try {
-    const dataUrl = renderer.domElement.toDataURL('image/png');
-    const w = window.open();
-    if (w) w.document.write(`<img style="width:100%" src="${dataUrl}" />`);
-  } catch (e) {
-    alert('Не удалось сделать скриншот.');
-  }
-});
-
-// Help
-UI.btnShowHelp.addEventListener('click', () => {
-  show(UI.help, !UI.help.classList.contains('hidden'));
-});
-
-// ------------------------
-// Проекты (localStorage)
-// ------------------------
-const LS_KEY = 'webar_tile_projects_v1';
-
-function loadProjects() {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return [];
-    const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? arr : [];
-  } catch { return []; }
-}
-
-function saveProjects(list) {
-  localStorage.setItem(LS_KEY, JSON.stringify(list));
-}
-
-function saveCurrentProject() {
-  if (!state.closed || state.points.length < 3 || !state.selectedTile) {
-    alert('Сначала замкните контур (минимум 3 точки).');
-    return;
-  }
-  const name = prompt('Название проекта:', `Проект ${new Date().toLocaleString('ru-RU')}`) || '';
-  const projects = loadProjects();
-  projects.unshift({
-    id: uid(),
-    name: name.trim() || 'Без названия',
-    createdAt: nowIso(),
-    tileId: state.selectedTile.id,
-    layout: state.layout,
-    borderEnabled: state.borderEnabled,
-    borderWidth: state.borderWidth,
-    floorY: state.floorY,
-    points: state.points.map(p => ({ x: p.x, y: p.y, z: p.z })),
-  });
-  saveProjects(projects.slice(0, 30));
-  setStatus('Проект сохранён');
-}
-
-UI.btnSaveProject.addEventListener('click', saveCurrentProject);
-
-function openProjectsModal() {
-  renderProjectsList();
-  show(UI.projectsModal, true);
-}
-function closeProjectsModal() {
-  show(UI.projectsModal, false);
-}
-UI.btnProjects.addEventListener('click', openProjectsModal);
-UI.btnCloseProjects.addEventListener('click', closeProjectsModal);
-
-function renderProjectsList() {
-  const projects = loadProjects();
-  UI.projectsList.innerHTML = '';
-  if (!projects.length) {
-    UI.projectsList.innerHTML = `<div class="muted">Пока нет сохранённых проектов.</div>`;
-    return;
-  }
-  projects.forEach(p => {
-    const row = document.createElement('div');
-    row.className = 'projectRow';
-    row.innerHTML = `
-      <div>
-        <div class="projectRow__name">${escapeHtml(p.name)}</div>
-        <div class="projectRow__meta">${new Date(p.createdAt).toLocaleString('ru-RU')} • плитка #${p.tileId}</div>
-      </div>
-      <div class="projectRow__actions">
-        <button class="btn btn-primary">Загрузить</button>
-        <button class="btn">Удалить</button>
-      </div>
-    `;
-    const [btnLoad, btnDel] = row.querySelectorAll('button');
-    btnLoad.addEventListener('click', async () => {
-      await applyProject(p);
-      closeProjectsModal();
-    });
-    btnDel.addEventListener('click', () => {
-      if (!confirm('Удалить проект?')) return;
-      const next = loadProjects().filter(x => x.id !== p.id);
-      saveProjects(next);
-      renderProjectsList();
-    });
-    UI.projectsList.appendChild(row);
-  });
-}
-
-async function applyProject(p) {
-  // применяем настройки
-  state.layout = p.layout || 'straight';
-  UI.layoutSelect.value = state.layout;
-  if (tileMaterial) tileMaterial.uniforms.uLayoutMode.value = state.layout === 'straight' ? 0 : (state.layout === 'diagonal' ? 1 : 2);
-
-  state.borderEnabled = !!p.borderEnabled;
-  UI.toggleBorder.checked = state.borderEnabled;
-
-  state.borderWidth = clamp(parseFloat(p.borderWidth), 0.01, 0.4);
-  UI.borderWidth.value = String(state.borderWidth);
-  updateBorderLabel();
-
-  const tile = tiles.find(t => t.id === p.tileId);
-  if (tile) await selectTile(tile.id);
-
-  // точки
-  state.points = (p.points || []).map(q => new THREE.Vector3(q.x, q.y, q.z));
-  state.closed = true;
-  state.floorY = typeof p.floorY === 'number' ? p.floorY : state.floorY;
-  state.floorLocked = true;
-
-  rebuildMarkersAndLine(true);
-  rebuildFill();
-  setStatus('Проект загружен');
-}
-
-// ------------------------
-// Render loop
-// ------------------------
-renderer.setAnimationLoop((t, frame) => {
-  if (state.xrSession && frame) {
-    updateXR(frame);
+function updateAreaUI() {
+  if (!UI.arArea) return;
+  if (!state.closed) {
+    UI.arArea.textContent = state.points.length >= 3 ? fmtArea(computeAreaM2()) : '—';
   } else {
-    controls.update();
+    UI.arArea.textContent = fmtArea(computeAreaM2());
   }
-  renderer.render(scene, camera);
-});
+}
 
+// ------------------------
+// XR frame update
+// ------------------------
 const __tmpUp = new THREE.Vector3();
 
 function updateXR(frame) {
-  // hit test (центр экрана)
+  // center hit test
   let gotHit = false;
   if (state.hitTestSource && state.referenceSpace) {
     const hits = frame.getHitTestResults(state.hitTestSource);
@@ -935,35 +940,75 @@ function updateXR(frame) {
         reticle.visible = true;
         reticle.matrix.fromArray(pose.transform.matrix);
         reticle.matrix.decompose(reticle.position, reticle.quaternion, reticle.scale);
-        // Фильтр: ретикл должен быть на полу (горизонтальная поверхность), иначе игнорируем (стены/мебель)
+
         __tmpUp.set(0, 1, 0).applyQuaternion(reticle.quaternion);
         if (__tmpUp.y < 0.75) {
           reticle.visible = false;
           gotHit = false;
         } else {
-          // Если пол зафиксирован — принудительно кладём маркер на плоскость пола
           if (state.floorLocked) reticle.position.y = state.floorY;
           gotHit = true;
+        }
+
+        if (!state.floorLocked) {
+          scanGrid.visible = true;
+          scanGrid.position.set(reticle.position.x, reticle.position.y + 0.001, reticle.position.z);
+          scanGrid.quaternion.copy(reticle.quaternion);
         }
       }
     }
   }
-  state.reticleVisible = gotHit;
-  if (!gotHit) {
-    reticle.visible = false;
+
+  // transient hit results
+  if (state.transientHitTestSource && state.referenceSpace) {
+    try {
+      state.transientHitPoses.clear();
+      const transientResults = frame.getHitTestResultsForTransientInput(state.transientHitTestSource);
+      for (const tr of transientResults) {
+        if (!tr.results || !tr.results.length) continue;
+        const pose = tr.results[0].getPose(state.referenceSpace);
+        if (!pose) continue;
+
+        const q = new THREE.Quaternion(
+          pose.transform.orientation.x,
+          pose.transform.orientation.y,
+          pose.transform.orientation.z,
+          pose.transform.orientation.w
+        );
+        __tmpUp.set(0, 1, 0).applyQuaternion(q);
+        if (__tmpUp.y < 0.75) continue;
+
+        state.transientHitPoses.set(tr.inputSource, pose);
+      }
+    } catch (_) {}
   }
 
-  // depth (best-effort) — только если сессия запущена с depth-sensing.
+  // magnet highlight
+  state.snapArmed = false;
+  if (state.floorLocked && !state.closed && state.phase === 'ar_draw' && state.points.length >= 3 && reticle.visible) {
+    const wpos = reticle.position.clone(); wpos.y = state.floorY;
+    const loc = anchorGroup.worldToLocal(wpos);
+    const d0 = distXZ(state.points[0], loc);
+    state.snapArmed = d0 < SNAP_DIST_M;
+  }
+  if (reticle.material?.color) {
+    reticle.material.color.setHex(state.snapArmed ? 0x36d399 : 0x2f6cff);
+  }
+  const firstRing = pointsGroup.children.find(c => c.name === 'firstRing');
+  if (firstRing?.material?.color) {
+    firstRing.material.color.setHex(state.snapArmed ? 0x36d399 : 0x2f6cff);
+  }
+
+  state.reticleVisible = gotHit;
+  if (!gotHit) reticle.visible = false;
+
+  // depth (best-effort)
   if (state.xrSession && state.depthSupported) {
-    const xrCam = renderer.xr.getCamera(camera);
     const views = frame.getViewerPose(state.referenceSpace)?.views;
     if (views && views.length) {
       try {
         const depthInfo = frame.getDepthInformation?.(views[0]);
-        if (depthInfo && depthInfo.width && depthInfo.height) {
-          // getDepthInformation может иногда вернуться null даже при включённом feature.
-          // Если сюда попали — глубина действительно доступна в этом кадре.
-
+        if (depthInfo && depthInfo.width && depthInfo.height && depthInfo.data) {
           const w = depthInfo.width, h = depthInfo.height;
           const key = `${w}x${h}`;
           if (!state.depthInfoSize || state.depthInfoSize !== key) {
@@ -977,84 +1022,178 @@ function updateXR(frame) {
               tileMaterial.uniforms.uDepthTex.value = state.depthTexture;
               tileMaterial.uniforms.uDepthValid.value = 1;
             }
-            show(UI.toggleOcclusionWrap, true);
           }
 
-          // заполнение depthData: читаем raw buffer если доступен
           const raw = depthInfo.data;
           const scale = depthInfo.rawValueToMeters || 1.0;
+          const u16 = new Uint16Array(raw);
+          const n = Math.min(u16.length, state.depthData.length);
+          for (let i = 0; i < n; i++) state.depthData[i] = u16[i] * scale;
+          state.depthTexture.needsUpdate = true;
 
-          // luminance-alpha как Uint16
-          if (raw && state.depthData) {
-            const u16 = new Uint16Array(raw);
-            const n = Math.min(u16.length, state.depthData.length);
-            for (let i = 0; i < n; i++) state.depthData[i] = u16[i] * scale;
-            state.depthTexture.needsUpdate = true;
-          }
-
-          if (tileMaterial) {
-            tileMaterial.uniforms.uUseOcclusion.value = state.occlusionEnabled ? 1 : 0;
-          }
+          // occlusion toggle
+          state.occlusionEnabled = !!UI.toggleOcclusion?.checked;
+          if (tileMaterial) tileMaterial.uniforms.uUseOcclusion.value = state.occlusionEnabled ? 1 : 0;
+        } else {
+          if (tileMaterial) tileMaterial.uniforms.uDepthValid.value = 0;
         }
-      } catch {
-        // ignore
+      } catch (_) {
+        if (tileMaterial) tileMaterial.uniforms.uDepthValid.value = 0;
       }
     }
   }
 
-  // UI hints
-  if (!state.floorLocked) {
-    if (state.reticleVisible) setStatus('Маркер найден. Нажмите «Зафиксировать пол».');
-  }
+  // UI measure labels
+  const xrCam = renderer.xr.getCamera(camera);
+  updateMeasureLabels(xrCam);
 }
 
-// occlusion toggle
-UI.toggleOcclusion.addEventListener('change', () => {
-  const want = !!UI.toggleOcclusion.checked;
-  // Запоминаем настройку на следующий запуск AR.
-  try { localStorage.setItem('occlusionWanted', want ? '1' : '0'); } catch (_) {}
+// ------------------------
+// Events
+// ------------------------
+// UI clicks should not place points
+UI.overlay?.addEventListener('pointerdown', (e) => {
+  if (!state.xrSession) return;
+  state.lastUiTapTs = performance.now();
+}, true);
 
-  // Во время AR переключатель заблокирован (изменение требует перезапуска сессии),
-  // но в preview обновим состояние/шейдер.
-  if (!state.xrSession) {
-    state.occlusionEnabled = want && state.depthSupported;
-    if (tileMaterial) tileMaterial.uniforms.uUseOcclusion.value = state.occlusionEnabled ? 1 : 0;
+UI.catalogSearch?.addEventListener('input', () => {
+  const q = UI.catalogSearch.value.trim().toLowerCase();
+  if (!q) renderCatalog(state.tiles);
+  else renderCatalog(state.tiles.filter(t => t.name.toLowerCase().includes(q)));
+});
+
+UI.btnDetailBack?.addEventListener('click', () => {
+  setActiveScreen('catalog');
+  state.phase = 'catalog';
+});
+
+UI.btnViewAR?.addEventListener('click', async () => {
+  await startAR();
+});
+
+UI.btnArBack?.addEventListener('click', async () => {
+  await stopAR();
+});
+
+UI.btnArReset?.addEventListener('click', () => {
+  // keep floor if already locked
+  resetAll(true);
+  show(UI.btnArAdd, true);
+  show(UI.btnArOk, false);
+  show(UI.postCloseBar, false);
+  show(UI.finalBar, false);
+  if (state.floorLocked) {
+    state.phase = 'ar_draw';
+    show(UI.scanHint, false);
+  } else {
+    state.phase = 'ar_scan';
+    show(UI.scanHint, true);
   }
 });
 
-// Resize
-window.addEventListener('resize', () => {
-  // Во время XR-сессии размер управляется WebXR. Менять size нельзя.
-  // Некоторые браузеры могут бросать resize ещё до того, как isPresenting станет true,
-  // поэтому дополнительно проверяем наличие активной сессии.
-  if (state.xrSession) return;
-  if (renderer.xr && renderer.xr.isPresenting) return;
+UI.btnArAdd?.addEventListener('click', () => {
+  addPointFromReticle();
+});
 
-  const w = window.innerWidth, h = window.innerHeight;
-  renderer.setSize(w, h, false);
-  camera.aspect = w / h;
+UI.btnArOk?.addEventListener('click', () => {
+  if (state.phase === 'ar_cut') closeHole();
+  else closeContour();
+});
+
+UI.btnEditShape?.addEventListener('click', () => {
+  // return to drawing mode, keep points
+  state.closed = false;
+  state.phase = 'ar_draw';
+  // In the reference app, changing the outer shape resets any existing cutouts.
+  state.holes = [];
+  state.holePoints = [];
+  show(UI.postCloseBar, false);
+  show(UI.btnArAdd, true);
+  show(UI.btnArOk, state.points.length >= 3);
+  rebuildMarkersAndLine(false);
+  if (fillMesh) { anchorGroup.remove(fillMesh); fillMesh.geometry.dispose(); fillMesh = null; }
+  clearMeasureLabels();
+  updateAreaUI();
+});
+
+UI.btnCutout?.addEventListener('click', () => {
+  // cutout mode
+  state.phase = 'ar_cut';
+  state.holePoints = [];
+  show(UI.postCloseBar, false);
+  show(UI.btnArAdd, true);
+  show(UI.btnArOk, false);
+
+  // show hint
+  UI.scanHint.querySelector('.scanTitle').textContent = 'СДЕЛАЙТЕ ВЫРЕЗ';
+  UI.scanHint.querySelector('.scanText').textContent = 'Поставьте точки внутри области. Замкните контур рядом с первой точкой.';
+  show(UI.scanHint, true);
+
+  rebuildMarkersAndLine(true);
+});
+
+UI.btnDone?.addEventListener('click', () => {
+  state.phase = 'ar_final';
+  show(UI.postCloseBar, false);
+  show(UI.finalBar, true);
+
+  rebuildFill();
+  updateAreaUI();
+
+  // Build bottom controls
+  UI.finalPatterns?.querySelectorAll('.patternTab').forEach(btn => {
+    btn.onclick = () => setLayout(btn.dataset.layout);
+  });
+  setLayout(state.layout);
+
+  renderColorRow(UI.finalColors, state.tiles.slice(0, 8));
+
+  // hide hint
+  show(UI.scanHint, false);
+});
+
+window.addEventListener('resize', () => {
+  if (!state.xrSession) {
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+  camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
 });
 
-// Initial UI
-(async function init() {
-  // Настройка окклюзии запоминается. ВАЖНО: глубина/окклюзия в WebXR всё ещё нестабильны
-  // на разных версиях Chrome/Android, поэтому по умолчанию выключена.
-  try {
-    const want = localStorage.getItem('occlusionWanted') === '1';
-    if (UI.toggleOcclusion) UI.toggleOcclusion.checked = want;
-  } catch (_) {}
+// ------------------------
+// Main
+// ------------------------
+async function init() {
+  const data = await loadTiles();
+  state.tiles = data.tiles || [];
 
-  state.xrSupported = await checkXrSupport();
-  updateUIVisibility();
-  setStatus(state.xrSupported ? 'Готово. Можно запускать AR.' : 'AR недоступен: нужен Chrome на Android.');
-})();
+  // initial
+  renderCatalog(state.tiles);
+  setActiveScreen('catalog');
+  state.phase = 'catalog';
 
-function escapeHtml(s) {
-  return String(s)
-    .replaceAll('&','&amp;')
-    .replaceAll('<','&lt;')
-    .replaceAll('>','&gt;')
-    .replaceAll('"','&quot;')
-    .replaceAll("'","&#039;");
+  // choose default tile
+  const defaultId = state.tiles[0]?.id;
+  if (defaultId) await selectTile(defaultId);
+
+  // AR title
+  if (UI.arProductTitle && state.selectedTile) UI.arProductTitle.textContent = state.selectedTile.name;
+
+  // set initial layout
+  setLayout('straight');
 }
+
+renderer.setAnimationLoop((t, frame) => {
+  if (state.xrSession && frame) {
+    updateXR(frame);
+  } else {
+    controls.update();
+  }
+  renderer.render(scene, camera);
+});
+
+init().catch(err => {
+  console.error(err);
+  alert('Ошибка инициализации: ' + (err?.message || err));
+});

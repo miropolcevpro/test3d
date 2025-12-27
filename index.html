@@ -3,13 +3,11 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>WebAR Визуализатор плитки</title>
+  <meta name="theme-color" content="#0a0c10" />
+  <title>Визуализатор плитки (WebAR)</title>
+  <link rel="icon" href="./favicon.ico" />
   <link rel="stylesheet" href="css/style.css" />
 
-  <!--
-    IMPORTANT (ESM): three/examples modules (OrbitControls etc.) import from bare specifier "three".
-    On GitHub Pages / plain HTML we must provide an import map.
-  -->
   <script type="importmap">
     {
       "imports": {
@@ -20,124 +18,146 @@
   </script>
 </head>
 <body>
-  <div id="app">
-    <header class="topbar">
-      <div class="brand">
-        <div class="brand__title">Визуализатор плитки (WebAR)</div>
-        <div class="brand__subtitle" id="statusText">Готово</div>
-      </div>
-      <div class="topbar__actions">
-        <button id="btnStartAR" class="btn btn-primary">Запустить AR</button>
-        <button id="btnExitAR" class="btn btn-secondary hidden">Выйти</button>
-      </div>
-    </header>
+  <canvas id="xrCanvas"></canvas>
 
-    <main class="stage">
-      <canvas id="xrCanvas"></canvas>
+  <!-- DOM Overlay root (используется в WebXR immersive-ar) -->
+  <div id="overlay" class="overlayRoot">
 
-      <!-- DOM Overlay (видно в AR при поддержке dom-overlay) -->
-      <div id="overlay" class="overlay">
-        <div class="leftDrawer" id="catalogDrawer">
-          <div class="drawerHeader">
-            <div class="drawerTitle">Каталог</div>
-            <button id="btnToggleCatalog" class="btn btn-ghost">Скрыть</button>
-          </div>
-          <div class="drawerBody">
-            <input id="catalogSearch" class="input" placeholder="Поиск..." />
-            <div id="catalogList" class="catalogList"></div>
-          </div>
+    <!-- Экран 1: Каталог (как в приложении) -->
+    <section id="screenCatalog" class="screen screen--active" aria-label="Каталог">
+      <header class="appHeader">
+        <button id="btnCatalogBack" class="iconCircle hidden" aria-label="Назад">←</button>
+        <div class="headerTitle">КАТАЛОГ</div>
+        <button id="btnFilter" class="iconCircle ghost" aria-label="Фильтр">⛭</button>
+      </header>
+
+      <div class="catalogWrap">
+        <input id="catalogSearch" class="search" type="search" placeholder="Поиск…" />
+        <div id="catalogCards" class="catalogCards"></div>
+      </div>
+
+      <nav class="bottomNav" aria-label="Навигация">
+        <button class="navItem navItem--active" type="button">
+          <span class="navIcon">▦</span>
+          <span class="navLabel">Продукция</span>
+        </button>
+        <button class="navItem" type="button" id="btnNav3D">
+          <span class="navIcon">⬚</span>
+          <span class="navLabel">3D</span>
+        </button>
+        <a class="navItem" href="admin.html" rel="noopener">
+          <span class="navIcon">⚙</span>
+          <span class="navLabel">Админка</span>
+        </a>
+      </nav>
+    </section>
+
+    <!-- Экран 2: Детали позиции -->
+    <section id="screenDetail" class="screen" aria-label="Детали" hidden>
+      <header class="detailTop">
+        <button id="btnDetailBack" class="iconCircle" aria-label="Назад">←</button>
+        <div class="detailTopTitle" id="detailTitle">—</div>
+      </header>
+
+      <div class="detailHero" id="detailHero"></div>
+
+      <div class="detailBody">
+        <div class="detailRow">
+          <div class="detailName" id="detailName">—</div>
+          <div class="detailSub" id="detailSub">—</div>
         </div>
 
-        <div class="tools">
-          <div class="tools__row">
-            <button id="btnCalibrate" class="btn btn-primary hidden">Зафиксировать пол</button>
-            <button id="btnAddPoint" class="btn btn-primary hidden">Добавить точку</button>
-            <button id="btnUndo" class="btn btn-secondary hidden">Отмена</button>
-            <button id="btnClose" class="btn btn-primary hidden">Замкнуть контур</button>
-            <button id="btnClear" class="btn btn-secondary hidden">Очистить</button>
-          </div>
-
-          <div class="tools__row">
-            <label class="toggle hidden" id="toggleOcclusionWrap">
-              <input type="checkbox" id="toggleOcclusion" />
-              <span>Окклюзия (если поддерживается)</span>
-            </label>
-
-            <div class="selectWrap hidden" id="layoutWrap">
-              <span class="label">Раскладка:</span>
-              <select id="layoutSelect" class="select">
-                <option value="straight">Прямая</option>
-                <option value="diagonal">Диагональ 45°</option>
-                <option value="stagger">Вразбежку</option>
-              </select>
-            </div>
-
-            <div class="selectWrap hidden" id="borderWrap">
-              <label class="toggle">
-                <input type="checkbox" id="toggleBorder" />
-                <span>Бордюр</span>
-              </label>
-              <div class="rangeRow">
-                <span class="label">Ширина:</span>
-                <input id="borderWidth" type="range" min="0.03" max="0.20" step="0.01" value="0.08" />
-                <span id="borderWidthLabel" class="mono">0.08м</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="tools__row">
-            <button id="btnSaveProject" class="btn btn-secondary hidden">Сохранить</button>
-            <button id="btnProjects" class="btn btn-secondary hidden">Проекты</button>
-            <button id="btnScreenshot" class="btn btn-secondary hidden">Скриншот</button>
-          </div>
+        <div class="card">
+          <div class="cardTitle">Технические параметры</div>
+          <div class="kv" id="detailTech"></div>
         </div>
 
-        <div id="projectsModal" class="modal hidden" role="dialog" aria-modal="true">
-          <div class="modal__card">
-            <div class="modal__header">
-              <div class="modal__title">Проекты</div>
-              <button id="btnCloseProjects" class="btn btn-ghost">Закрыть</button>
-            </div>
-            <div class="modal__body">
-              <div class="muted">Проекты сохраняются локально в браузере (localStorage).</div>
-              <div id="projectsList" class="projectsList"></div>
-            </div>
-          </div>
+        <div class="sectionTitle">Схемы укладки</div>
+        <div class="layoutRow" id="layoutRow">
+          <button class="layoutCard" data-layout="straight" type="button">
+            <div class="layoutThumb" data-thumb="straight"></div>
+            <div class="layoutLbl">Концепт</div>
+          </button>
+          <button class="layoutCard" data-layout="diagonal" type="button">
+            <div class="layoutThumb" data-thumb="diagonal"></div>
+            <div class="layoutLbl">Креатив</div>
+          </button>
+          <button class="layoutCard" data-layout="stagger" type="button">
+            <div class="layoutThumb" data-thumb="stagger"></div>
+            <div class="layoutLbl">Линеа</div>
+          </button>
         </div>
 
-        <div id="help" class="toast hidden">
-          <div class="toast__title">Как пользоваться</div>
-          <ol class="toast__list">
-            <li>Нажмите <b>Запустить AR</b> (Chrome на Android).</li>
-            <li>Наведите камеру на пол, дождитесь маркера, нажмите <b>Зафиксировать пол</b>.</li>
-            <li>Ставьте точки <b>тапом по экрану</b> (не по UI) или кнопкой <b>Добавить точку</b>, затем <b>Замкнуть контур</b>.</li>
-            <li>Выберите плитку в каталоге и раскладку — покрытие обновится.</li>
-          </ol>
+        <div class="sectionTitle">Цвета и поверхности</div>
+        <div class="swatchRow" id="colorRow"></div>
+      </div>
+
+      <footer class="detailCta">
+        <button id="btnViewAR" class="btnPrimary" type="button">Посмотреть в AR</button>
+      </footer>
+    </section>
+
+    <!-- Экран 3: AR -->
+    <section id="screenAR" class="screen" aria-label="AR" hidden>
+      <header class="arTop">
+        <button id="btnArBack" class="iconCircle" aria-label="Назад">←</button>
+        <div class="arTopText">
+          <div id="arProductTitle" class="arTitle">—</div>
+          <div id="arArea" class="arArea">—</div>
+        </div>
+        <button id="btnArReset" class="iconCircle" aria-label="Сброс">↻</button>
+      </header>
+
+      <!-- Подсказка сканирования -->
+      <div id="scanHint" class="scanHint">
+        <div class="scanTitle">СКАНИРУЙТЕ ПОВЕРХНОСТЬ</div>
+        <div class="scanText">
+          Плавно двигайте телефон влево-вправо и направляйте камеру на пол.
+          Разметка работает после фиксации плоскости.
         </div>
       </div>
 
-      <div class="fallback" id="fallbackPanel">
-        <div class="fallback__card">
-          <div class="fallback__title">AR в браузере</div>
-          <div class="fallback__text">
-            Полноценный режим разметки/заливки работает в <b>Chrome на Android</b> с поддержкой WebXR (immersive-ar).
-            Если AR недоступен, вы можете просмотреть плитку в 3D-превью ниже.
-          </div>
-          <button id="btnShowHelp" class="btn btn-secondary">Показать инструкцию</button>
-          <a class="link" href="admin.html">Админка каталога →</a>
-        </div>
-      </div>
-    </main>
+      <!-- Слой меток расстояний -->
+      <div id="measureLayer" class="measureLayer" aria-hidden="true"></div>
 
-    <footer class="bottombar">
-      <div class="bottombar__left">
-        <span class="chip" id="selectedTileChip">Плитка: —</span>
-        <span class="chip" id="tileSizeChip">Размер: —</span>
+      <!-- Основные кнопки разметки -->
+      <div class="arBottomCenter">
+        <button id="btnArAdd" class="fabPlus" type="button" aria-label="Добавить точку">＋</button>
+        <button id="btnArOk" class="fabOk" type="button" aria-label="ОК" hidden>OK</button>
       </div>
-      <div class="bottombar__right">
-        <a class="link" href="admin.html">Админка</a>
+
+      <!-- Шаг после замыкания: редактирование/вырез/готово -->
+      <div id="postCloseBar" class="postCloseBar" hidden>
+        <div class="postCloseTitle">Наступний крок</div>
+        <div class="postCloseBtns">
+          <button id="btnEditShape" class="btnGhost" type="button">Змінити форму</button>
+          <button id="btnCutout" class="btnGhost" type="button">Зробити виріз</button>
+        </div>
+        <button id="btnDone" class="btnPrimaryWide" type="button">Готово</button>
       </div>
-    </footer>
+
+      <!-- Нижняя панель после визуализации -->
+      <div id="finalBar" class="finalBar" hidden>
+        <div class="finalPatterns" id="finalPatterns">
+          <button class="patternTab" data-layout="straight" type="button">Концепт</button>
+          <button class="patternTab" data-layout="diagonal" type="button">Креатив</button>
+          <button class="patternTab" data-layout="stagger" type="button">Линеа</button>
+        </div>
+        <div class="finalColors" id="finalColors"></div>
+      </div>
+
+      <!-- Тех. элементы (скрыто) -->
+      <select id="layoutSelect" class="hidden" aria-hidden="true">
+        <option value="straight">Прямая</option>
+        <option value="diagonal">Диагональ 45°</option>
+        <option value="stagger">Вразбежку</option>
+      </select>
+
+      <label id="toggleOcclusionWrap" class="hidden" aria-hidden="true">
+        <input type="checkbox" id="toggleOcclusion" />
+      </label>
+    </section>
+
   </div>
 
   <script type="module" src="js/app.js"></script>
