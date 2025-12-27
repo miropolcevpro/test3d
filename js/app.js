@@ -99,6 +99,7 @@ const state = {
   layout: 'straight', // straight | diagonal | stagger
 
   // WebXR
+  _restartingAR: false,
   xrSession: null,
   referenceSpace: null,
   viewerSpace: null,
@@ -625,6 +626,30 @@ async function stopAR() {
   try { await s.end(); } catch (_) {}
 }
 
+
+async function restartAR() {
+  if (state._restartingAR) return;
+  state._restartingAR = true;
+  try {
+    // disable buttons to prevent double taps
+    if (UI.btnArReset) UI.btnArReset.disabled = true;
+    if (UI.btnArAdd) UI.btnArAdd.disabled = true;
+    if (UI.btnArOk) UI.btnArOk.disabled = true;
+
+    // Fully restart the XR session to guarantee clean hit-test / scanning state
+    await stopAR();
+    // give the browser a moment to dispatch the 'end' event and cleanup
+    await new Promise(r => setTimeout(r, 50));
+    await startAR();
+  } finally {
+    if (UI.btnArReset) UI.btnArReset.disabled = false;
+    if (UI.btnArAdd) UI.btnArAdd.disabled = false;
+    if (UI.btnArOk) UI.btnArOk.disabled = false;
+    state._restartingAR = false;
+  }
+}
+
+
 // ------------------------
 // Floor lock + points
 // ------------------------
@@ -768,13 +793,25 @@ function closeContour() {
 
 
 function resetAll(keepFloor = false) {
-  // Clear geometry/state but keep the XR session running
   state.points = [];
   state.holes = [];
   state.holePoints = [];
   state.closed = false;
 
-  // Remove visuals
+  if (!keepFloor) {
+    state.floorLocked = false;
+    state.floorY = 0;
+    state.floorSamples = [];
+    state.floorYEstimate = null;
+    state.floorStable = false;
+    state.phase = 'ar_scan';
+    show(UI.scanHint, true);
+    scanGrid.visible = true;
+  } else {
+    state.phase = state.xrSession ? (state.floorLocked ? 'ar_draw' : 'ar_scan') : state.phase;
+  }
+
+  // remove line/fill
   pointsGroup.clear();
   if (line) {
     anchorGroup.remove(line);
@@ -787,47 +824,29 @@ function resetAll(keepFloor = false) {
     fillMesh.geometry.dispose();
     fillMesh = null;
   }
-  clearMeasureLabels();
 
-  // Always return to non-final UI
+  // UI
   show(UI.postCloseBar, false);
-  show(UI.finalBar, false);
-  show(UI.finalColors, false);
-
-  // Restore guide visibility (points/line/measure layer)
-  pointsGroup.visible = true;
-  if (UI.measureLayer) UI.measureLayer.style.display = 'block';
-
-  if (!keepFloor) {
-    // Restart the whole scan->lock->draw flow (as on first entry)
-    state.floorLocked = false;
-    state.floorStable = false;
-    state.floorY = 0;
-    state.floorSamples = [];
-    state.floorYEstimate = null;
-    state.phase = 'ar_scan';
-
-    show(UI.scanHint, true);
-    scanGrid.visible = true;
-
-    // Disable placement UI while scanning
-    show(UI.arBottomCenter, false);
-    show(UI.btnArAdd, false);
-    show(UI.btnArOk, false);
+  // In AR we keep the bottom pattern strip visible; only colors are shown after "Готово"
+  if (state.xrSession) {
+    show(UI.finalBar, true);
+    show(UI.finalColors, false);
   } else {
-    // Keep the already locked floor and immediately allow placing points
-    state.phase = state.xrSession ? (state.floorLocked ? 'ar_draw' : 'ar_scan') : state.phase;
-
-    show(UI.scanHint, !state.floorLocked);
-    scanGrid.visible = !state.floorLocked;
-
-    show(UI.arBottomCenter, !!state.floorLocked);
-    show(UI.btnArAdd, !!state.floorLocked);
-    show(UI.btnArOk, false);
+    show(UI.finalBar, false);
+  show(UI.finalColors, false);
+  updateArBottomStripVar();
   }
-
+  show(UI.btnArAdd, true);
+  show(UI.btnArOk, false);
+  show(UI.arBottomCenter, false);
+  show(UI.btnArAdd, false);
+  show(UI.btnArOk, false);
+  pointsGroup.visible = true;
+  if (line) line.visible = true;
+  if (UI.measureLayer) UI.measureLayer.style.display = 'block';
   updateArBottomStripVar();
   updateAreaUI();
+  clearMeasureLabels();
 }
 
 // ------------------------
@@ -1263,9 +1282,9 @@ UI.btnArBack?.addEventListener('click', async () => {
   await stopAR();
 });
 
-UI.btnArReset?.addEventListener('click', () => {
-  // Restart the AR flow from scanning (prevents half-reset states and matches "first run")
-  resetAll(false);
+UI.btnArReset?.addEventListener('click', async () => {
+  // Full restart of AR mode (clean state like first run)
+  await restartAR();
 });
 
 UI.btnArAdd?.addEventListener('click', () => {
