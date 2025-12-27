@@ -20,7 +20,6 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   width:100vw;height:100vh;
   display:block;
   background:#000;
-  touch-action:none;
 }
 
 .overlayRoot{position:fixed;inset:0;pointer-events:none;}
@@ -158,17 +157,6 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
 .arTitle{font-weight:900;font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .arArea{font-weight:800;font-size:14px;color:rgba(255,255,255,0.80);}
 
-
-.editHint{
-  position:absolute;left:12px;right:12px;top:90px;
-  padding:12px 14px;
-  border-radius:18px;
-  background:rgba(0,0,0,0.45);
-  border:1px solid rgba(255,255,255,0.10);
-  font-size:14px;
-  line-height:1.35;
-  color:rgba(255,255,255,0.92);
-}
 .scanHint{
   position:absolute;left:12px;right:12px;top:90px;
   padding:16px 16px;
@@ -178,6 +166,18 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
 }
 .scanTitle{font-weight:1000;font-size:24px;letter-spacing:1px;text-align:center;margin-bottom:10px;}
 .scanText{font-size:14px;line-height:1.35;color:rgba(255,255,255,0.86);text-align:center;}
+
+
+.editHint{
+  position:absolute;left:12px;right:12px;top:90px;
+  padding:12px 12px;border-radius:14px;
+  background:rgba(10,12,16,0.70);
+  border:1px solid rgba(255,255,255,0.10);
+  backdrop-filter: blur(8px);
+  z-index: 60;
+}
+.editHint .editTitle{font-weight:800;letter-spacing:0.04em;font-size:13px;color:#ffffff;text-align:center;}
+.editHint .editText{margin-top:6px;font-size:13px;line-height:1.25;color:rgba(255,255,255,0.86);text-align:center;}
 
 .arBottomCenter{
   position:absolute;left:0;right:0;
