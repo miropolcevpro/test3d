@@ -98,6 +98,10 @@ const state = {
   selectedTile: null,
   layout: 'straight', // straight | diagonal | stagger
 
+  // internal guards
+  _restartingAR: false,
+  _startingAR: false,
+
   // WebXR
   xrSession: null,
   referenceSpace: null,
@@ -487,6 +491,10 @@ async function checkXrSupport() {
 }
 
 async function startAR() {
+  if (state._startingAR) return;
+  state._startingAR = true;
+  try {
+
   if (!navigator.xr) {
     alert('WebXR недоступен в этом браузере. Откройте сайт в Chrome на Android.');
     return;
@@ -580,6 +588,9 @@ async function startAR() {
   show(UI.arBottomCenter, false);
   show(UI.btnArAdd, false);
   show(UI.btnArOk, false);
+  } finally {
+    state._startingAR = false;
+  }
 }
 
 function cleanupXR() {
@@ -612,8 +623,10 @@ function cleanupXR() {
   previewGrid.visible = true;
 
   // UI
-  setActiveScreen('detail');
-  state.phase = 'detail';
+  if (!state._restartingAR) {
+    setActiveScreen('detail');
+    state.phase = 'detail';
+  }
 }
 
 async function stopAR() {
@@ -623,6 +636,47 @@ async function stopAR() {
     if (state._onXRSelect) s.removeEventListener('select', state._onXRSelect);
   } catch (_) {}
   try { await s.end(); } catch (_) {}
+}
+
+
+async function fullRestartAR() {
+  // Full restart of the AR session to guarantee a clean scan/placement cycle
+  if (state._startingAR || state._restartingAR) return;
+
+  state._restartingAR = true;
+
+  // Disable controls during restart (prevents double clicks)
+  try {
+    UI.btnArReset?.setAttribute('disabled', '');
+    UI.btnArAdd?.setAttribute('disabled', '');
+    UI.btnArOk?.setAttribute('disabled', '');
+    UI.btnDone?.setAttribute('disabled', '');
+  } catch (_) {}
+
+  // End current session (if any) and wait until it is fully cleaned up
+  const s = state.xrSession;
+  if (s) {
+    await new Promise((resolve) => {
+      const onEnd = () => resolve();
+      try { s.addEventListener('end', onEnd, { once: true }); } catch (_) {}
+      try { s.end().catch(() => resolve()); } catch (_) { resolve(); }
+      // Safety: never hang forever
+      setTimeout(resolve, 1200);
+    });
+  }
+
+  // Now start again (startAR always resets and begins from scanning)
+  try {
+    await startAR();
+  } finally {
+    state._restartingAR = false;
+    try {
+      UI.btnArReset?.removeAttribute('disabled');
+      UI.btnArAdd?.removeAttribute('disabled');
+      UI.btnArOk?.removeAttribute('disabled');
+      UI.btnDone?.removeAttribute('disabled');
+    } catch (_) {}
+  }
 }
 
 // ------------------------
@@ -1265,20 +1319,8 @@ UI.btnArBack?.addEventListener('click', async () => {
   await stopAR();
 });
 
-UI.btnArReset?.addEventListener('click', () => {
-  // keep floor if already locked
-  resetAll(true);
-  show(UI.btnArAdd, true);
-  show(UI.btnArOk, false);
-  show(UI.postCloseBar, false);
-  show(UI.finalBar, false);
-  if (state.floorLocked) {
-    state.phase = 'ar_draw';
-    show(UI.scanHint, false);
-  } else {
-    state.phase = 'ar_scan';
-    show(UI.scanHint, true);
-  }
+UI.btnArReset?.addEventListener('click', async () => {
+  await fullRestartAR();
 });
 
 UI.btnArAdd?.addEventListener('click', () => {
