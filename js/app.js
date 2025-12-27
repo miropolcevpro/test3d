@@ -35,7 +35,6 @@ const UI = {
   arProductTitle: document.getElementById('arProductTitle'),
   arArea: document.getElementById('arArea'),
   scanHint: document.getElementById('scanHint'),
-  editHint: document.getElementById('editHint'),
   measureLayer: document.getElementById('measureLayer'),
   arBottomCenter: document.getElementById('arBottomCenter'),
   btnArAdd: document.getElementById('btnArAdd'),
@@ -58,117 +57,6 @@ function show(el, on = true) {
   if (on) el.removeAttribute('hidden');
   else el.setAttribute('hidden', '');
 }
-
-// ------------------------
-// Edit-shape drag helpers (точки можно двигать пальцем по экрану)
-// Активируется только через кнопку "Изменить форму" (как в референсе)
-// ------------------------
-const __editRaycaster = new THREE.Raycaster();
-const __editNDC = new THREE.Vector2();
-const __editPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-const __editWorld = new THREE.Vector3();
-const __editProj = new THREE.Vector3();
-
-function setEditDragEnabled(on) {
-  state.editDragEnabled = !!on;
-  state.editDragging = false;
-  state.editSelectedIndex = -1;
-  state.editPointerId = null;
-
-  if (UI.editHint) show(UI.editHint, state.editDragEnabled);
-
-  // Auto-hide hint after a short time (doesn't affect mode)
-  if (state._editHintT) {
-    try { clearTimeout(state._editHintT); } catch (_) {}
-    state._editHintT = 0;
-  }
-  if (state.editDragEnabled && UI.editHint) {
-    state._editHintT = setTimeout(() => {
-      if (UI.editHint) show(UI.editHint, false);
-    }, 4500);
-  }
-}
-
-function __getActiveXRCam() {
-  const xrCam = renderer.xr.getCamera(camera);
-  if (xrCam && xrCam.isArrayCamera && xrCam.cameras && xrCam.cameras.length) return xrCam.cameras[0];
-  return xrCam;
-}
-
-function __isUiTarget(target) {
-  if (!target || !target.closest) return false;
-  return !!target.closest('button, #finalBar, #postCloseBar, #arBottomCenter, #scanHint, .tabBar, .detailBottom, .colorSwatch');
-}
-
-function __pickPointIndex(clientX, clientY) {
-  const rect = renderer.domElement.getBoundingClientRect();
-  const w = rect.width || 1;
-  const h = rect.height || 1;
-
-  const cam = __getActiveXRCam();
-  if (!cam) return -1;
-
-  let best = -1;
-  let bestD2 = Infinity;
-
-  for (let i = 0; i < state.points.length; i++) {
-    __editWorld.copy(state.points[i]);
-    anchorGroup.localToWorld(__editWorld);
-    __editProj.copy(__editWorld).project(cam);
-
-    const sx = (__editProj.x * 0.5 + 0.5) * w + rect.left;
-    const sy = (-__editProj.y * 0.5 + 0.5) * h + rect.top;
-
-    const dx = sx - clientX;
-    const dy = sy - clientY;
-    const d2 = dx * dx + dy * dy;
-    if (d2 < bestD2) { bestD2 = d2; best = i; }
-  }
-
-  const TH = 32; // px hit radius
-  return (best >= 0 && bestD2 <= TH * TH) ? best : -1;
-}
-
-function __worldOnFloorFromClient(clientX, clientY) {
-  if (!state.floorLocked) return null;
-
-  const rect = renderer.domElement.getBoundingClientRect();
-  const w = rect.width || 1;
-  const h = rect.height || 1;
-
-  __editNDC.set(
-    ((clientX - rect.left) / w) * 2 - 1,
-    -(((clientY - rect.top) / h) * 2 - 1)
-  );
-
-  const cam = __getActiveXRCam();
-  if (!cam) return null;
-
-  __editRaycaster.setFromCamera(__editNDC, cam);
-
-  // Ray should point down enough to intersect floor in front
-  if (__editRaycaster.ray.direction.y > -0.03) return null;
-
-  __editPlane.constant = -state.floorY; // plane y = floorY
-  const hit = __editRaycaster.ray.intersectPlane(__editPlane, __editWorld);
-  if (!hit) return null;
-
-  __editWorld.y = state.floorY;
-  return __editWorld.clone();
-}
-
-function __scheduleEditRebuild() {
-  if (state._editRAF) return;
-  state._editRAF = requestAnimationFrame(() => {
-    state._editRAF = 0;
-    // rebuild visuals in draw mode
-    rebuildMarkersAndLine(false);
-    rebuildFill();
-    updateAreaUI();
-    show(UI.btnArOk, state.points.length >= 3);
-  });
-}
-
 
 function setActiveScreen(name) {
   const map = {
@@ -244,18 +132,15 @@ const state = {
   reticleVisible: false,
   snapArmed: false,
 
-  // edit shape drag
-  editDragEnabled: false,
-  editDragging: false,
-  editSelectedIndex: -1,
-  editPointerId: null,
-  _editRAF: 0,
-  _editHintT: 0,
-
   points: /** @type {THREE.Vector3[]} */ ([]),
   holes: /** @type {THREE.Vector3[][]} */ ([]),
   holePoints: /** @type {THREE.Vector3[]} */ ([]),
   closed: false,
+
+  // edit shape mode (drag existing points)
+  editMode: false,
+  dragPointIndex: -1,
+  dragPointerId: null,
 };
 
 const SNAP_DIST_M = 0.10;
@@ -923,7 +808,6 @@ function closeHole() {
 }
 
 function closeContour() {
-  setEditDragEnabled(false);
   if (state.points.length < 3) return;
   state.closed = true;
   state.phase = 'ar_mask';
@@ -1014,14 +898,13 @@ function rebuildMarkersAndLine(closed = false) {
   pointsGroup.clear();
 
   const markerMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-  const markerMatSel = new THREE.MeshBasicMaterial({ color: 0x2f6cff });
   const markerGeo = new THREE.SphereGeometry(0.018, 18, 12);
 
   const allOuter = state.points;
   allOuter.forEach((p, i) => {
-    const useSel = (state.editDragEnabled && i === state.editSelectedIndex);
-    const m = new THREE.Mesh(markerGeo, useSel ? markerMatSel : markerMat);
-    if (useSel) m.scale.setScalar(1.6);
+    const m = new THREE.Mesh(markerGeo, markerMat);
+    m.userData.pointIndex = i;
+    m.name = 'outerPoint';
     m.position.copy(p);
     m.position.y += 0.002;
     pointsGroup.add(m);
@@ -1207,6 +1090,115 @@ function updateAreaUI() {
   // Otherwise show product name + current area (as in the reference flow)
   if (UI.arProductTitle && state.selectedTile) UI.arProductTitle.textContent = state.selectedTile.name;
   UI.arArea.textContent = state.closed ? fmtArea(computeAreaM2()) : areaText;
+}
+
+// ------------------------
+// Edit shape (drag points) helpers
+// ------------------------
+const __raycaster = new THREE.Raycaster();
+const __ndc = new THREE.Vector2();
+let __editHintTimer = null;
+let __rebuildScheduled = false;
+
+function getActiveCameraForScreenRay() {
+  if (state.xrSession) {
+    const xrCam = renderer.xr.getCamera(camera);
+    return (xrCam.cameras && xrCam.cameras.length) ? xrCam.cameras[0] : xrCam;
+  }
+  return camera;
+}
+
+function isUiElement(target) {
+  if (!target) return false;
+  return !!target.closest('button, #postCloseBar, #finalBar, #detailBottom, .tabBar, .bottomTabs');
+}
+
+function pickOuterPointIndex(clientX, clientY) {
+  const cam = getActiveCameraForScreenRay();
+  const rect = renderer.domElement.getBoundingClientRect();
+  const px = clientX - rect.left;
+  const py = clientY - rect.top;
+  const w = rect.width;
+  const h = rect.height;
+
+  let bestI = -1;
+  let bestD = 1e9;
+
+  for (let i = 0; i < state.points.length; i++) {
+    const v = state.points[i].clone();
+    v.project(cam);
+    const sx = (v.x * 0.5 + 0.5) * w;
+    const sy = (-v.y * 0.5 + 0.5) * h;
+    const d = Math.hypot(sx - px, sy - py);
+    if (d < bestD) { bestD = d; bestI = i; }
+  }
+
+  // hit radius in pixels
+  return (bestD <= 42) ? bestI : -1;
+}
+
+function screenToFloorPoint(clientX, clientY) {
+  if (!state.floorLocked) return null;
+  const cam = getActiveCameraForScreenRay();
+  const rect = renderer.domElement.getBoundingClientRect();
+  const x = (clientX - rect.left) / rect.width;
+  const y = (clientY - rect.top) / rect.height;
+  __ndc.set(x * 2 - 1, -(y * 2 - 1));
+
+  __raycaster.setFromCamera(__ndc, cam);
+  const dir = __raycaster.ray.direction;
+  const ori = __raycaster.ray.origin;
+  if (Math.abs(dir.y) < 1e-5) return null;
+  const t = (state.floorY - ori.y) / dir.y;
+  if (!(t > 0.02 && t < 12.0)) return null;
+  const p = ori.clone().addScaledVector(dir, t);
+  p.y = state.floorY;
+  return p;
+}
+
+function applyEditHighlight() {
+  const idx = state.dragPointIndex;
+  pointsGroup.traverse((obj) => {
+    if (obj && obj.isMesh && obj.name === 'outerPoint' && typeof obj.userData.pointIndex === 'number') {
+      const isActive = (obj.userData.pointIndex === idx);
+      obj.scale.setScalar(isActive ? 1.8 : 1.0);
+      if (obj.material && obj.material.color) obj.material.color.set(isActive ? 0x2f6cff : 0xffffff);
+    }
+  });
+}
+
+function scheduleRebuildAfterEdit() {
+  if (__rebuildScheduled) return;
+  __rebuildScheduled = true;
+  requestAnimationFrame(() => {
+    __rebuildScheduled = false;
+    rebuildMarkersAndLine(true);
+    rebuildFill();
+    updateAreaUI();
+    applyEditHighlight();
+  });
+}
+
+function showEditHint(on) {
+  if (!UI.scanHint) return;
+  const t = UI.scanHint.querySelector('.scanTitle');
+  const s = UI.scanHint.querySelector('.scanText');
+  if (on) {
+    if (t) t.textContent = 'РЕЖИМ РЕДАКТИРОВАНИЯ';
+    if (s) s.textContent = 'Нажмите на флажок и перетаскивайте его по полу. Отпустите палец, чтобы зафиксировать.';
+    show(UI.scanHint, true);
+    if (__editHintTimer) clearTimeout(__editHintTimer);
+    __editHintTimer = setTimeout(() => show(UI.scanHint, false), 4500);
+  } else {
+    if (__editHintTimer) clearTimeout(__editHintTimer);
+    __editHintTimer = null;
+    // restore default scan hint text for later use
+    try {
+      if (t) t.textContent = 'СКАНИРУЙТЕ ПОВЕРХНОСТЬ';
+      if (s) s.textContent = 'Плавно двигайте телефон влево-вправо и направляйте камеру на пол. Разметка работает после фиксации плоскости.';
+    } catch (_) {}
+    show(UI.scanHint, false);
+  }
 }
 
 // ------------------------
@@ -1424,6 +1416,63 @@ UI.overlay?.addEventListener('pointerdown', (e) => {
   state.lastUiTapTs = performance.now();
 }, true);
 
+// Drag existing points in "Изменить форму" mode
+const __editDrag = { active: false };
+
+function endEditDrag() {
+  __editDrag.active = false;
+  state.dragPointerId = null;
+  // allow normal scrolling again
+  try { UI.overlay.style.touchAction = ''; } catch (_) {}
+}
+
+function onEditPointerDown(e) {
+  if (!state.xrSession) return;
+  if (!state.editMode || state.phase !== 'ar_edit') return;
+  if (!state.floorLocked) return;
+  if (isUiElement(e.target)) return;
+
+  const idx = pickOuterPointIndex(e.clientX, e.clientY);
+  if (idx < 0) return;
+
+  state.dragPointIndex = idx;
+  state.dragPointerId = e.pointerId;
+  __editDrag.active = true;
+  applyEditHighlight();
+
+  // prevent page scroll while dragging
+  try { UI.overlay.style.touchAction = 'none'; } catch (_) {}
+  try { UI.canvas.setPointerCapture(e.pointerId); } catch (_) {}
+  e.preventDefault();
+}
+
+function onEditPointerMove(e) {
+  if (!__editDrag.active) return;
+  if (!state.editMode || state.phase !== 'ar_edit') return;
+  if (state.dragPointerId !== e.pointerId) return;
+  const idx = state.dragPointIndex;
+  if (!(idx >= 0 && idx < state.points.length)) return;
+
+  const p = screenToFloorPoint(e.clientX, e.clientY);
+  if (!p) return;
+
+  state.points[idx].set(p.x, state.floorY, p.z);
+  scheduleRebuildAfterEdit();
+  e.preventDefault();
+}
+
+function onEditPointerUp(e) {
+  if (state.dragPointerId !== e.pointerId) return;
+  endEditDrag();
+  state.dragPointIndex = -1;
+  applyEditHighlight();
+}
+
+UI.canvas?.addEventListener('pointerdown', onEditPointerDown, { passive: false });
+UI.canvas?.addEventListener('pointermove', onEditPointerMove, { passive: false });
+UI.canvas?.addEventListener('pointerup', onEditPointerUp, { passive: true });
+UI.canvas?.addEventListener('pointercancel', onEditPointerUp, { passive: true });
+
 UI.catalogSearch?.addEventListener('input', () => {
   const q = UI.catalogSearch.value.trim().toLowerCase();
   if (!q) renderCatalog(state.tiles);
@@ -1440,12 +1489,10 @@ UI.btnViewAR?.addEventListener('click', async () => {
 });
 
 UI.btnArBack?.addEventListener('click', async () => {
-  setEditDragEnabled(false);
   await stopAR();
 });
 
 UI.btnArReset?.addEventListener('click', async () => {
-  setEditDragEnabled(false);
   await fullRestartAR();
 });
 
@@ -1459,37 +1506,59 @@ UI.btnArOk?.addEventListener('click', () => {
 });
 
 UI.btnEditShape?.addEventListener('click', () => {
-  // return to drawing mode, keep points
+  if (!state.xrSession) return;
+  if (!state.closed || state.points.length < 3) return;
+
+  // Toggle edit mode: in edit mode user can drag existing points
+  state.editMode = !state.editMode;
+  state.dragPointIndex = -1;
+  state.dragPointerId = null;
+  applyEditHighlight();
+
   show(UI.finalColors, false);
   if (typeof updateArBottomStripVar === 'function') updateArBottomStripVar();
 
-  state.closed = false;
-  state.phase = 'ar_draw';
-  // In the reference app, changing the outer shape resets any existing cutouts.
-  state.holes = [];
-  state.holePoints = [];
+  if (state.editMode) {
+    // Changing the outer shape invalidates cutouts, so reset them (as in reference behavior).
+    state.holes = [];
+    state.holePoints = [];
 
-  show(UI.postCloseBar, false);
-  show(UI.btnArAdd, true);
-  show(UI.btnArOk, state.points.length >= 3);
-  show(UI.arBottomCenter, true);
-
-  rebuildMarkersAndLine(false);
-  // restore guides (they may be hidden after "Готово")
-  pointsGroup.visible = true;
-  if (line) line.visible = true;
-  if (UI.measureLayer) UI.measureLayer.style.display = 'block';
-
-  if (fillMesh) { anchorGroup.remove(fillMesh); fillMesh.geometry.dispose(); fillMesh = null; }
-  clearMeasureLabels();
-  updateAreaUI();
-  // enable drag editing of existing points
-  setEditDragEnabled(true);
-
+    // Keep contour closed and visible (mask stays), but allow dragging points.
+    state.phase = 'ar_edit';
+    show(UI.arBottomCenter, false);
+    show(UI.btnArAdd, false);
+    show(UI.btnArOk, false);
+    show(UI.postCloseBar, true);
+    // Ensure guides are visible (in case we came from final)
+    pointsGroup.visible = true;
+    if (line) line.visible = true;
+    if (UI.measureLayer) UI.measureLayer.style.display = 'block';
+    clearMeasureLabels();
+    rebuildMarkersAndLine(true);
+    rebuildFill();
+    updateAreaUI();
+    showEditHint(true);
+  } else {
+    endEditDrag();
+    // Back to normal mask step
+    state.phase = 'ar_mask';
+    showEditHint(false);
+    rebuildMarkersAndLine(true);
+    rebuildFill();
+    updateAreaUI();
+  }
 });
 
 UI.btnCutout?.addEventListener('click', () => {
-  setEditDragEnabled(false);
+  // leaving edit mode (if any)
+  if (state.editMode) {
+    state.editMode = false;
+    state.dragPointIndex = -1;
+    state.dragPointerId = null;
+    endEditDrag();
+    showEditHint(false);
+    applyEditHighlight();
+  }
   // cutout mode
   show(UI.finalColors, false);
   if (typeof updateArBottomStripVar === 'function') updateArBottomStripVar();
@@ -1515,6 +1584,15 @@ UI.btnCutout?.addEventListener('click', () => {
 });
 
 UI.btnDone?.addEventListener('click', () => {
+  // leaving edit mode (if any)
+  if (state.editMode) {
+    state.editMode = false;
+    state.dragPointIndex = -1;
+    state.dragPointerId = null;
+    endEditDrag();
+    showEditHint(false);
+    applyEditHighlight();
+  }
   state.phase = 'ar_final';
   show(UI.postCloseBar, false);
   show(UI.arBottomCenter, false);
@@ -1589,75 +1667,3 @@ init().catch(err => {
   console.error(err);
   alert('Ошибка инициализации: ' + (err?.message || err));
 });
-// ------------------------
-// Pointer drag for edit-shape (only in AR + editDragEnabled)
-// ------------------------
-UI.overlay?.addEventListener('pointerdown', (e) => {
-  if (!state.xrSession) return;
-  if (!state.editDragEnabled) return;
-  if (state.phase !== 'ar_draw') return;
-  if (!state.points.length) return;
-  if (__isUiTarget(e.target)) return;
-
-  const idx = __pickPointIndex(e.clientX, e.clientY);
-  if (idx < 0) return;
-
-  state.editSelectedIndex = idx;
-  state.editDragging = true;
-  state.editPointerId = e.pointerId;
-
-  try { UI.overlay.setPointerCapture(e.pointerId); } catch (_) {}
-  e.preventDefault();
-}, { passive: false });
-
-UI.overlay?.addEventListener('pointermove', (e) => {
-  if (!state.xrSession) return;
-  if (!state.editDragEnabled || !state.editDragging) return;
-  if (state.editPointerId !== null && e.pointerId !== state.editPointerId) return;
-
-  const w = __worldOnFloorFromClient(e.clientX, e.clientY);
-  if (!w) return;
-
-  const local = anchorGroup.worldToLocal(w.clone());
-  local.y = state.floorY;
-  if (state.editSelectedIndex >= 0 && state.editSelectedIndex < state.points.length) {
-    state.points[state.editSelectedIndex].copy(local);
-    __scheduleEditRebuild();
-  }
-  e.preventDefault();
-}, { passive: false });
-
-function __endEditDrag() {
-  if (!state.editDragging) return;
-  state.editDragging = false;
-  state.editPointerId = null;
-  // keep selected highlight until next tap on empty space
-}
-
-UI.overlay?.addEventListener('pointerup', (e) => {
-  if (!state.xrSession) return;
-  if (!state.editDragEnabled) return;
-  if (state.editPointerId !== null && e.pointerId !== state.editPointerId) return;
-  __endEditDrag();
-}, { passive: true });
-
-UI.overlay?.addEventListener('pointercancel', (e) => {
-  if (!state.xrSession) return;
-  if (!state.editDragEnabled) return;
-  __endEditDrag();
-}, { passive: true });
-
-// Tap on empty space to clear selection (but only when not dragging)
-UI.overlay?.addEventListener('click', (e) => {
-  if (!state.xrSession) return;
-  if (!state.editDragEnabled) return;
-  if (state.editDragging) return;
-  if (__isUiTarget(e.target)) return;
-
-  const idx = __pickPointIndex(e.clientX, e.clientY);
-  if (idx < 0) {
-    state.editSelectedIndex = -1;
-    rebuildMarkersAndLine(false);
-  }
-}, true);
-
