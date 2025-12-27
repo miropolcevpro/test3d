@@ -551,7 +551,7 @@ async function startAR() {
   // enter AR UI
   setActiveScreen('ar');
   state.phase = 'ar_scan';
-  resetAll(true);
+  resetAll(false); // всегда начинаем с нового сканирования
   UI.scanHint.classList.remove('hidden');
   show(UI.scanHint, true);
 
@@ -584,6 +584,14 @@ function cleanupXR() {
   state.depthInfoSize = null;
   state.depthTexture = null;
   state.depthData = null;
+
+  // reset floor scan state when leaving AR so the next start begins from scanning
+  state.floorLocked = false;
+  state.floorStable = false;
+  state.floorY = 0;
+  state.floorSamples = [];
+  state.floorYEstimate = null;
+
 
   reticle.visible = false;
   scanGrid.visible = false;
