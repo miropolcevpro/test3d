@@ -1446,7 +1446,7 @@ function requestEditShapeMode(e) {
   // Страховка: на мобильных иногда "click" не прилетает или перехватывается.
   // Поэтому используем и прямой слушатель, и делегирование на документ (в capture).
   if (e) { try { e.preventDefault(); } catch (_) {} }
-  if (!state.inXR) return;
+  if (!state.xrSession) return;
   if (!state.closed || !state.points || state.points.length < 3) return;
 
   enterEditShapeMode();
