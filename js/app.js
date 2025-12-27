@@ -36,6 +36,7 @@ const UI = {
   arArea: document.getElementById('arArea'),
   scanHint: document.getElementById('scanHint'),
   measureLayer: document.getElementById('measureLayer'),
+  arBottomCenter: document.getElementById('arBottomCenter'),
   btnArAdd: document.getElementById('btnArAdd'),
   btnArOk: document.getElementById('btnArOk'),
   postCloseBar: document.getElementById('postCloseBar'),
@@ -158,17 +159,19 @@ const reticle = new THREE.Mesh(
 reticle.visible = false;
 world.add(reticle);
 
-// Scanning grid (visual hint)
-const scanGrid = new THREE.Mesh(
-  new THREE.PlaneGeometry(1.8, 1.8).rotateX(-Math.PI / 2),
-  new THREE.MeshBasicMaterial({
-    color: 0x2f6cff,
-    transparent: true,
-    opacity: 0.18,
-    depthWrite: false,
-  })
-);
+// Scanning grid (visual hint) — line grid like in the reference app
+const scanGrid = new THREE.GridHelper(2.4, 24, 0x2f6cff, 0x2f6cff);
 scanGrid.visible = false;
+scanGrid.position.y = 0.001;
+// soften the grid
+try {
+  const mats = Array.isArray(scanGrid.material) ? scanGrid.material : [scanGrid.material];
+  for (const m of mats) {
+    m.transparent = true;
+    m.opacity = 0.35;
+    m.depthWrite = false;
+  }
+} catch (_) {}
 world.add(scanGrid);
 
 // Desktop fallback preview
@@ -544,6 +547,16 @@ async function startAR() {
 
   // grid visible while scanning
   scanGrid.visible = true;
+
+  // Hide desktop preview objects in AR (they otherwise appear floating)
+  previewPlane.visible = false;
+  previewGrid.visible = false;
+
+  // Show bottom pattern strip in AR (like in the native app)
+  show(UI.finalBar, true);
+  show(UI.finalColors, false);
+  // main add button area visible at start
+  show(UI.arBottomCenter, true);
 }
 
 function cleanupXR() {
@@ -562,6 +575,10 @@ function cleanupXR() {
 
   reticle.visible = false;
   scanGrid.visible = false;
+
+  // Restore desktop preview objects
+  previewPlane.visible = true;
+  previewGrid.visible = true;
 
   // UI
   setActiveScreen('detail');
@@ -586,9 +603,9 @@ function ensureFloorLocked() {
   state.floorLocked = true;
   state.floorY = reticle.position.y;
 
-  // place scan grid on floor
+  // lock scanning grid to the floor (and then hide it — it is only for scanning)
   scanGrid.position.set(reticle.position.x, state.floorY + 0.001, reticle.position.z);
-  scanGrid.quaternion.copy(reticle.quaternion);
+  scanGrid.visible = false;
 
   // hide scan hint
   show(UI.scanHint, false);
@@ -686,6 +703,7 @@ function closeHole() {
   show(UI.scanHint, false);
   show(UI.btnArOk, false);
   show(UI.btnArAdd, false);
+  show(UI.arBottomCenter, false);
   show(UI.postCloseBar, true);
   rebuildFill();
   updateAreaUI();
@@ -703,6 +721,7 @@ function closeContour() {
   // UI
   show(UI.btnArAdd, false);
   show(UI.btnArOk, false);
+  show(UI.arBottomCenter, false);
   show(UI.postCloseBar, true);
 }
 
@@ -738,9 +757,16 @@ function resetAll(keepFloor = false) {
 
   // UI
   show(UI.postCloseBar, false);
-  show(UI.finalBar, false);
+  // In AR we keep the bottom pattern strip visible; only colors are shown after "Готово"
+  if (state.xrSession) {
+    show(UI.finalBar, true);
+    show(UI.finalColors, false);
+  } else {
+    show(UI.finalBar, false);
+  }
   show(UI.btnArAdd, true);
   show(UI.btnArOk, false);
+  show(UI.arBottomCenter, true);
   updateAreaUI();
   clearMeasureLabels();
 }
@@ -953,7 +979,8 @@ function updateXR(frame) {
         if (!state.floorLocked) {
           scanGrid.visible = true;
           scanGrid.position.set(reticle.position.x, reticle.position.y + 0.001, reticle.position.z);
-          scanGrid.quaternion.copy(reticle.quaternion);
+          // keep grid horizontal
+          scanGrid.rotation.set(0, 0, 0);
         }
       }
     }
@@ -1001,6 +1028,13 @@ function updateXR(frame) {
 
   state.reticleVisible = gotHit;
   if (!gotHit) reticle.visible = false;
+
+  // Keep scan grid only when we have a valid floor hit before the floor is locked
+  if (!state.floorLocked) {
+    scanGrid.visible = !!gotHit;
+  } else {
+    scanGrid.visible = false;
+  }
 
   // depth (best-effort)
   if (state.xrSession && state.depthSupported) {
@@ -1111,6 +1145,7 @@ UI.btnEditShape?.addEventListener('click', () => {
   show(UI.postCloseBar, false);
   show(UI.btnArAdd, true);
   show(UI.btnArOk, state.points.length >= 3);
+  show(UI.arBottomCenter, true);
   rebuildMarkersAndLine(false);
   if (fillMesh) { anchorGroup.remove(fillMesh); fillMesh.geometry.dispose(); fillMesh = null; }
   clearMeasureLabels();
@@ -1124,6 +1159,7 @@ UI.btnCutout?.addEventListener('click', () => {
   show(UI.postCloseBar, false);
   show(UI.btnArAdd, true);
   show(UI.btnArOk, false);
+  show(UI.arBottomCenter, true);
 
   // show hint
   UI.scanHint.querySelector('.scanTitle').textContent = 'СДЕЛАЙТЕ ВЫРЕЗ';
@@ -1136,7 +1172,9 @@ UI.btnCutout?.addEventListener('click', () => {
 UI.btnDone?.addEventListener('click', () => {
   state.phase = 'ar_final';
   show(UI.postCloseBar, false);
+  show(UI.arBottomCenter, false);
   show(UI.finalBar, true);
+  show(UI.finalColors, true);
 
   rebuildFill();
   updateAreaUI();

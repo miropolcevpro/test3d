@@ -9,6 +9,8 @@
   --white:#ffffff;
   --safe-top: env(safe-area-inset-top);
   --safe-bottom: env(safe-area-inset-bottom);
+  /* Reserved height for AR bottom pattern strip (tabs) */
+  --ar-bottom-strip: 84px;
 }
 *{box-sizing:border-box;}
 html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif;height:100%;}
@@ -166,7 +168,9 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
 .scanText{font-size:14px;line-height:1.35;color:rgba(255,255,255,0.86);text-align:center;}
 
 .arBottomCenter{
-  position:absolute;left:0;right:0;bottom:calc(18px + var(--safe-bottom));
+  position:absolute;left:0;right:0;
+  /* Keep main buttons above the bottom pattern strip */
+  bottom:calc(var(--ar-bottom-strip) + 18px + var(--safe-bottom));
   display:flex;justify-content:center;gap:18px;align-items:center;
 }
 .fabPlus{
@@ -187,8 +191,10 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
 }
 
 .postCloseBar{
-  position:absolute;left:0;right:0;bottom:0;
-  padding:14px 14px calc(12px + var(--safe-bottom));
+  position:absolute;left:0;right:0;
+  /* Sit above the bottom pattern strip so "Готово" is never covered */
+  bottom:calc(var(--ar-bottom-strip) + var(--safe-bottom));
+  padding:14px 14px 12px;
   background:rgba(0,0,0,0.35);
   backdrop-filter: blur(10px);
 }
@@ -216,7 +222,7 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
 
 .finalBar{
   position:absolute;left:0;right:0;bottom:0;
-  padding:10px 10px calc(12px + var(--safe-bottom));
+  padding:10px 10px calc(10px + var(--safe-bottom));
   background:rgba(0,0,0,0.40);
   backdrop-filter: blur(10px);
   display:flex;flex-direction:column;gap:10px;
