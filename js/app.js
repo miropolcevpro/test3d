@@ -560,7 +560,10 @@ async function startAR() {
   show(UI.finalBar, true);
   show(UI.finalColors, false);
   // main add button area visible at start
-  show(UI.arBottomCenter, true);
+  show(UI.arBottomCenter, false);
+  // During scanning we hide the + button to prevent accidental first point.
+  show(UI.btnArAdd, false);
+  show(UI.btnArOk, false);
 }
 
 function cleanupXR() {
@@ -608,18 +611,24 @@ async function stopAR() {
 function ensureFloorLocked() {
   if (state.floorLocked) return;
   if (!reticle.visible) return;
+
   state.floorLocked = true;
   state.floorY = (state.scanFloorY ?? reticle.position.y);
 
-  // lock scanning grid to the floor (and then hide it — it is only for scanning)
+  // Lock scanning grid to the floor and hide it — it is only for scanning
   scanGrid.position.set(reticle.position.x, state.floorY + 0.001, reticle.position.z);
   scanGrid.visible = false;
 
-  // hide scan hint
+  // Hide scan hint and switch to drawing phase
   show(UI.scanHint, false);
-  
-state.phase = 'ar_draw';
+  state.phase = 'ar_draw';
+
+  // Enable point placement UI only after floor is locked
+  show(UI.arBottomCenter, true);
+  show(UI.btnArAdd, true);
+  show(UI.btnArOk, false);
 }
+
 
 // Return intersection of XR camera center ray with locked floor plane (world space)
 function getCenterRayFloorPoint(outVec) {
@@ -696,8 +705,8 @@ function addPointFromReticle() {
   ensureFloorLocked();
   if (!state.floorLocked) return;
 
-  // Prefer floor-ray intersection to avoid wall hits
-  const p = getCenterRayFloorPoint(__tmpWorldPoint) || (reticle.visible ? reticle.position.clone() : null);
+  // Use the projected reticle position (always clamped to floor)
+  const p = (reticle.visible ? reticle.position.clone() : null);
   if (!p) return;
   addPointAtWorld(p);
 }
@@ -1003,6 +1012,8 @@ function updateAreaUI() {
 // ------------------------
 const __tmpUp = new THREE.Vector3();
 const __tmpWorldPoint = new THREE.Vector3();
+const __tmpFwd = new THREE.Vector3();
+const __tmpCam = new THREE.Vector3();
 
 function updateXR(frame) {
   // center hit test
@@ -1017,46 +1028,78 @@ function updateXR(frame) {
         reticle.matrix.decompose(reticle.position, reticle.quaternion, reticle.scale);
 
         __tmpUp.set(0, 1, 0).applyQuaternion(reticle.quaternion);
-        const upThresh = state.floorLocked ? 0.75 : 0.92;
-        if (__tmpUp.y < upThresh) {
-          reticle.visible = false;
-          gotHit = false;
+        const upThresh = state.floorLocked ? 0.55 : 0.92;
+
+        if (!state.floorLocked) {
+          // During scanning we only accept near-horizontal hits as floor samples.
+          if (__tmpUp.y < upThresh) {
+            reticle.visible = false;
+            gotHit = false;
+          } else {
+            gotHit = true;
+          }
         } else {
-          if (state.floorLocked) reticle.position.y = state.floorY;
+          // After floor is locked we PROJECT ANY hit (even walls) down onto the floor plane.
+          // This guarantees points never land on walls; aiming at a wall will place the reticle at the wall base.
           gotHit = true;
         }
 
+        if (gotHit && state.floorLocked) {
+          reticle.position.y = state.floorY;
+          reticle.quaternion.set(0, 0, 0, 1);
+        }
+
         if (!state.floorLocked) {
-          // collect floor Y samples for better stability (avoid grid floating)
-          state.scanYs.push(reticle.position.y);
-          if (state.scanYs.length > 60) state.scanYs.shift();
+          // Collect floor Y samples for better stability.
+          // We only sample when (a) hit is horizontal enough and (b) camera looks downward,
+          // to avoid sampling walls or vertical surfaces.
+          const xrCam = renderer.xr.getCamera(camera);
+          const cam = (xrCam.cameras && xrCam.cameras.length) ? xrCam.cameras[0] : xrCam;
 
-          // robust estimate: use 20th percentile to ignore occasional high hits (tables) but not chase noise
-          const ys = state.scanYs.slice().sort((a,b)=>a-b);
-          const idx = Math.max(0, Math.min(ys.length - 1, Math.floor(ys.length * 0.2)));
-          state.scanFloorY = ys[idx];
+          __tmpFwd.set(0, 0, -1).applyQuaternion(cam.quaternion);
+          const lookingDown = __tmpFwd.y < -0.15;
 
-          const gridY = state.scanFloorY ?? reticle.position.y;
+          if (lookingDown) {
+            state.scanYs.push(reticle.position.y);
+            if (state.scanYs.length > 80) state.scanYs.shift();
+
+            const ys = state.scanYs.slice().sort((a, b) => a - b);
+            const idx = Math.max(0, Math.min(ys.length - 1, Math.floor(ys.length * 0.2)));
+            state.scanFloorY = ys[idx];
+
+            // Auto-finish scanning when samples are stable.
+            if (ys.length >= 25) {
+              const last = ys.slice(Math.max(0, ys.length - 25));
+              const mean = last.reduce((s, v) => s + v, 0) / last.length;
+              const varr = last.reduce((s, v) => s + (v - mean) * (v - mean), 0) / last.length;
+              const std = Math.sqrt(varr);
+              // ~1.5cm stability threshold
+              if (std < 0.015) {
+                // Project reticle to the stable floor estimate and lock.
+                reticle.position.y = state.scanFloorY;
+                reticle.quaternion.set(0, 0, 0, 1);
+                ensureFloorLocked();
+              }
+            }
+          }
+
+          // Visual scanning grid sticks to the estimated floor height.
+          const gridY = (state.scanFloorY ?? reticle.position.y);
+          reticle.position.y = gridY;
+          reticle.quaternion.set(0, 0, 0, 1);
+
           scanGrid.visible = true;
           scanGrid.position.set(reticle.position.x, gridY + 0.001, reticle.position.z);
-          // keep grid horizontal
           scanGrid.rotation.set(0, 0, 0);
         }
       }
     }
   }
-  // After floor is locked, keep reticle strictly on the locked floor plane (prevents wall placements)
-  if (state.floorLocked) {
-    const p = getCenterRayFloorPoint(__tmpWorldPoint);
-    if (p) {
-      reticle.visible = true;
-      reticle.position.copy(p);
-      reticle.quaternion.set(0, 0, 0, 1);
-      gotHit = true;
-    } else {
-      reticle.visible = false;
-      gotHit = false;
-    }
+  }
+
+  // If floor is locked but we have no hit this frame, hide the reticle to avoid stale placement.
+  if (state.floorLocked && !gotHit) {
+    reticle.visible = false;
   }
 
   // transient hit results
@@ -1201,6 +1244,9 @@ UI.btnArReset?.addEventListener('click', () => {
 });
 
 UI.btnArAdd?.addEventListener('click', () => {
+  // Points can be placed only after scanning (floor locked) and only in drawing/cut modes.
+  if (!state.floorLocked) return;
+  if (!(state.phase === 'ar_draw' || state.phase === 'ar_cut')) return;
   addPointFromReticle();
 });
 
