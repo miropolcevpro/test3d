@@ -689,6 +689,12 @@ function addPointAtWorld(worldPos) {
   rebuildFill();
   updateAreaUI();
 
+  // Keep the + button visible after placing points (especially after reset).
+  if (state.phase === "ar_draw" || state.phase === "ar_cut") {
+    show(UI.arBottomCenter, true);
+    show(UI.btnArAdd, true);
+  }
+
   if (state.points.length >= 3) show(UI.btnArOk, true);
 }
 
@@ -1260,6 +1266,9 @@ UI.btnArBack?.addEventListener('click', async () => {
 UI.btnArReset?.addEventListener('click', () => {
   // keep floor if already locked
   resetAll(true);
+  // After reset we must re-enable the point placement UI.
+  // Some flows hide the container (arBottomCenter), so explicitly show it.
+  show(UI.arBottomCenter, true);
   show(UI.btnArAdd, true);
   show(UI.btnArOk, false);
   show(UI.postCloseBar, false);
