@@ -622,7 +622,8 @@ async function stopAR() {
 }
 
 // ------------------------
-// Floor lockfunction ensureFloorLocked() {
+// Floor lock
+function ensureFloorLocked() {
   if (state.floorLocked) return;
 
   // We need a visible reticle from hit-test to lock the plane
@@ -645,9 +646,6 @@ async function stopAR() {
   show(UI.scanHint, false);
   scanGrid.visible = false;
 
-  state.phase = 'ar_draw';
-}
- false);
   state.phase = 'ar_draw';
 }
 
