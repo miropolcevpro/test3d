@@ -689,12 +689,6 @@ function addPointAtWorld(worldPos) {
   rebuildFill();
   updateAreaUI();
 
-  // Keep the + button visible after placing points (especially after reset).
-  if (state.phase === "ar_draw" || state.phase === "ar_cut") {
-    show(UI.arBottomCenter, true);
-    show(UI.btnArAdd, true);
-  }
-
   if (state.points.length >= 3) show(UI.btnArOk, true);
 }
 
@@ -774,25 +768,13 @@ function closeContour() {
 
 
 function resetAll(keepFloor = false) {
+  // Clear geometry/state but keep the XR session running
   state.points = [];
   state.holes = [];
   state.holePoints = [];
   state.closed = false;
 
-  if (!keepFloor) {
-    state.floorLocked = false;
-    state.floorY = 0;
-    state.floorSamples = [];
-    state.floorYEstimate = null;
-    state.floorStable = false;
-    state.phase = 'ar_scan';
-    show(UI.scanHint, true);
-    scanGrid.visible = true;
-  } else {
-    state.phase = state.xrSession ? (state.floorLocked ? 'ar_draw' : 'ar_scan') : state.phase;
-  }
-
-  // remove line/fill
+  // Remove visuals
   pointsGroup.clear();
   if (line) {
     anchorGroup.remove(line);
@@ -805,29 +787,47 @@ function resetAll(keepFloor = false) {
     fillMesh.geometry.dispose();
     fillMesh = null;
   }
+  clearMeasureLabels();
 
-  // UI
+  // Always return to non-final UI
   show(UI.postCloseBar, false);
-  // In AR we keep the bottom pattern strip visible; only colors are shown after "Готово"
-  if (state.xrSession) {
-    show(UI.finalBar, true);
-    show(UI.finalColors, false);
-  } else {
-    show(UI.finalBar, false);
+  show(UI.finalBar, false);
   show(UI.finalColors, false);
-  updateArBottomStripVar();
-  }
-  show(UI.btnArAdd, true);
-  show(UI.btnArOk, false);
-  show(UI.arBottomCenter, false);
-  show(UI.btnArAdd, false);
-  show(UI.btnArOk, false);
+
+  // Restore guide visibility (points/line/measure layer)
   pointsGroup.visible = true;
-  if (line) line.visible = true;
   if (UI.measureLayer) UI.measureLayer.style.display = 'block';
+
+  if (!keepFloor) {
+    // Restart the whole scan->lock->draw flow (as on first entry)
+    state.floorLocked = false;
+    state.floorStable = false;
+    state.floorY = 0;
+    state.floorSamples = [];
+    state.floorYEstimate = null;
+    state.phase = 'ar_scan';
+
+    show(UI.scanHint, true);
+    scanGrid.visible = true;
+
+    // Disable placement UI while scanning
+    show(UI.arBottomCenter, false);
+    show(UI.btnArAdd, false);
+    show(UI.btnArOk, false);
+  } else {
+    // Keep the already locked floor and immediately allow placing points
+    state.phase = state.xrSession ? (state.floorLocked ? 'ar_draw' : 'ar_scan') : state.phase;
+
+    show(UI.scanHint, !state.floorLocked);
+    scanGrid.visible = !state.floorLocked;
+
+    show(UI.arBottomCenter, !!state.floorLocked);
+    show(UI.btnArAdd, !!state.floorLocked);
+    show(UI.btnArOk, false);
+  }
+
   updateArBottomStripVar();
   updateAreaUI();
-  clearMeasureLabels();
 }
 
 // ------------------------
@@ -1264,22 +1264,8 @@ UI.btnArBack?.addEventListener('click', async () => {
 });
 
 UI.btnArReset?.addEventListener('click', () => {
-  // keep floor if already locked
-  resetAll(true);
-  // After reset we must re-enable the point placement UI.
-  // Some flows hide the container (arBottomCenter), so explicitly show it.
-  show(UI.arBottomCenter, true);
-  show(UI.btnArAdd, true);
-  show(UI.btnArOk, false);
-  show(UI.postCloseBar, false);
-  show(UI.finalBar, false);
-  if (state.floorLocked) {
-    state.phase = 'ar_draw';
-    show(UI.scanHint, false);
-  } else {
-    state.phase = 'ar_scan';
-    show(UI.scanHint, true);
-  }
+  // Restart the AR flow from scanning (prevents half-reset states and matches "first run")
+  resetAll(false);
 });
 
 UI.btnArAdd?.addEventListener('click', () => {
