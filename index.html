@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>WebAR Визуализатор плитки</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand__title">Визуализатор плитки (WebAR)</div>
+        <div class="brand__subtitle" id="statusText">Готово</div>
+      </div>
+      <div class="topbar__actions">
+        <button id="btnStartAR" class="btn btn-primary">Запустить AR</button>
+        <button id="btnExitAR" class="btn btn-secondary hidden">Выйти</button>
+      </div>
+    </header>
+
+    <main class="stage">
+      <canvas id="xrCanvas"></canvas>
+
+      <!-- DOM Overlay (видно в AR при поддержке dom-overlay) -->
+      <div id="overlay" class="overlay">
+        <div class="leftDrawer" id="catalogDrawer">
+          <div class="drawerHeader">
+            <div class="drawerTitle">Каталог</div>
+            <button id="btnToggleCatalog" class="btn btn-ghost">Скрыть</button>
+          </div>
+          <div class="drawerBody">
+            <input id="catalogSearch" class="input" placeholder="Поиск..." />
+            <div id="catalogList" class="catalogList"></div>
+          </div>
+        </div>
+
+        <div class="tools">
+          <div class="tools__row">
+            <button id="btnCalibrate" class="btn btn-primary hidden">Зафиксировать пол</button>
+            <button id="btnAddPoint" class="btn btn-primary hidden">Добавить точку</button>
+            <button id="btnUndo" class="btn btn-secondary hidden">Отмена</button>
+            <button id="btnClose" class="btn btn-primary hidden">Замкнуть контур</button>
+            <button id="btnClear" class="btn btn-secondary hidden">Очистить</button>
+          </div>
+
+          <div class="tools__row">
+            <label class="toggle hidden" id="toggleOcclusionWrap">
+              <input type="checkbox" id="toggleOcclusion" />
+              <span>Окклюзия (если поддерживается)</span>
+            </label>
+
+            <div class="selectWrap hidden" id="layoutWrap">
+              <span class="label">Раскладка:</span>
+              <select id="layoutSelect" class="select">
+                <option value="straight">Прямая</option>
+                <option value="diagonal">Диагональ 45°</option>
+                <option value="stagger">Вразбежку</option>
+              </select>
+            </div>
+
+            <div class="selectWrap hidden" id="borderWrap">
+              <label class="toggle">
+                <input type="checkbox" id="toggleBorder" />
+                <span>Бордюр</span>
+              </label>
+              <div class="rangeRow">
+                <span class="label">Ширина:</span>
+                <input id="borderWidth" type="range" min="0.03" max="0.20" step="0.01" value="0.08" />
+                <span id="borderWidthLabel" class="mono">0.08м</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="tools__row">
+            <button id="btnSaveProject" class="btn btn-secondary hidden">Сохранить</button>
+            <button id="btnProjects" class="btn btn-secondary hidden">Проекты</button>
+            <button id="btnScreenshot" class="btn btn-secondary hidden">Скриншот</button>
+          </div>
+        </div>
+
+        <div id="projectsModal" class="modal hidden" role="dialog" aria-modal="true">
+          <div class="modal__card">
+            <div class="modal__header">
+              <div class="modal__title">Проекты</div>
+              <button id="btnCloseProjects" class="btn btn-ghost">Закрыть</button>
+            </div>
+            <div class="modal__body">
+              <div class="muted">Проекты сохраняются локально в браузере (localStorage).</div>
+              <div id="projectsList" class="projectsList"></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="help" class="toast hidden">
+          <div class="toast__title">Как пользоваться</div>
+          <ol class="toast__list">
+            <li>Нажмите <b>Запустить AR</b> (Chrome на Android).</li>
+            <li>Наведите камеру на пол, дождитесь маркера, нажмите <b>Зафиксировать пол</b>.</li>
+            <li>Ставьте точки кнопкой <b>Добавить точку</b>, затем <b>Замкнуть контур</b>.</li>
+            <li>Выберите плитку в каталоге и раскладку — покрытие обновится.</li>
+          </ol>
+        </div>
+      </div>
+
+      <div class="fallback" id="fallbackPanel">
+        <div class="fallback__card">
+          <div class="fallback__title">AR в браузере</div>
+          <div class="fallback__text">
+            Полноценный режим разметки/заливки работает в <b>Chrome на Android</b> с поддержкой WebXR (immersive-ar).
+            Если AR недоступен, вы можете просмотреть плитку в 3D-превью ниже.
+          </div>
+          <button id="btnShowHelp" class="btn btn-secondary">Показать инструкцию</button>
+          <a class="link" href="admin.html">Админка каталога →</a>
+        </div>
+      </div>
+    </main>
+
+    <footer class="bottombar">
+      <div class="bottombar__left">
+        <span class="chip" id="selectedTileChip">Плитка: —</span>
+        <span class="chip" id="tileSizeChip">Размер: —</span>
+      </div>
+      <div class="bottombar__right">
+        <a class="link" href="admin.html">Админка</a>
+      </div>
+    </footer>
+  </div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
