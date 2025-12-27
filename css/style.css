@@ -20,6 +20,7 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   width:100vw;height:100vh;
   display:block;
   background:#000;
+  touch-action:none;
 }
 
 .overlayRoot{position:fixed;inset:0;pointer-events:none;}
@@ -157,6 +158,17 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
 .arTitle{font-weight:900;font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .arArea{font-weight:800;font-size:14px;color:rgba(255,255,255,0.80);}
 
+
+.editHint{
+  position:absolute;left:12px;right:12px;top:90px;
+  padding:12px 14px;
+  border-radius:18px;
+  background:rgba(0,0,0,0.45);
+  border:1px solid rgba(255,255,255,0.10);
+  font-size:14px;
+  line-height:1.35;
+  color:rgba(255,255,255,0.92);
+}
 .scanHint{
   position:absolute;left:12px;right:12px;top:90px;
   padding:16px 16px;

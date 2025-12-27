@@ -35,6 +35,7 @@ const UI = {
   arProductTitle: document.getElementById('arProductTitle'),
   arArea: document.getElementById('arArea'),
   scanHint: document.getElementById('scanHint'),
+  editHint: document.getElementById('editHint'),
   measureLayer: document.getElementById('measureLayer'),
   arBottomCenter: document.getElementById('arBottomCenter'),
   btnArAdd: document.getElementById('btnArAdd'),
@@ -57,6 +58,174 @@ function show(el, on = true) {
   if (on) el.removeAttribute('hidden');
   else el.setAttribute('hidden', '');
 }
+
+
+// ------------------------
+// Edit shape: drag points
+// ------------------------
+function setEditMode(on) {
+  state.editMode = !!on;
+  state.editIndex = -1;
+  state._draggingEdit = false;
+  state._editPointerId = null;
+  if (UI.editHint) show(UI.editHint, on);
+  // Rebuild markers to reflect selection styling
+  rebuildMarkersAndLine(state.closed);
+}
+
+const __editRaycaster = new THREE.Raycaster();
+const __editNDC = new THREE.Vector2();
+const __editPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const __editHit = new THREE.Vector3();
+const __editWorld = new THREE.Vector3();
+const __editProj = new THREE.Vector3();
+
+function __getActiveXRCameraForInput() {
+  const xrCam = state._xrCam || renderer.xr.getCamera(camera);
+  if (xrCam && xrCam.isArrayCamera && xrCam.cameras && xrCam.cameras.length) return xrCam.cameras[0];
+  return xrCam;
+}
+
+function __pickPointIndex(clientX, clientY) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  const w = rect.width || 1;
+  const h = rect.height || 1;
+
+  const cam = __getActiveXRCameraForInput();
+  if (!cam) return -1;
+
+  let best = -1;
+  let bestD2 = Infinity;
+
+  for (let i = 0; i < state.points.length; i++) {
+    // project point to screen
+    __editWorld.copy(state.points[i]);
+    anchorGroup.localToWorld(__editWorld);
+    __editProj.copy(__editWorld).project(cam);
+
+    const sx = ( __editProj.x * 0.5 + 0.5 ) * w + rect.left;
+    const sy = ( -__editProj.y * 0.5 + 0.5 ) * h + rect.top;
+
+    const dx = sx - clientX;
+    const dy = sy - clientY;
+    const d2 = dx*dx + dy*dy;
+    if (d2 < bestD2) {
+      bestD2 = d2;
+      best = i;
+    }
+  }
+
+  // threshold in px
+  const THRESH = 44;
+  if (best >= 0 && bestD2 <= THRESH * THRESH) return best;
+  return -1;
+}
+
+function __screenToFloorLocal(clientX, clientY) {
+  if (!state.floorLocked) return null;
+
+  const rect = renderer.domElement.getBoundingClientRect();
+  const w = rect.width || 1;
+  const h = rect.height || 1;
+
+  // NDC from client coords
+  __editNDC.set(
+    ((clientX - rect.left) / w) * 2 - 1,
+    -(((clientY - rect.top) / h) * 2 - 1)
+  );
+
+  const cam = __getActiveXRCameraForInput();
+  if (!cam) return null;
+
+  __editRaycaster.setFromCamera(__editNDC, cam);
+
+  // Ray must point downward enough to intersect the floor in front
+  if (__editRaycaster.ray.direction.y > -0.05) return null;
+
+  __editPlane.constant = -state.floorY; // plane y = floorY
+  const hit = __editRaycaster.ray.intersectPlane(__editPlane, __editHit);
+  if (!hit) return null;
+
+  // Clamp on floor and convert to local
+  __editHit.y = state.floorY;
+  const local = anchorGroup.worldToLocal(__editHit.clone());
+  local.y = state.floorY;
+  return local;
+}
+
+function __scheduleEditRebuild() {
+  if (state._editRebuildPending) return;
+  state._editRebuildPending = true;
+  requestAnimationFrame(() => {
+    state._editRebuildPending = false;
+    rebuildMarkersAndLine(state.closed);
+    rebuildFill();
+    updateAreaUI();
+    // update ok button visibility (in case user moved points and then wants to close)
+    show(UI.btnArOk, (state.phase === 'ar_draw' || state.phase === 'ar_edit') && state.points.length >= 3);
+  });
+}
+
+// Pointer-based dragging in edit mode
+UI.canvas?.addEventListener('pointerdown', (e) => {
+  if (!state.xrSession) return;
+  if (!state.editMode) return;
+  if (state.phase !== 'ar_draw' && state.phase !== 'ar_edit') return;
+
+  // Ignore UI taps
+  if (e.target && e.target.closest && e.target.closest('button, #postCloseBar, #finalBar, .tabBar, .detailBottom')) return;
+
+  const idx = __pickPointIndex(e.clientX, e.clientY);
+  if (idx < 0) return;
+
+  e.preventDefault();
+  state.editIndex = idx;
+  state._draggingEdit = true;
+  state._editPointerId = e.pointerId;
+
+  try { UI.canvas.setPointerCapture(e.pointerId); } catch (_) {}
+
+  __scheduleEditRebuild();
+}, { passive: false });
+
+UI.canvas?.addEventListener('pointermove', (e) => {
+  if (!state.xrSession) return;
+  if (!state.editMode || !state._draggingEdit) return;
+  if (state._editPointerId !== e.pointerId) return;
+
+  e.preventDefault();
+  const local = __screenToFloorLocal(e.clientX, e.clientY);
+  if (!local) return;
+
+  // Update point
+  state.points[state.editIndex].copy(local);
+  // Keep guide visuals updated
+  __scheduleEditRebuild();
+}, { passive: false });
+
+function __endEditDrag() {
+  state._draggingEdit = false;
+  state._editPointerId = null;
+  state.editIndex = -1;
+  __scheduleEditRebuild();
+}
+
+UI.canvas?.addEventListener('pointerup', (e) => {
+  if (!state.editMode) return;
+  if (state._editPointerId !== e.pointerId) return;
+  e.preventDefault();
+  try { UI.canvas.releasePointerCapture(e.pointerId); } catch (_) {}
+  __endEditDrag();
+}, { passive: false });
+
+UI.canvas?.addEventListener('pointercancel', (e) => {
+  if (!state.editMode) return;
+  if (state._editPointerId !== e.pointerId) return;
+  e.preventDefault();
+  try { UI.canvas.releasePointerCapture(e.pointerId); } catch (_) {}
+  __endEditDrag();
+}, { passive: false });
+
 
 function setActiveScreen(name) {
   const map = {
@@ -132,16 +301,18 @@ const state = {
   reticleVisible: false,
   snapArmed: false,
 
+  // Edit shape drag mode
+  editMode: false,
+  editIndex: -1,
+  _draggingEdit: false,
+  _editPointerId: null,
+  _editRebuildPending: false,
+  _xrCam: null,
+
   points: /** @type {THREE.Vector3[]} */ ([]),
   holes: /** @type {THREE.Vector3[][]} */ ([]),
   holePoints: /** @type {THREE.Vector3[]} */ ([]),
   closed: false,
-
-  // Edit-shape mode (move existing points in-place)
-  editMode: false,
-  dragging: false,
-  dragIndex: -1,
-  _lastDragRebuildTs: 0,
 };
 
 const SNAP_DIST_M = 0.10;
@@ -806,20 +977,13 @@ function closeHole() {
   updateArBottomStripVar();
   rebuildFill();
   updateAreaUI();
-
-  // leaving edit mode
-  state.editMode = false;
-  clearDragSelection();
 }
 
 function closeContour() {
+  setEditMode(false);
   if (state.points.length < 3) return;
   state.closed = true;
   state.phase = 'ar_mask';
-
-  // leaving edit mode
-  state.editMode = false;
-  clearDragSelection();
 
   rebuildMarkersAndLine(true);
   rebuildFill();
@@ -836,9 +1000,6 @@ function closeContour() {
 
 
 function resetAll(keepFloor = false) {
-  state.editMode = false;
-  clearDragSelection();
-
   state.points = [];
   state.holes = [];
   state.holePoints = [];
@@ -910,6 +1071,7 @@ function rebuildMarkersAndLine(closed = false) {
   pointsGroup.clear();
 
   const markerMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const markerMatSel = new THREE.MeshBasicMaterial({ color: 0x2f6cff });
   const markerGeo = new THREE.SphereGeometry(0.018, 18, 12);
 
   const allOuter = state.points;
@@ -917,9 +1079,9 @@ function rebuildMarkersAndLine(closed = false) {
     const m = new THREE.Mesh(markerGeo, markerMat);
     m.position.copy(p);
     m.position.y += 0.002;
-    // In edit-shape mode, subtly emphasize the currently dragged point.
-    if (state.editMode && state.dragging && state.dragIndex === i) {
-      m.scale.setScalar(1.45);
+    if (state.editMode && i === state.editIndex) {
+      m.material = markerMatSel;
+      m.scale.setScalar(1.6);
     }
     pointsGroup.add(m);
 
@@ -1107,51 +1269,6 @@ function updateAreaUI() {
 }
 
 // ------------------------
-// Edit-shape (move points)
-// ------------------------
-function getPrimaryXRCamera() {
-  const xrCam = renderer.xr.getCamera(camera);
-  return (xrCam.cameras && xrCam.cameras.length) ? xrCam.cameras[0] : xrCam;
-}
-
-function pickNearestOuterPoint(clientX, clientY) {
-  if (!state.points.length) return -1;
-
-  const cam = getPrimaryXRCamera();
-  const w = window.innerWidth;
-  const h = window.innerHeight;
-
-  let best = -1;
-  let bestD2 = Infinity;
-  const THRESH_PX = 44; // touch-friendly
-  const thresh2 = THRESH_PX * THRESH_PX;
-
-  for (let i = 0; i < state.points.length; i++) {
-    const pLocal = state.points[i];
-    const pWorld = anchorGroup.localToWorld(pLocal.clone());
-    const v = pWorld.project(cam);
-    if (v.z < -1 || v.z > 1) continue;
-
-    const sx = (v.x * 0.5 + 0.5) * w;
-    const sy = (-v.y * 0.5 + 0.5) * h;
-    const dx = sx - clientX;
-    const dy = sy - clientY;
-    const d2 = dx * dx + dy * dy;
-    if (d2 < bestD2) {
-      bestD2 = d2;
-      best = i;
-    }
-  }
-
-  return bestD2 <= thresh2 ? best : -1;
-}
-
-function clearDragSelection() {
-  state.dragging = false;
-  state.dragIndex = -1;
-}
-
-// ------------------------
 // XR frame update
 // ------------------------
 const __tmpUp = new THREE.Vector3();
@@ -1260,26 +1377,6 @@ function updateXR(frame) {
     reticle.position.y = state.floorY;
   }
 
-  // Edit-shape dragging: move selected point to current reticle position.
-  // This keeps points strictly on the locked floor plane and updates geometry live.
-  if (state.editMode && state.dragging && state.dragIndex >= 0 && state.phase === 'ar_draw' && state.floorLocked && reticle.visible) {
-    const hitWorld = reticle.position.clone();
-    hitWorld.y = state.floorY;
-    const local = anchorGroup.worldToLocal(hitWorld);
-    // Preserve y exactly on floor
-    local.y = state.floorY;
-    if (state.points[state.dragIndex]) {
-      state.points[state.dragIndex].copy(local);
-      const now = performance.now();
-      if (now - state._lastDragRebuildTs > 55) {
-        state._lastDragRebuildTs = now;
-        rebuildMarkersAndLine(false);
-        rebuildFill();
-        updateAreaUI();
-      }
-    }
-  }
-
 
   // transient hit results
   if (state.transientHitTestSource && state.referenceSpace) {
@@ -1374,6 +1471,7 @@ function updateXR(frame) {
 
   // UI measure labels
   const xrCam = renderer.xr.getCamera(camera);
+  state._xrCam = xrCam;
   updateMeasureLabels(xrCam);
 }
 
@@ -1384,42 +1482,6 @@ function updateXR(frame) {
 UI.overlay?.addEventListener('pointerdown', (e) => {
   if (!state.xrSession) return;
   state.lastUiTapTs = performance.now();
-}, true);
-
-// Edit-shape interaction:
-// Tap a point marker to start moving it; tap again to drop (like in the OZON flow).
-UI.overlay?.addEventListener('pointerdown', (e) => {
-  if (!state.xrSession) return;
-  if (!state.editMode) return;
-  if (state.phase !== 'ar_draw') return;
-  if (!state.floorLocked) return;
-
-  // Ignore UI taps
-  const t = /** @type {HTMLElement} */ (e.target);
-  if (t && t.closest('button')) return;
-  if (t && t.closest('#postCloseBar')) return;
-  if (t && t.closest('#finalBar')) return;
-  if (t && t.closest('.tabBar')) return;
-  if (t && t.closest('.detailBottom')) return;
-
-  const idx = pickNearestOuterPoint(e.clientX, e.clientY);
-  if (idx < 0) {
-    // tap away => drop current selection
-    clearDragSelection();
-    rebuildMarkersAndLine(false);
-    return;
-  }
-
-  if (state.dragging && state.dragIndex === idx) {
-    clearDragSelection();
-    rebuildMarkersAndLine(false);
-    return;
-  }
-
-  state.dragging = true;
-  state.dragIndex = idx;
-  state._lastDragRebuildTs = 0;
-  rebuildMarkersAndLine(false);
 }, true);
 
 UI.catalogSearch?.addEventListener('input', () => {
@@ -1438,10 +1500,12 @@ UI.btnViewAR?.addEventListener('click', async () => {
 });
 
 UI.btnArBack?.addEventListener('click', async () => {
+  setEditMode(false);
   await stopAR();
 });
 
 UI.btnArReset?.addEventListener('click', async () => {
+  setEditMode(false);
   await fullRestartAR();
 });
 
@@ -1461,11 +1525,6 @@ UI.btnEditShape?.addEventListener('click', () => {
 
   state.closed = false;
   state.phase = 'ar_draw';
-
-  // enable edit-shape mode: allow moving existing points by tapping them
-  state.editMode = true;
-  clearDragSelection();
-
   // In the reference app, changing the outer shape resets any existing cutouts.
   state.holes = [];
   state.holePoints = [];
@@ -1484,16 +1543,16 @@ UI.btnEditShape?.addEventListener('click', () => {
   if (fillMesh) { anchorGroup.remove(fillMesh); fillMesh.geometry.dispose(); fillMesh = null; }
   clearMeasureLabels();
   updateAreaUI();
+  // Enter point drag edit mode
+  state.phase = 'ar_edit';
+  setEditMode(true);
 });
 
 UI.btnCutout?.addEventListener('click', () => {
+  setEditMode(false);
   // cutout mode
   show(UI.finalColors, false);
   if (typeof updateArBottomStripVar === 'function') updateArBottomStripVar();
-
-  // leave edit-shape mode when entering cutout
-  state.editMode = false;
-  clearDragSelection();
 
   state.phase = 'ar_cut';
   state.holePoints = [];
@@ -1516,10 +1575,7 @@ UI.btnCutout?.addEventListener('click', () => {
 });
 
 UI.btnDone?.addEventListener('click', () => {
-  // leave edit-shape mode in final visualization
-  state.editMode = false;
-  clearDragSelection();
-
+  setEditMode(false);
   state.phase = 'ar_final';
   show(UI.postCloseBar, false);
   show(UI.arBottomCenter, false);
