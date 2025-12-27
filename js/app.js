@@ -1442,7 +1442,17 @@ UI.btnArOk?.addEventListener('click', () => {
   else closeContour();
 });
 
-UI.btnEditShape?.addEventListener('click', () => {
+function requestEditShapeMode(e) {
+  // Страховка: на мобильных иногда "click" не прилетает или перехватывается.
+  // Поэтому используем и прямой слушатель, и делегирование на документ (в capture).
+  if (e) { try { e.preventDefault(); } catch (_) {} }
+  if (!state.inXR) return;
+  if (!state.closed || !state.points || state.points.length < 3) return;
+
+  enterEditShapeMode();
+}
+
+function enterEditShapeMode() {
   // Режим "Изменить фигуру": перемещение уже выставленных точек (как в приложении)
   // Важно: меняем только режим редактирования, сценарий/экраны не трогаем.
   show(UI.finalColors, false);
@@ -1476,7 +1486,16 @@ UI.btnEditShape?.addEventListener('click', () => {
   // Снять выделение
   state.editIndex = null;
   state.editDragging = false;
-});
+
+}
+
+UI.btnEditShape?.addEventListener('click', requestEditShapeMode);
+// Делегирование (capture) — гарантирует, что кнопка будет реагировать даже при стопе bubbling.
+document.addEventListener('click', (e) => {
+  const t = e.target;
+  if (t && t.closest && t.closest('#btnEditShape')) requestEditShapeMode(e);
+}, true);
+
 
 UI.btnCutout?.addEventListener('click', () => {
   // cutout mode
