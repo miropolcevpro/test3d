@@ -479,13 +479,28 @@ async function checkXrSupport() {
 }
 
 async function startAR() {
+  // Prevent double-start and "already active XRSession" errors
+  if (state._startingAR) return;
+  if (state.xrSession) {
+    console.warn('AR-сессия уже запущена');
+    return;
+  }
+  state._startingAR = true;
+  if (UI.btnViewAR) UI.btnViewAR.disabled = true;
+
+  const _abortStart = (msg) => {
+    if (msg) alert(msg);
+    state._startingAR = false;
+    if (UI.btnViewAR) UI.btnViewAR.disabled = false;
+  };
+
   if (!navigator.xr) {
-    alert('WebXR недоступен в этом браузере. Откройте сайт в Chrome на Android.');
+    _abortStart('WebXR недоступен в этом браузере. Откройте сайт в Chrome на Android.');
     return;
   }
   const supported = await checkXrSupport();
   if (!supported) {
-    alert('immersive-ar не поддерживается. Нужен Chrome на Android с ARCore.');
+    _abortStart('immersive-ar не поддерживается. Нужен Chrome на Android с ARCore.');
     return;
   }
 
@@ -509,7 +524,7 @@ async function startAR() {
     session = await navigator.xr.requestSession('immersive-ar', sessionInit);
   } catch (e) {
     console.error(e);
-    alert('Не удалось запустить AR-сессию. Проверьте разрешения камеры.');
+    _abortStart('Не удалось запустить AR-сессию. Проверьте разрешения камеры.');
     return;
   }
 
@@ -520,16 +535,36 @@ async function startAR() {
   // reset scan samples
   state.scanMinY = null;
   state.floorPlane = null;
-  // Prefer local-floor for better floor alignment; fallback to local
+  // Select a supported reference space type BEFORE passing the session to three.js
   let refType = 'local-floor';
-  try { renderer.xr.setReferenceSpaceType(refType); } catch (e) { refType = 'local'; renderer.xr.setReferenceSpaceType(refType); }
-  await renderer.xr.setSession(session);
+  let refSpace = null;
+  try {
+    refSpace = await session.requestReferenceSpace('local-floor');
+  } catch (_) {
+    refType = 'local';
+    refSpace = await session.requestReferenceSpace('local');
+  }
 
-  state.referenceSpace = await session.requestReferenceSpace(refType).catch(() => session.requestReferenceSpace('local'));
+  renderer.xr.setReferenceSpaceType(refType);
 
+  try {
+    await renderer.xr.setSession(session);
+  } catch (e) {
+    console.error(e);
+    try { await session.end(); } catch (_) {}
+    cleanupXR();
+    _abortStart('Не удалось инициализировать AR-сессию на этом устройстве.');
+    return;
+  }
+
+  state.referenceSpace = refSpace;
   state.viewerSpace = await session.requestReferenceSpace('viewer');
 
   state.hitTestSource = await session.requestHitTestSource({ space: state.viewerSpace });
+
+  // Start succeeded
+  state._startingAR = false;
+  if (UI.btnViewAR) UI.btnViewAR.disabled = false;
 
   // IMPORTANT:
   // In the reference app, points are placed ONLY by pressing the on-screen "+" button
@@ -551,7 +586,10 @@ async function startAR() {
   } catch (_) {}
 
   session.addEventListener('end', () => {
+    try { renderer.setAnimationLoop(null); } catch (_) {}
     cleanupXR();
+    state._startingAR = false;
+    if (UI.btnViewAR) UI.btnViewAR.disabled = false;
   });
 
   // enter AR UI
@@ -622,11 +660,12 @@ async function stopAR() {
 }
 
 // ------------------------
+// ------------------------
 // Floor lock
 function ensureFloorLocked() {
   if (state.floorLocked) return;
 
-  // We need a visible reticle from hit-test to lock the plane
+  // Need a visible reticle from hit-test to lock the plane
   if (!reticle.visible) return;
 
   // Estimate floor Y: prefer the lowest sampled Y during scanning (helps avoid 'floating' planes)
