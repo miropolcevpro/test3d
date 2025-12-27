@@ -110,6 +110,8 @@ const state = {
   phase: 'catalog', // catalog|detail|ar_scan|ar_draw|ar_mask|ar_cut|ar_final
   floorLocked: false,
   floorY: 0,
+  scanMinY: null,
+  floorPlane: null,
   reticleVisible: false,
   snapArmed: false,
 
@@ -184,6 +186,11 @@ world.add(previewPlane);
 const previewGrid = new THREE.GridHelper(3, 12, 0x3a6cff, 0x3a3a3a);
 previewGrid.position.y = 0.0005;
 world.add(previewGrid);
+
+// keep refs to hide in XR
+state._previewPlane = previewPlane;
+state._previewGrid = previewGrid;
+
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(0, 0, 0);
@@ -507,10 +514,19 @@ async function startAR() {
   }
 
   state.xrSession = session;
-  renderer.xr.setReferenceSpaceType('local');
+  // Hide desktop preview while in XR
+  if (state._previewPlane) state._previewPlane.visible = false;
+  if (state._previewGrid) state._previewGrid.visible = false;
+  // reset scan samples
+  state.scanMinY = null;
+  state.floorPlane = null;
+  // Prefer local-floor for better floor alignment; fallback to local
+  let refType = 'local-floor';
+  try { renderer.xr.setReferenceSpaceType(refType); } catch (e) { refType = 'local'; renderer.xr.setReferenceSpaceType(refType); }
   await renderer.xr.setSession(session);
 
-  state.referenceSpace = await session.requestReferenceSpace('local');
+  state.referenceSpace = await session.requestReferenceSpace(refType).catch(() => session.requestReferenceSpace('local'));
+
   state.viewerSpace = await session.requestReferenceSpace('viewer');
 
   state.hitTestSource = await session.requestHitTestSource({ space: state.viewerSpace });
@@ -573,6 +589,14 @@ function cleanupXR() {
   state.depthTexture = null;
   state.depthData = null;
 
+  // tracking state
+  state.floorLocked = false;
+  state.floorY = 0;
+  state.scanMinY = null;
+  state.floorPlane = null;
+  anchorGroup.position.set(0, 0, 0);
+  anchorGroup.updateMatrixWorld(true);
+
   reticle.visible = false;
   scanGrid.visible = false;
 
@@ -583,6 +607,9 @@ function cleanupXR() {
   // UI
   setActiveScreen('detail');
   state.phase = 'detail';
+  show(UI.finalBar, false);
+  show(UI.postCloseBar, false);
+  show(UI.scanHint, false);
 }
 
 async function stopAR() {
@@ -595,20 +622,32 @@ async function stopAR() {
 }
 
 // ------------------------
-// Floor lock + points
-// ------------------------
-function ensureFloorLocked() {
+// Floor lockfunction ensureFloorLocked() {
   if (state.floorLocked) return;
-  if (!reticle.visible) return;
-  state.floorLocked = true;
-  state.floorY = reticle.position.y;
 
-  // lock scanning grid to the floor (and then hide it — it is only for scanning)
-  scanGrid.position.set(reticle.position.x, state.floorY + 0.001, reticle.position.z);
+  // We need a visible reticle from hit-test to lock the plane
+  if (!reticle.visible) return;
+
+  // Estimate floor Y: prefer the lowest sampled Y during scanning (helps avoid 'floating' planes)
+  const y = (state.scanMinY != null) ? state.scanMinY : reticle.position.y;
+
+  state.floorLocked = true;
+  state.floorY = y;
+
+  // Anchor group sits on the locked floor (so all local geometry can live at y=0)
+  anchorGroup.position.set(0, state.floorY, 0);
+  anchorGroup.updateMatrixWorld(true);
+
+  // Store a plane equation in world coords for stable floor intersection (y = floorY)
+  state.floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -state.floorY);
+
+  // Hide scanning hint + grid
+  show(UI.scanHint, false);
   scanGrid.visible = false;
 
-  // hide scan hint
-  show(UI.scanHint, false);
+  state.phase = 'ar_draw';
+}
+ false);
   state.phase = 'ar_draw';
 }
 
@@ -734,9 +773,13 @@ function resetAll(keepFloor = false) {
   if (!keepFloor) {
     state.floorLocked = false;
     state.floorY = 0;
+    state.scanMinY = null;
+    state.floorPlane = null;
+    anchorGroup.position.set(0, 0, 0);
+    anchorGroup.updateMatrixWorld(true);
     state.phase = 'ar_scan';
     show(UI.scanHint, true);
-    scanGrid.visible = true;
+    scanGrid.visible = false;
   } else {
     state.phase = state.xrSession ? (state.floorLocked ? 'ar_draw' : 'ar_scan') : state.phase;
   }
@@ -865,8 +908,8 @@ function rebuildFill() {
   geom.rotateX(-Math.PI / 2);
 
   // lift a bit to avoid z-fighting
-  const baseY = state.floorY;
-  geom.translate(0, baseY + 0.002, 0);
+  // anchorGroup already sits on the locked floor
+  geom.translate(0, 0.002, 0);
 
   const mat = (state.phase === 'ar_final') ? tileMaterial : maskMaterial;
   if (!mat) return;
@@ -924,7 +967,7 @@ function updateMeasureLabels(xrCam) {
     const b = pts[(i + 1) % pts.length];
     const d = distXZ(a, b);
 
-    const mid = new THREE.Vector3((a.x + b.x) / 2, state.floorY + 0.02, (a.z + b.z) / 2);
+    const mid = new THREE.Vector3((a.x + b.x) / 2, 0.02, (a.z + b.z) / 2);
     const midW = anchorGroup.localToWorld(mid.clone());
 
     const v = midW.clone().project(xrCam);
@@ -954,32 +997,48 @@ function updateAreaUI() {
 // XR frame update
 // ------------------------
 const __tmpUp = new THREE.Vector3();
+const __tmpO = new THREE.Vector3();
+const __tmpD = new THREE.Vector3();
+const __tmpHit = new THREE.Vector3();
+const __tmpPlane = new THREE.Plane();
+
 
 function updateXR(frame) {
-  // center hit test
+  // center hit test (used mainly for initial floor scan)
   let gotHit = false;
+
   if (state.hitTestSource && state.referenceSpace) {
     const hits = frame.getHitTestResults(state.hitTestSource);
     if (hits.length) {
       const pose = hits[0].getPose(state.referenceSpace);
-      if (pose) {
+      if (pose && !state.floorLocked) {
         reticle.visible = true;
         reticle.matrix.fromArray(pose.transform.matrix);
         reticle.matrix.decompose(reticle.position, reticle.quaternion, reticle.scale);
 
+        // Prefer horizontal-ish surfaces during scanning
         __tmpUp.set(0, 1, 0).applyQuaternion(reticle.quaternion);
-        if (__tmpUp.y < 0.75) {
+        if (__tmpUp.y >= 0.75) {
+          gotHit = true;
+
+          // Track a low-Y sample while user looks downward: helps avoid "floating" scan plane
+          if (state.phase === 'ar_scan') {
+            camera.getWorldDirection(__tmpD);
+            if (__tmpD.y < -0.25) {
+              const yy = reticle.position.y;
+              state.scanMinY = (state.scanMinY == null) ? yy : Math.min(state.scanMinY, yy);
+            }
+          }
+        } else {
           reticle.visible = false;
           gotHit = false;
-        } else {
-          if (state.floorLocked) reticle.position.y = state.floorY;
-          gotHit = true;
         }
 
-        if (!state.floorLocked) {
-          scanGrid.visible = true;
-          scanGrid.position.set(reticle.position.x, reticle.position.y + 0.001, reticle.position.z);
-          // keep grid horizontal
+        // Scan grid follows the detected surface while scanning
+        scanGrid.visible = gotHit && (state.phase === 'ar_scan');
+        if (scanGrid.visible) {
+          const gy = (state.scanMinY != null) ? Math.min(state.scanMinY, reticle.position.y) : reticle.position.y;
+          scanGrid.position.set(reticle.position.x, gy + 0.001, reticle.position.z);
           scanGrid.rotation.set(0, 0, 0);
         }
       }
@@ -1008,6 +1067,36 @@ function updateXR(frame) {
         state.transientHitPoses.set(tr.inputSource, pose);
       }
     } catch (_) {}
+  }
+
+  // After locking floor, keep reticle on the locked floor plane (prevents placing on walls)
+  if (state.floorLocked) {
+    if (!state.floorPlane) {
+      state.floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -state.floorY);
+    }
+    __tmpPlane.copy(state.floorPlane);
+
+    camera.getWorldPosition(__tmpO);
+    camera.getWorldDirection(__tmpD);
+
+    const denom = __tmpPlane.normal.dot(__tmpD);
+    if (Math.abs(denom) > 1e-6) {
+      const t = -(__tmpO.dot(__tmpPlane.normal) + __tmpPlane.constant) / denom;
+      if (t > 0.05 && t < 30.0) {
+        __tmpHit.copy(__tmpD).multiplyScalar(t).add(__tmpO);
+        reticle.visible = true;
+        reticle.position.copy(__tmpHit);
+        reticle.quaternion.set(0, 0, 0, 1);
+        gotHit = true;
+      } else {
+        reticle.visible = false;
+      }
+    } else {
+      reticle.visible = false;
+    }
+
+    // scan grid only during scan phase
+    scanGrid.visible = false;
   }
 
   // magnet highlight
