@@ -99,7 +99,6 @@ const state = {
   layout: 'straight', // straight | diagonal | stagger
 
   // WebXR
-  _restartingAR: false,
   xrSession: null,
   referenceSpace: null,
   viewerSpace: null,
@@ -626,30 +625,6 @@ async function stopAR() {
   try { await s.end(); } catch (_) {}
 }
 
-
-async function restartAR() {
-  if (state._restartingAR) return;
-  state._restartingAR = true;
-  try {
-    // disable buttons to prevent double taps
-    if (UI.btnArReset) UI.btnArReset.disabled = true;
-    if (UI.btnArAdd) UI.btnArAdd.disabled = true;
-    if (UI.btnArOk) UI.btnArOk.disabled = true;
-
-    // Fully restart the XR session to guarantee clean hit-test / scanning state
-    await stopAR();
-    // give the browser a moment to dispatch the 'end' event and cleanup
-    await new Promise(r => setTimeout(r, 50));
-    await startAR();
-  } finally {
-    if (UI.btnArReset) UI.btnArReset.disabled = false;
-    if (UI.btnArAdd) UI.btnArAdd.disabled = false;
-    if (UI.btnArOk) UI.btnArOk.disabled = false;
-    state._restartingAR = false;
-  }
-}
-
-
 // ------------------------
 // Floor lock + points
 // ------------------------
@@ -801,53 +776,61 @@ function resetAll(keepFloor = false) {
   if (!keepFloor) {
     state.floorLocked = false;
     state.floorY = 0;
-    state.floorSamples = [];
-    state.floorYEstimate = null;
-    state.floorStable = false;
+    // floor stabilization state (may exist depending on build)
+    if ('floorSamples' in state) state.floorSamples = [];
+    if ('floorYEstimate' in state) state.floorYEstimate = null;
+    if ('floorStable' in state) state.floorStable = false;
+
     state.phase = 'ar_scan';
     show(UI.scanHint, true);
-    scanGrid.visible = true;
+    if (typeof scanGrid !== 'undefined' && scanGrid) scanGrid.visible = true;
   } else {
     state.phase = state.xrSession ? (state.floorLocked ? 'ar_draw' : 'ar_scan') : state.phase;
   }
 
-  // remove line/fill
+  // remove line/fill and markers
   pointsGroup.clear();
+
   if (line) {
     anchorGroup.remove(line);
     line.geometry.dispose();
     line.material.dispose();
     line = null;
   }
+
   if (fillMesh) {
     anchorGroup.remove(fillMesh);
     fillMesh.geometry.dispose();
+    // material is shared shader; don't dispose here
     fillMesh = null;
   }
 
+  clearMeasureLabels();
+
   // UI
   show(UI.postCloseBar, false);
-  // In AR we keep the bottom pattern strip visible; only colors are shown after "Готово"
+  // Bottom strip: keep patterns available in AR; colors appear only after "Готово"
   if (state.xrSession) {
     show(UI.finalBar, true);
     show(UI.finalColors, false);
   } else {
     show(UI.finalBar, false);
-  show(UI.finalColors, false);
-  updateArBottomStripVar();
   }
-  show(UI.btnArAdd, true);
+
+  const inScan = (state.phase === 'ar_scan' && !state.floorLocked);
+  show(UI.arBottomCenter, !inScan);
+  show(UI.btnArAdd, !inScan);
   show(UI.btnArOk, false);
-  show(UI.arBottomCenter, false);
-  show(UI.btnArAdd, false);
-  show(UI.btnArOk, false);
+
+  // restore guides visibility (they may be hidden in final mode)
   pointsGroup.visible = true;
-  if (line) line.visible = true;
   if (UI.measureLayer) UI.measureLayer.style.display = 'block';
-  updateArBottomStripVar();
+
+  if (typeof updateArBottomStripVar === 'function') updateArBottomStripVar();
   updateAreaUI();
-  clearMeasureLabels();
 }
+
+
 
 // ------------------------
 // Markers / line / fill
@@ -1282,9 +1265,20 @@ UI.btnArBack?.addEventListener('click', async () => {
   await stopAR();
 });
 
-UI.btnArReset?.addEventListener('click', async () => {
-  // Full restart of AR mode (clean state like first run)
-  await restartAR();
+UI.btnArReset?.addEventListener('click', () => {
+  // keep floor if already locked
+  resetAll(true);
+  show(UI.btnArAdd, true);
+  show(UI.btnArOk, false);
+  show(UI.postCloseBar, false);
+  show(UI.finalBar, false);
+  if (state.floorLocked) {
+    state.phase = 'ar_draw';
+    show(UI.scanHint, false);
+  } else {
+    state.phase = 'ar_scan';
+    show(UI.scanHint, true);
+  }
 });
 
 UI.btnArAdd?.addEventListener('click', () => {
@@ -1297,38 +1291,44 @@ UI.btnArOk?.addEventListener('click', () => {
 });
 
 UI.btnEditShape?.addEventListener('click', () => {
-  show(UI.finalColors, false);
-  updateArBottomStripVar();
   // return to drawing mode, keep points
+  show(UI.finalColors, false);
+  if (typeof updateArBottomStripVar === 'function') updateArBottomStripVar();
+
   state.closed = false;
   state.phase = 'ar_draw';
   // In the reference app, changing the outer shape resets any existing cutouts.
   state.holes = [];
   state.holePoints = [];
+
   show(UI.postCloseBar, false);
   show(UI.btnArAdd, true);
   show(UI.btnArOk, state.points.length >= 3);
-  show(UI.arBottomCenter, false);
-  show(UI.btnArAdd, false);
-  show(UI.btnArOk, false);
+  show(UI.arBottomCenter, true);
+
   rebuildMarkersAndLine(false);
+  // restore guides (they may be hidden after "Готово")
+  pointsGroup.visible = true;
+  if (line) line.visible = true;
+  if (UI.measureLayer) UI.measureLayer.style.display = 'block';
+
   if (fillMesh) { anchorGroup.remove(fillMesh); fillMesh.geometry.dispose(); fillMesh = null; }
   clearMeasureLabels();
   updateAreaUI();
 });
 
 UI.btnCutout?.addEventListener('click', () => {
-  show(UI.finalColors, false);
-  updateArBottomStripVar();
   // cutout mode
+  show(UI.finalColors, false);
+  if (typeof updateArBottomStripVar === 'function') updateArBottomStripVar();
+
   state.phase = 'ar_cut';
   state.holePoints = [];
+
   show(UI.postCloseBar, false);
   show(UI.btnArAdd, true);
   show(UI.btnArOk, false);
-  show(UI.arBottomCenter, false);
-  show(UI.btnArAdd, false);
-  show(UI.btnArOk, false);
+  show(UI.arBottomCenter, true);
 
   // show hint
   UI.scanHint.querySelector('.scanTitle').textContent = 'СДЕЛАЙТЕ ВЫРЕЗ';
@@ -1336,11 +1336,10 @@ UI.btnCutout?.addEventListener('click', () => {
   show(UI.scanHint, true);
 
   rebuildMarkersAndLine(true);
+  // restore guides
   pointsGroup.visible = true;
   if (line) line.visible = true;
   if (UI.measureLayer) UI.measureLayer.style.display = 'block';
-  show(UI.finalColors, false);
-  updateArBottomStripVar();
 });
 
 UI.btnDone?.addEventListener('click', () => {
