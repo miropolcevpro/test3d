@@ -67,7 +67,7 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   position:relative;
   height:0;
   padding-bottom:125%; /* 4:5 карточка */
-  border-radius:18px;
+  border-radius:5px;
   overflow:hidden;
   border:1px solid rgba(255,255,255,0.12);
   background:#222;
@@ -87,7 +87,7 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   text-shadow:0 8px 24px rgba(0,0,0,0.55);
   line-height:1.05;
 }
-.catalogCardTitle--small{font-size:15px;}
+.catalogCardTitle--small{opacity:0; pointer-events:none; font-size:15px;}
 
 .bottomNav{
   position:fixed;left:0;right:0;bottom:0;
@@ -124,7 +124,7 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
 .detailRow{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px;}
 .detailName{font-size:34px;font-weight:900;line-height:1.05;}
 .detailSub{margin-top:6px;font-weight:800;color:#111;opacity:0.65;white-space:nowrap;}
-.card{background:#f4f6f8;border-radius:18px;padding:14px 14px 10px;border:1px solid rgba(0,0,0,0.05);}
+.card{background:#f4f6f8;border-radius:5px;padding:14px 14px 10px;border:1px solid rgba(0,0,0,0.05);}
 .cardTitle{font-weight:800;margin-bottom:10px;display:flex;align-items:center;gap:8px;}
 .kv{display:grid;grid-template-columns:1fr 1fr;gap:8px 14px;font-size:14px;}
 .kv div{display:flex;justify-content:space-between;gap:10px;}
