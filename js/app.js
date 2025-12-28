@@ -478,9 +478,21 @@ function openDetail(shapeId) {
     'Класс': '—',
   };
   for (const [k, v] of Object.entries(tech)) {
+    const key = String(k);
+    const val = String(v);
+
+    // Толщина выводим одной строкой слева: "Толщина - 60мм" (как в OZON)
+    if (/^\s*Толщина/.test(key)) {
+      const row = document.createElement('div');
+      row.className = 'kvRow kvRowFull';
+      row.innerHTML = `<div class="kvFull">${key.replace(/\s*,\s*мм\s*$/i,'')} - ${val.replace(/\s*мм\s*$/i,'')}мм</div>`;
+      UI.detailTech.appendChild(row);
+      continue;
+    }
+
     const row = document.createElement('div');
     row.className = 'kvRow';
-    row.innerHTML = `<div class="kvK">${k}</div><div class="kvV">${v}</div>`;
+    row.innerHTML = `<div class="kvK">${key}</div><div class="kvV">${val}</div>`;
     UI.detailTech.appendChild(row);
   }
   if (UI.techBody) UI.techBody.hidden = true;

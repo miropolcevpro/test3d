@@ -119,8 +119,9 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   color:#0a0c10;
 }
 .detailTopTitle{flex:1;font-weight:800;font-size:18px;opacity:0.9;}
+.detailScroll{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;}
 .detailHero{height:240px;background:#ddd;background-position:center;background-size:cover;}
-.detailBody{flex:1;overflow:auto;background:#fff;color:#0a0c10;padding:16px 14px 110px;}
+.detailBody{flex:none;overflow:visible;background:#fff;color:#0a0c10;padding:16px 14px 110px;}
 .detailRow{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px;}
 .detailName{font-size:34px;font-weight:900;line-height:1.05;}
 .detailSub{margin-top:6px;font-weight:800;color:#111;opacity:0.65;white-space:nowrap;}
@@ -130,6 +131,8 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
 .kvRow{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;}
 .kvK{font-weight:700;opacity:.85;min-width:120px;}
 .kvV{font-weight:800;text-align:right;word-break:break-word;}
+.kvRowFull{justify-content:flex-start;}
+.kvFull{width:100%;text-align:left;font-weight:800;word-break:break-word;}
 .kv b{font-weight:800;}
 .sectionTitle{margin:18px 2px 10px;font-weight:900;font-size:20px;}
 .layoutRow{display:flex;gap:10px;overflow:auto;padding-bottom:6px;}
