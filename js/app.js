@@ -132,15 +132,16 @@ const state = {
   reticleVisible: false,
   snapArmed: false,
 
+  // edit shape drag
+  editMode: false,
+  dragging: false,
+  dragPointIndex: -1,
+  dragPointerId: -1,
+
   points: /** @type {THREE.Vector3[]} */ ([]),
   holes: /** @type {THREE.Vector3[][]} */ ([]),
   holePoints: /** @type {THREE.Vector3[]} */ ([]),
   closed: false,
-
-  // edit shape mode (drag existing points)
-  editMode: false,
-  dragPointIndex: -1,
-  dragPointerId: null,
 };
 
 const SNAP_DIST_M = 0.10;
@@ -231,6 +232,185 @@ const maskMaterial = new THREE.MeshBasicMaterial({
   opacity: 0.30,
   depthWrite: false,
 });
+
+// ------------------------
+// Marker/line visuals (OZON-like "flags" + thicker segments)
+// ------------------------
+const FLAG_POLE_H = 0.12;
+const FLAG_BASE_R = 0.022;
+const FLAG_HIT_R  = 0.055;
+const LINE_RADIUS = 0.006; // ~6mm world thickness for visibility outdoors
+
+const _flagTexCache = new Map();
+function _hex6(v){ return (v >>> 0).toString(16).padStart(6,'0'); }
+
+function makeFlagTexture(colorHex){
+  const key = _hex6(colorHex);
+  if (_flagTexCache.has(key)) return _flagTexCache.get(key);
+
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 128;
+  const ctx = c.getContext('2d');
+
+  ctx.clearRect(0,0,128,128);
+
+  // white outer
+  ctx.fillStyle = 'rgba(255,255,255,1)';
+  ctx.beginPath();
+  ctx.moveTo(18, 28);
+  ctx.lineTo(112, 52);
+  ctx.lineTo(18, 76);
+  ctx.closePath();
+  ctx.fill();
+
+  // colored inner
+  ctx.fillStyle = `#${key}`;
+  ctx.beginPath();
+  ctx.moveTo(24, 34);
+  ctx.lineTo(104, 52);
+  ctx.lineTo(24, 70);
+  ctx.closePath();
+  ctx.fill();
+
+  // little "pole hole" circle
+  ctx.fillStyle = 'rgba(255,255,255,0.95)';
+  ctx.beginPath();
+  ctx.arc(20, 52, 6, 0, Math.PI * 2);
+  ctx.fill();
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.needsUpdate = true;
+  _flagTexCache.set(key, tex);
+  return tex;
+}
+
+function createFlagMarker(colorHex, pointIndex, kind = 'outer', isFirst = false){
+  const g = new THREE.Group();
+  g.name = kind === 'hole' ? 'holeFlag' : 'outerFlag';
+
+  // pole
+  const poleGeo = new THREE.CylinderGeometry(0.004, 0.004, FLAG_POLE_H, 10);
+  const poleMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const pole = new THREE.Mesh(poleGeo, poleMat);
+  pole.position.y = FLAG_POLE_H / 2;
+  g.add(pole);
+
+  // base disc
+  const baseGeo = new THREE.CircleGeometry(FLAG_BASE_R, 24).rotateX(-Math.PI / 2);
+  const baseMat = new THREE.MeshBasicMaterial({
+    color: isFirst ? 0x2f6cff : 0xffffff,
+    transparent: true,
+    opacity: 0.9
+  });
+  const base = new THREE.Mesh(baseGeo, baseMat);
+  base.position.y = 0.002;
+  g.add(base);
+
+  // flag sprite
+  const tex = makeFlagTexture(colorHex);
+  const sprMat = new THREE.SpriteMaterial({ map: tex, transparent: true });
+  const spr = new THREE.Sprite(sprMat);
+  spr.scale.set(0.10, 0.10, 1);
+  spr.position.y = FLAG_POLE_H - 0.01;
+  g.add(spr);
+
+  // invisible hit collider (must be visible=true so raycaster can hit it)
+  const hitGeo = new THREE.SphereGeometry(FLAG_HIT_R, 10, 8);
+  const hitMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.0, depthWrite: false });
+  const hit = new THREE.Mesh(hitGeo, hitMat);
+  hit.position.y = FLAG_POLE_H * 0.55;
+  hit.userData.draggable = true;
+  hit.userData.pointIndex = pointIndex;
+  hit.userData.kind = kind;
+  g.add(hit);
+
+  g.userData.pointIndex = pointIndex;
+  g.userData.kind = kind;
+  g.userData._base = base;
+  g.userData._sprite = spr;
+  g.userData._hit = hit;
+
+  return g;
+}
+
+function setMarkerSelected(markerGroup, selected){
+  if (!markerGroup || !markerGroup.userData) return;
+  const spr = markerGroup.userData._sprite;
+  const base = markerGroup.userData._base;
+  if (spr) spr.scale.set(selected ? 0.135 : 0.10, selected ? 0.135 : 0.10, 1);
+  if (base && base.material) base.material.opacity = selected ? 1.0 : 0.9;
+}
+
+function disposeObject3D(obj){
+  if (!obj) return;
+  obj.traverse((c) => {
+    if (c.geometry) c.geometry.dispose();
+    if (c.material) {
+      if (Array.isArray(c.material)) c.material.forEach(m => m.dispose());
+      else c.material.dispose();
+    }
+  });
+}
+
+function makeThickSegment(a, b, color = 0xffffff, opacity = 0.85){
+  const dir = new THREE.Vector3().subVectors(b, a);
+  const len = dir.length();
+  if (len < 1e-6) return null;
+
+  const geom = new THREE.CylinderGeometry(LINE_RADIUS, LINE_RADIUS, len, 10);
+  const mat  = new THREE.MeshBasicMaterial({ color, transparent: true, opacity });
+  const mesh = new THREE.Mesh(geom, mat);
+
+  mesh.position.copy(a).add(b).multiplyScalar(0.5);
+  const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
+  mesh.quaternion.copy(q);
+  return mesh;
+}
+
+const _raycaster = new THREE.Raycaster();
+const _ndc = new THREE.Vector2();
+
+function getHitTargets(){
+  const targets = [];
+  pointsGroup.traverse((o) => {
+    if (o.userData && o.userData.draggable) targets.push(o);
+  });
+  return targets;
+}
+
+function intersectFloorFromPointer(clientX, clientY){
+  const rect = renderer.domElement.getBoundingClientRect();
+  const x = ((clientX - rect.left) / rect.width) * 2 - 1;
+  const y = -((clientY - rect.top) / rect.height) * 2 + 1;
+  _ndc.set(x, y);
+
+  const xrCam = renderer.xr.getCamera(camera);
+  _raycaster.setFromCamera(_ndc, xrCam);
+  const ray = _raycaster.ray;
+
+  const denom = ray.direction.y;
+  if (Math.abs(denom) < 1e-5) return null;
+  const t = (state.floorY - ray.origin.y) / denom;
+  if (t < 0) return null;
+
+  const p = ray.origin.clone().add(ray.direction.clone().multiplyScalar(t));
+  p.y = state.floorY;
+  return p;
+}
+
+let _editRebuildQueued = false;
+function queueEditRebuild(){
+  if (_editRebuildQueued) return;
+  _editRebuildQueued = true;
+  requestAnimationFrame(() => {
+    _editRebuildQueued = false;
+    // keep closed visuals while editing
+    rebuildMarkersAndLine(true);
+    rebuildFill();
+    updateAreaUI();
+  });
+}
 
 function makeTileMaterial(texture) {
   texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
@@ -894,20 +1074,21 @@ function resetAll(keepFloor = false) {
 // ------------------------
 // Markers / line / fill
 // ------------------------
+
 function rebuildMarkersAndLine(closed = false) {
   pointsGroup.clear();
 
-  const markerMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-  const markerGeo = new THREE.SphereGeometry(0.018, 18, 12);
-
+  // Outer points -> flags
   const allOuter = state.points;
   allOuter.forEach((p, i) => {
-    const m = new THREE.Mesh(markerGeo, markerMat);
-    m.userData.pointIndex = i;
-    m.name = 'outerPoint';
-    m.position.copy(p);
-    m.position.y += 0.002;
-    pointsGroup.add(m);
+    const flag = createFlagMarker(0x2f6cff, i, 'outer', i === 0);
+    flag.position.copy(p);
+    flag.position.y = state.floorY;
+
+    // selection highlight while editing
+    if (state.editMode && state.dragPointIndex === i) setMarkerSelected(flag, true);
+
+    pointsGroup.add(flag);
 
     if (i === 0) {
       const ring = new THREE.Mesh(
@@ -916,19 +1097,19 @@ function rebuildMarkersAndLine(closed = false) {
       );
       ring.name = 'firstRing';
       ring.position.copy(p);
-      ring.position.y += 0.001;
+      ring.position.y = state.floorY + 0.001;
       pointsGroup.add(ring);
     }
   });
 
-  // Hole markers (in cut mode)
-  if (state.phase === 'ar_cut') {
-    const holeMat = new THREE.MeshBasicMaterial({ color: 0x5aa7ff });
+  // Hole points (when cutting)
+  if (state.holePoints && state.holePoints.length) {
     state.holePoints.forEach((p, i) => {
-      const m = new THREE.Mesh(markerGeo, holeMat);
-      m.position.copy(p);
-      m.position.y += 0.002;
-      pointsGroup.add(m);
+      const flag = createFlagMarker(0x5aa7ff, i, 'hole', i === 0);
+      flag.position.copy(p);
+      flag.position.y = state.floorY;
+      pointsGroup.add(flag);
+
       if (i === 0) {
         const ring = new THREE.Mesh(
           new THREE.RingGeometry(0.028, 0.038, 22).rotateX(-Math.PI / 2),
@@ -936,17 +1117,16 @@ function rebuildMarkersAndLine(closed = false) {
         );
         ring.name = 'holeFirstRing';
         ring.position.copy(p);
-        ring.position.y += 0.001;
+        ring.position.y = state.floorY + 0.001;
         pointsGroup.add(ring);
       }
     });
   }
 
-  // Line
+  // Thick polyline segments (outer contour)
   if (line) {
     anchorGroup.remove(line);
-    line.geometry.dispose();
-    line.material.dispose();
+    disposeObject3D(line);
     line = null;
   }
 
@@ -955,13 +1135,20 @@ function rebuildMarkersAndLine(closed = false) {
     const drawPts = pts.slice();
     if (closed) drawPts.push(pts[0].clone());
 
-    const geom = new THREE.BufferGeometry().setFromPoints(drawPts.map(v => new THREE.Vector3(v.x, v.y + 0.001, v.z)));
-    const mat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.75 });
-    line = new THREE.Line(geom, mat);
+    const g = new THREE.Group();
+    g.name = 'thickLine';
+
+    for (let i = 0; i < drawPts.length - 1; i++) {
+      const a = new THREE.Vector3(drawPts[i].x, state.floorY + 0.004, drawPts[i].z);
+      const b = new THREE.Vector3(drawPts[i+1].x, state.floorY + 0.004, drawPts[i+1].z);
+      const seg = makeThickSegment(a, b, 0xffffff, 0.85);
+      if (seg) g.add(seg);
+    }
+
+    line = g;
     anchorGroup.add(line);
   }
 }
-
 function rebuildFill() {
   if (fillMesh) {
     anchorGroup.remove(fillMesh);
@@ -1090,115 +1277,6 @@ function updateAreaUI() {
   // Otherwise show product name + current area (as in the reference flow)
   if (UI.arProductTitle && state.selectedTile) UI.arProductTitle.textContent = state.selectedTile.name;
   UI.arArea.textContent = state.closed ? fmtArea(computeAreaM2()) : areaText;
-}
-
-// ------------------------
-// Edit shape (drag points) helpers
-// ------------------------
-const __raycaster = new THREE.Raycaster();
-const __ndc = new THREE.Vector2();
-let __editHintTimer = null;
-let __rebuildScheduled = false;
-
-function getActiveCameraForScreenRay() {
-  if (state.xrSession) {
-    const xrCam = renderer.xr.getCamera(camera);
-    return (xrCam.cameras && xrCam.cameras.length) ? xrCam.cameras[0] : xrCam;
-  }
-  return camera;
-}
-
-function isUiElement(target) {
-  if (!target) return false;
-  return !!target.closest('button, #postCloseBar, #finalBar, #detailBottom, .tabBar, .bottomTabs');
-}
-
-function pickOuterPointIndex(clientX, clientY) {
-  const cam = getActiveCameraForScreenRay();
-  const rect = renderer.domElement.getBoundingClientRect();
-  const px = clientX - rect.left;
-  const py = clientY - rect.top;
-  const w = rect.width;
-  const h = rect.height;
-
-  let bestI = -1;
-  let bestD = 1e9;
-
-  for (let i = 0; i < state.points.length; i++) {
-    const v = state.points[i].clone();
-    v.project(cam);
-    const sx = (v.x * 0.5 + 0.5) * w;
-    const sy = (-v.y * 0.5 + 0.5) * h;
-    const d = Math.hypot(sx - px, sy - py);
-    if (d < bestD) { bestD = d; bestI = i; }
-  }
-
-  // hit radius in pixels
-  return (bestD <= 42) ? bestI : -1;
-}
-
-function screenToFloorPoint(clientX, clientY) {
-  if (!state.floorLocked) return null;
-  const cam = getActiveCameraForScreenRay();
-  const rect = renderer.domElement.getBoundingClientRect();
-  const x = (clientX - rect.left) / rect.width;
-  const y = (clientY - rect.top) / rect.height;
-  __ndc.set(x * 2 - 1, -(y * 2 - 1));
-
-  __raycaster.setFromCamera(__ndc, cam);
-  const dir = __raycaster.ray.direction;
-  const ori = __raycaster.ray.origin;
-  if (Math.abs(dir.y) < 1e-5) return null;
-  const t = (state.floorY - ori.y) / dir.y;
-  if (!(t > 0.02 && t < 12.0)) return null;
-  const p = ori.clone().addScaledVector(dir, t);
-  p.y = state.floorY;
-  return p;
-}
-
-function applyEditHighlight() {
-  const idx = state.dragPointIndex;
-  pointsGroup.traverse((obj) => {
-    if (obj && obj.isMesh && obj.name === 'outerPoint' && typeof obj.userData.pointIndex === 'number') {
-      const isActive = (obj.userData.pointIndex === idx);
-      obj.scale.setScalar(isActive ? 1.8 : 1.0);
-      if (obj.material && obj.material.color) obj.material.color.set(isActive ? 0x2f6cff : 0xffffff);
-    }
-  });
-}
-
-function scheduleRebuildAfterEdit() {
-  if (__rebuildScheduled) return;
-  __rebuildScheduled = true;
-  requestAnimationFrame(() => {
-    __rebuildScheduled = false;
-    rebuildMarkersAndLine(true);
-    rebuildFill();
-    updateAreaUI();
-    applyEditHighlight();
-  });
-}
-
-function showEditHint(on) {
-  if (!UI.scanHint) return;
-  const t = UI.scanHint.querySelector('.scanTitle');
-  const s = UI.scanHint.querySelector('.scanText');
-  if (on) {
-    if (t) t.textContent = 'РЕЖИМ РЕДАКТИРОВАНИЯ';
-    if (s) s.textContent = 'Нажмите на флажок и перетаскивайте его по полу. Отпустите палец, чтобы зафиксировать.';
-    show(UI.scanHint, true);
-    if (__editHintTimer) clearTimeout(__editHintTimer);
-    __editHintTimer = setTimeout(() => show(UI.scanHint, false), 4500);
-  } else {
-    if (__editHintTimer) clearTimeout(__editHintTimer);
-    __editHintTimer = null;
-    // restore default scan hint text for later use
-    try {
-      if (t) t.textContent = 'СКАНИРУЙТЕ ПОВЕРХНОСТЬ';
-      if (s) s.textContent = 'Плавно двигайте телефон влево-вправо и направляйте камеру на пол. Разметка работает после фиксации плоскости.';
-    } catch (_) {}
-    show(UI.scanHint, false);
-  }
 }
 
 // ------------------------
@@ -1416,62 +1494,75 @@ UI.overlay?.addEventListener('pointerdown', (e) => {
   state.lastUiTapTs = performance.now();
 }, true);
 
-// Drag existing points in "Изменить форму" mode
-const __editDrag = { active: false };
+// Drag existing flags in "Изменить форму" mode (editMode)
+UI.overlay?.addEventListener('pointerdown', (e) => {
+  if (!state.xrSession || !state.editMode) return;
 
-function endEditDrag() {
-  __editDrag.active = false;
-  state.dragPointerId = null;
-  // allow normal scrolling again
-  try { UI.overlay.style.touchAction = ''; } catch (_) {}
-}
+  // Ignore taps on UI panels/buttons
+  if (e.target && (e.target.closest('button') || e.target.closest('#postCloseBar') || e.target.closest('#finalBar') || e.target.closest('.tabBar') || e.target.closest('.detailBottom'))) {
+    return;
+  }
 
-function onEditPointerDown(e) {
-  if (!state.xrSession) return;
-  if (!state.editMode || state.phase !== 'ar_edit') return;
-  if (!state.floorLocked) return;
-  if (isUiElement(e.target)) return;
+  const targets = getHitTargets();
+  if (!targets.length) return;
 
-  const idx = pickOuterPointIndex(e.clientX, e.clientY);
-  if (idx < 0) return;
+  const rect = renderer.domElement.getBoundingClientRect();
+  const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  const y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  _ndc.set(x, y);
 
+  const xrCam = renderer.xr.getCamera(camera);
+  _raycaster.setFromCamera(_ndc, xrCam);
+
+  const hits = _raycaster.intersectObjects(targets, true);
+  if (!hits.length) return;
+
+  const h = hits[0].object;
+  const idx = h.userData?.pointIndex;
+  if (typeof idx !== 'number' || idx < 0 || idx >= state.points.length) return;
+
+  state.dragging = true;
   state.dragPointIndex = idx;
   state.dragPointerId = e.pointerId;
-  __editDrag.active = true;
-  applyEditHighlight();
 
-  // prevent page scroll while dragging
-  try { UI.overlay.style.touchAction = 'none'; } catch (_) {}
-  try { UI.canvas.setPointerCapture(e.pointerId); } catch (_) {}
+  try { UI.overlay.setPointerCapture(e.pointerId); } catch (_) {}
+  queueEditRebuild();
+
   e.preventDefault();
-}
+}, { passive: false, capture: true });
 
-function onEditPointerMove(e) {
-  if (!__editDrag.active) return;
-  if (!state.editMode || state.phase !== 'ar_edit') return;
+UI.overlay?.addEventListener('pointermove', (e) => {
+  if (!state.xrSession || !state.editMode || !state.dragging) return;
   if (state.dragPointerId !== e.pointerId) return;
-  const idx = state.dragPointIndex;
-  if (!(idx >= 0 && idx < state.points.length)) return;
 
-  const p = screenToFloorPoint(e.clientX, e.clientY);
+  const p = intersectFloorFromPointer(e.clientX, e.clientY);
   if (!p) return;
 
+  const idx = state.dragPointIndex;
+  if (idx < 0 || idx >= state.points.length) return;
+
   state.points[idx].set(p.x, state.floorY, p.z);
-  scheduleRebuildAfterEdit();
+  queueEditRebuild();
+
+  e.preventDefault();
+}, { passive: false, capture: true });
+
+function _endDrag(e){
+  if (!state.xrSession || !state.editMode) return;
+  if (!state.dragging) return;
+  if (state.dragPointerId !== e.pointerId) return;
+
+  state.dragging = false;
+  state.dragPointerId = -1;
+
+  // Keep selection highlighted for a moment after release (optional)
+  queueEditRebuild();
+
   e.preventDefault();
 }
 
-function onEditPointerUp(e) {
-  if (state.dragPointerId !== e.pointerId) return;
-  endEditDrag();
-  state.dragPointIndex = -1;
-  applyEditHighlight();
-}
-
-UI.canvas?.addEventListener('pointerdown', onEditPointerDown, { passive: false });
-UI.canvas?.addEventListener('pointermove', onEditPointerMove, { passive: false });
-UI.canvas?.addEventListener('pointerup', onEditPointerUp, { passive: true });
-UI.canvas?.addEventListener('pointercancel', onEditPointerUp, { passive: true });
+UI.overlay?.addEventListener('pointerup', _endDrag, { passive: false, capture: true });
+UI.overlay?.addEventListener('pointercancel', _endDrag, { passive: false, capture: true });
 
 UI.catalogSearch?.addEventListener('input', () => {
   const q = UI.catalogSearch.value.trim().toLowerCase();
@@ -1506,60 +1597,51 @@ UI.btnArOk?.addEventListener('click', () => {
 });
 
 UI.btnEditShape?.addEventListener('click', () => {
-  if (!state.xrSession) return;
-  if (!state.closed || state.points.length < 3) return;
-
-  // Toggle edit mode: in edit mode user can drag existing points
-  state.editMode = !state.editMode;
-  state.dragPointIndex = -1;
-  state.dragPointerId = null;
-  applyEditHighlight();
-
+  // OZON-like edit mode: drag existing flags to reshape the closed contour
   show(UI.finalColors, false);
   if (typeof updateArBottomStripVar === 'function') updateArBottomStripVar();
 
-  if (state.editMode) {
-    // Changing the outer shape invalidates cutouts, so reset them (as in reference behavior).
-    state.holes = [];
-    state.holePoints = [];
+  state.editMode = true;
+  state.dragging = false;
+  state.dragPointIndex = -1;
+  state.dragPointerId = -1;
 
-    // Keep contour closed and visible (mask stays), but allow dragging points.
-    state.phase = 'ar_edit';
-    show(UI.arBottomCenter, false);
-    show(UI.btnArAdd, false);
-    show(UI.btnArOk, false);
-    show(UI.postCloseBar, true);
-    // Ensure guides are visible (in case we came from final)
-    pointsGroup.visible = true;
-    if (line) line.visible = true;
-    if (UI.measureLayer) UI.measureLayer.style.display = 'block';
-    clearMeasureLabels();
-    rebuildMarkersAndLine(true);
-    rebuildFill();
-    updateAreaUI();
-    showEditHint(true);
-  } else {
-    endEditDrag();
-    // Back to normal mask step
-    state.phase = 'ar_mask';
-    showEditHint(false);
-    rebuildMarkersAndLine(true);
-    rebuildFill();
-    updateAreaUI();
-  }
+  // Stay in closed/mask stage
+  state.closed = true;
+  state.phase = 'ar_mask';
+
+  // In edit mode we don't add points with "+"
+  show(UI.btnArAdd, false);
+  show(UI.btnArOk, false);
+  show(UI.arBottomCenter, false);
+
+  // Keep guides visible while editing
+  pointsGroup.visible = true;
+  if (line) line.visible = true;
+  if (UI.measureLayer) UI.measureLayer.style.display = 'block';
+
+  rebuildMarkersAndLine(true);
+  rebuildFill();
+  updateAreaUI();
+
+  // UI hint
+  try {
+    const t = UI.scanHint?.querySelector('.scanTitle');
+    const s = UI.scanHint?.querySelector('.scanText');
+    if (t) t.textContent = 'РЕЖИМ РЕДАКТИРОВАНИЯ';
+    if (s) s.textContent = 'Нажмите на флажок и перетаскивайте его по полу, чтобы изменить форму. Отпустите — чтобы зафиксировать.';
+    show(UI.scanHint, true);
+    setTimeout(() => { if (state.editMode) show(UI.scanHint, false); }, 4500);
+  } catch (_) {}
 });
 
+
 UI.btnCutout?.addEventListener('click', () => {
-  // leaving edit mode (if any)
-  if (state.editMode) {
-    state.editMode = false;
-    state.dragPointIndex = -1;
-    state.dragPointerId = null;
-    endEditDrag();
-    showEditHint(false);
-    applyEditHighlight();
-  }
   // cutout mode
+  state.editMode = false;
+  state.dragging = false;
+  state.dragPointIndex = -1;
+  state.dragPointerId = -1;
   show(UI.finalColors, false);
   if (typeof updateArBottomStripVar === 'function') updateArBottomStripVar();
 
@@ -1584,15 +1666,10 @@ UI.btnCutout?.addEventListener('click', () => {
 });
 
 UI.btnDone?.addEventListener('click', () => {
-  // leaving edit mode (if any)
-  if (state.editMode) {
-    state.editMode = false;
-    state.dragPointIndex = -1;
-    state.dragPointerId = null;
-    endEditDrag();
-    showEditHint(false);
-    applyEditHighlight();
-  }
+  state.editMode = false;
+  state.dragging = false;
+  state.dragPointIndex = -1;
+  state.dragPointerId = -1;
   state.phase = 'ar_final';
   show(UI.postCloseBar, false);
   show(UI.arBottomCenter, false);
