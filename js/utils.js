@@ -4,6 +4,12 @@ export async function loadTiles() {
   return await res.json();
 }
 
+export async function loadShapes() {
+  const res = await fetch('shapes.json', { cache: 'no-store' });
+  if (!res.ok) throw new Error('Не удалось загрузить shapes.json');
+  return await res.json();
+}
+
 export function clamp(v, lo, hi) {
   if (!isFinite(v)) return lo;
   return Math.min(hi, Math.max(lo, v));

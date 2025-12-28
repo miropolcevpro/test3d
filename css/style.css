@@ -57,26 +57,37 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   color:var(--white);
   outline:none;
 }
-.catalogCards{display:flex;flex-direction:column;gap:14px;padding-bottom:96px;}
+.catalogCards{
+  display:grid;
+  grid-template-columns:repeat(3, minmax(0, 1fr));
+  gap:12px;
+  padding-bottom:96px;
+}
 .catalogCard{
   position:relative;
-  height:120px;
+  height:0;
+  padding-bottom:125%; /* 4:5 карточка */
   border-radius:18px;
   overflow:hidden;
   border:1px solid rgba(255,255,255,0.12);
   background:#222;
+  background-size:cover;
+  background-position:center;
 }
+.catalogCard--square{padding-bottom:125%;}
 .catalogCardBg{position:absolute;inset:0;background-size:cover;background-position:center;filter:saturate(1.05) contrast(1.05);}
 .catalogCardShade{position:absolute;inset:0;background:linear-gradient(to right, rgba(0,0,0,0.55), rgba(0,0,0,0.05));}
 .catalogCardTitle{
-  position:absolute;left:18px;bottom:16px;
+  position:absolute;left:10px;right:10px;bottom:10px;
   font-weight:900;
-  font-size:28px;
-  letter-spacing:1px;
+  font-size:16px;
+  letter-spacing:0.4px;
   text-transform:uppercase;
   color:var(--white);
   text-shadow:0 8px 24px rgba(0,0,0,0.55);
+  line-height:1.05;
 }
+.catalogCardTitle--small{font-size:15px;}
 
 .bottomNav{
   position:fixed;left:0;right:0;bottom:0;
@@ -254,6 +265,6 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
 }
 
 @media (min-width: 820px){
-  .catalogCards{max-width:420px;margin:0 auto;padding-bottom:120px;}
+  .catalogCards{max-width:780px;margin:0 auto;padding-bottom:120px;}
   .detailBody{max-width:520px;margin:0 auto;}
 }

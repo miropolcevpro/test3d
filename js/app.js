@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { loadTiles, clamp } from './utils.js';
+import { loadTiles, loadShapes, clamp } from './utils.js';
 
 // ------------------------
 // UI
@@ -96,6 +96,8 @@ function updateArBottomStripVar() {
 const state = {
   tiles: [],
   selectedTile: null,
+  shapes: [],
+  selectedShape: null,
   layout: 'straight', // straight | diagonal | stagger
 
   // internal guards
@@ -405,44 +407,46 @@ async function selectTile(tileId) {
 }
 
 // ------------------------
-// Catalog + Detail rendering
+// Catalog + Detail rendering (Формы -> деталка формы -> выбор цветов/текстур)
 // ------------------------
 function renderCatalog(list) {
   if (!UI.catalogCards) return;
   UI.catalogCards.innerHTML = '';
-  list.forEach(tile => {
+  list.forEach(shape => {
     const card = document.createElement('button');
     card.type = 'button';
-    card.className = 'catalogCard';
-    card.style.backgroundImage = `url(${tile.preview})`;
+    card.className = 'catalogCard catalogCard--square';
+    card.style.backgroundImage = `url(${shape.icon || shape.hero || ''})`;
 
     const title = document.createElement('div');
-    title.className = 'catalogCardTitle';
-    title.textContent = tile.name.replace(/^Плитка\s+/, '').replace(/«|»/g, '').toUpperCase();
+    title.className = 'catalogCardTitle catalogCardTitle--small';
+    title.textContent = (shape.name || '').toUpperCase();
 
     card.appendChild(title);
-    card.addEventListener('click', () => openDetail(tile.id));
+    card.addEventListener('click', () => openDetail(shape.id));
     UI.catalogCards.appendChild(card);
   });
 }
 
-function openDetail(tileId) {
-  const t = state.tiles.find(x => x.id === tileId);
-  if (!t) return;
+function openDetail(shapeId) {
+  const s = state.shapes.find(x => x.id === shapeId);
+  if (!s) return;
+  state.selectedShape = s;
 
   // Fill UI
-  UI.detailTitle.textContent = 'КАТАЛОГ';
-  UI.detailName.textContent = t.name;
-  UI.detailSub.textContent = `${t.tileSizeM.w.toFixed(2)}×${t.tileSizeM.h.toFixed(2)} м`;
-  UI.detailHero.style.backgroundImage = `url(${t.preview})`;
+  UI.detailTitle.textContent = shape.name;
+  UI.detailName.textContent = s.name;
+  UI.detailSub.textContent = s.subtitle || 'Тротуарная плитка';
+  UI.detailHero.style.backgroundImage = `url(${s.hero || s.icon || ''})`;
 
   // tech
   UI.detailTech.innerHTML = '';
-  const kv = {
-    'Размер': `${t.tileSizeM.w.toFixed(2)}×${t.tileSizeM.h.toFixed(2)} м`,
-    'Рекомендовано': (t.recommendedLayouts || []).slice(0, 3).join(', ') || '—',
+  const tech = s.tech || {
+    'Толщина': '—',
+    'Назначение': '—',
+    'Класс': '—',
   };
-  for (const [k, v] of Object.entries(kv)) {
+  for (const [k, v] of Object.entries(tech)) {
     const row = document.createElement('div');
     row.className = 'kvRow';
     row.innerHTML = `<div class="kvK">${k}</div><div class="kvV">${v}</div>`;
@@ -455,10 +459,16 @@ function openDetail(tileId) {
   });
   setLayout(state.layout);
 
-  // Color row (first 8 tiles)
-  renderColorRow(UI.colorRow, state.tiles.slice(0, 8));
+  // Colors for this shape (fallback: first 8 tiles)
+  const allowed = Array.isArray(s.tileIds) && s.tileIds.length
+    ? s.tileIds.map(id => state.tiles.find(t => t.id === id)).filter(Boolean)
+    : state.tiles.slice(0, 8);
+  renderColorRow(UI.colorRow, allowed);
 
-  selectTile(tileId);
+  // Choose default tile for this shape
+  const defaultTile = allowed[0] || state.tiles[0];
+  if (defaultTile) selectTile(defaultTile.id);
+
   setActiveScreen('detail');
   state.phase = 'detail';
 }
@@ -1395,8 +1405,8 @@ UI.overlay?.addEventListener('pointerdown', (e) => {
 
 UI.catalogSearch?.addEventListener('input', () => {
   const q = UI.catalogSearch.value.trim().toLowerCase();
-  if (!q) renderCatalog(state.tiles);
-  else renderCatalog(state.tiles.filter(t => t.name.toLowerCase().includes(q)));
+  if (!q) renderCatalog(state.shapes);
+  else renderCatalog(state.shapes.filter(s => (s.name || '').toLowerCase().includes(q)));
 });
 
 UI.btnDetailBack?.addEventListener('click', () => {
@@ -1523,8 +1533,25 @@ async function init() {
   const data = await loadTiles();
   state.tiles = data.tiles || [];
 
+  // load формы
+  try {
+    const shapesData = await loadShapes();
+    state.shapes = shapesData.shapes || [];
+  } catch (e) {
+    console.warn('shapes.json не найден или повреждён — используем плитки как каталог', e);
+    // fallback: каждая плитка как отдельная "форма"
+    state.shapes = state.tiles.map(t => ({
+      id: String(t.id),
+      name: t.name,
+      icon: t.preview,
+      hero: t.preview,
+      tileIds: [t.id],
+      tech: { 'Размер': `${t.tileSizeM.w.toFixed(2)}×${t.tileSizeM.h.toFixed(2)} м` },
+    }));
+  }
+
   // initial
-  renderCatalog(state.tiles);
+  renderCatalog(state.shapes);
   setActiveScreen('catalog');
   state.phase = 'catalog';
 
