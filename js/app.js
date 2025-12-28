@@ -909,39 +909,57 @@ function createFlagMarker({
   const g = new THREE.Group();
   g.name = 'flagMarker';
 
-  // Небольшой диск на полу
+  // --- Визуал маркера ближе к OZON: ободок + белый центр + короткий шток ---
+  // Лёгкая тень на полу (чтобы было читаемо на светлой поверхности)
+  const shadow = new THREE.Mesh(
+    new THREE.CircleGeometry(0.034, 28).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.18, depthWrite: false })
+  );
+  shadow.position.y = 0.0005;
+  g.add(shadow);
+
+  // Белый центр
   const disk = new THREE.Mesh(
-    new THREE.CircleGeometry(0.018, 20).rotateX(-Math.PI / 2),
+    new THREE.CircleGeometry(0.0165, 28).rotateX(-Math.PI / 2),
     new THREE.MeshBasicMaterial({ color: baseColor })
   );
   disk.position.y = 0.001;
   g.add(disk);
 
-  // Кольцо (используем для первой точки как подсветку)
+  // Синий ободок (всегда присутствует)
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.0188, 0.0285, 40).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({ color: ringColor, transparent: true, opacity: 0.95, depthWrite: false })
+  );
+  ring.name = 'baseRing';
+  ring.position.y = 0.0011;
+  g.add(ring);
+
+  // Дополнительное подсвечивающее кольцо (для первой точки/«магнита»)
   if (withRing) {
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.028, 0.042, 26).rotateX(-Math.PI / 2),
-      new THREE.MeshBasicMaterial({ color: ringColor, transparent: true, opacity: 0.85 })
+    const firstRing = new THREE.Mesh(
+      new THREE.RingGeometry(0.030, 0.052, 44).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: ringColor, transparent: true, opacity: 0.55, depthWrite: false })
     );
-    ring.name = 'firstRing';
-    ring.position.y = 0.001;
-    g.add(ring);
+    firstRing.name = 'firstRing';
+    firstRing.position.y = 0.0012;
+    g.add(firstRing);
   }
 
-  // Короткий "столбик" флажка
+  // Короткий "штырь" (шток) — чуть выше и тоньше, как в референсе
   const pole = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.0035, 0.0035, 0.12, 10),
-    new THREE.MeshBasicMaterial({ color: poleColor })
+    new THREE.CylinderGeometry(0.0024, 0.0024, 0.16, 12),
+    new THREE.MeshBasicMaterial({ color: poleColor, transparent: true, opacity: 0.95 })
   );
-  pole.position.y = 0.06;
+  pole.position.y = 0.08;
   g.add(pole);
 
-  // Маленькая "головка" сверху
+  // Небольшая "головка" сверху
   const top = new THREE.Mesh(
-    new THREE.SphereGeometry(0.008, 14, 10),
-    new THREE.MeshBasicMaterial({ color: poleColor })
+    new THREE.SphereGeometry(0.0065, 16, 12),
+    new THREE.MeshBasicMaterial({ color: poleColor, transparent: true, opacity: 0.95 })
   );
-  top.position.y = 0.12;
+  top.position.y = 0.16;
   g.add(top);
 
   // Большая невидимая hit-зона (на будущее для редактирования)
