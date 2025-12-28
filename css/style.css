@@ -268,3 +268,74 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   .catalogCards{max-width:780px;margin:0 auto;padding-bottom:120px;}
   .detailBody{max-width:520px;margin:0 auto;}
 }
+
+
+/* --- Антика: карусель в шапке страницы формы --- */
+.detailHero{
+  position: relative;
+  overflow: hidden;
+}
+.heroCarousel{
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+.heroTrack{
+  width: 100%;
+  height: 100%;
+  display: flex;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+}
+.heroTrack::-webkit-scrollbar{ display:none; }
+.heroSlide{
+  flex: 0 0 100%;
+  height: 100%;
+  scroll-snap-align: start;
+}
+.heroSlide img{
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.heroDots{
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 10px;
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  pointer-events: none;
+}
+.heroDot{
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.45);
+}
+.heroDot.active{
+  background: rgba(255,255,255,.90);
+}
+
+/* --- Аккордеон "Технические параметры" --- */
+.techToggle{
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0;
+  cursor: pointer;
+}
+.techToggle .chev{
+  opacity: .8;
+  transition: transform .15s ease;
+}
+.techToggle[aria-expanded="true"] .chev{ transform: rotate(180deg); }

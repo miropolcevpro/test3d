@@ -25,6 +25,7 @@ const UI = {
   detailName: document.getElementById('detailName'),
   detailSub: document.getElementById('detailSub'),
   detailTech: document.getElementById('detailTech'),
+  btnTechToggle: document.getElementById('btnTechToggle'),
   layoutRow: document.getElementById('layoutRow'),
   colorRow: document.getElementById('colorRow'),
   btnViewAR: document.getElementById('btnViewAR'),
@@ -390,7 +391,11 @@ async function selectTile(tileId) {
 
   // update detail hero
   if (UI.detailHero) {
+    if (!(state.selectedShape && Array.isArray(state.selectedShape.gallery) && state.selectedShape.gallery.length)) {
+    if (!(state.selectedShape && Array.isArray(state.selectedShape.gallery) && state.selectedShape.gallery.length)) {
     UI.detailHero.style.backgroundImage = `url(${t.preview})`;
+  }
+  }
   }
 
   // update selected in color rows
@@ -432,7 +437,35 @@ function openDetail(shapeId) {
   UI.detailTitle.textContent = s.name;
   UI.detailName.textContent = s.name;
   UI.detailSub.textContent = s.subtitle || 'Тротуарная плитка';
-  UI.detailHero.style.backgroundImage = `url(${s.hero || s.icon || ''})`;
+  // Шапка: либо карусель из фото (если задано), либо одиночное изображение
+  const gallery = Array.isArray(s.gallery) ? s.gallery.filter(Boolean) : [];
+  if (gallery.length > 0) {
+    UI.detailHero.style.backgroundImage = 'none';
+    UI.detailHero.innerHTML = `
+      <div class="heroCarousel">
+        <div class="heroTrack" id="heroTrack">
+          ${gallery.map((src, idx) => `
+            <div class="heroSlide" data-idx="${idx}">
+              <img src="${src}" alt="">
+            </div>`).join('')}
+        </div>
+        <div class="heroDots" id="heroDots">
+          ${gallery.map((_, idx) => `<div class="heroDot ${idx===0?'active':''}" data-idx="${idx}"></div>`).join('')}
+        </div>
+      </div>
+    `;
+    const track = UI.detailHero.querySelector('#heroTrack');
+    const dots = [...UI.detailHero.querySelectorAll('.heroDot')];
+    const activateDot = (i) => dots.forEach((d, di) => d.classList.toggle('active', di===i));
+    track.addEventListener('scroll', () => {
+      const w = track.clientWidth || 1;
+      const idx = Math.round(track.scrollLeft / w);
+      activateDot(Math.max(0, Math.min(dots.length-1, idx)));
+    }, { passive: true });
+  } else {
+    UI.detailHero.innerHTML = '';
+    UI.detailHero.style.backgroundImage = `url(${s.hero || s.icon || ''})`;
+  }
 
   // tech
   UI.detailTech.innerHTML = '';
@@ -447,6 +480,8 @@ function openDetail(shapeId) {
     row.innerHTML = `<div class="kvK">${k}</div><div class="kvV">${v}</div>`;
     UI.detailTech.appendChild(row);
   }
+  UI.detailTech.hidden = true;
+  UI.btnTechToggle?.setAttribute('aria-expanded','false');
 
   // Layout buttons
   UI.layoutRow.querySelectorAll('.layoutCard').forEach(btn => {
@@ -1407,6 +1442,13 @@ UI.catalogSearch?.addEventListener('input', () => {
 UI.btnDetailBack?.addEventListener('click', () => {
   setActiveScreen('catalog');
   state.phase = 'catalog';
+});
+
+// Аккордеон характеристик
+UI.btnTechToggle?.addEventListener('click', () => {
+  const expanded = UI.btnTechToggle.getAttribute('aria-expanded') === 'true';
+  UI.btnTechToggle.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+  if (UI.detailTech) UI.detailTech.hidden = expanded ? true : false;
 });
 
 UI.btnViewAR?.addEventListener('click', async () => {
