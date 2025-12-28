@@ -67,13 +67,16 @@
           <div class="detailSub" id="detailSub">—</div>
         </div>
 
-        <div class="card">
-          <div class="cardTitle">
-          <button id="btnTechToggle" class="techToggle" type="button" aria-expanded="false">
-            Технические параметры <span class="chev">⌄</span>
-          </button>
-        </div>
-        <div class="kv" id="detailTech" hidden></div>
+        
+        <div class="card" id="detailTechCard">
+          <div class="cardTitle techHeader">
+            <div class="techTitle">Технические параметры</div>
+            <button id="btnTechToggle" class="btnSmall" type="button">Показать</button>
+          </div>
+          <div class="techBody" id="techBody" hidden>
+            <button id="btnTechClose" class="techClose" type="button" aria-label="Закрыть">✕</button>
+            <div class="kv" id="detailTech"></div>
+          </div>
         </div>
 
         <div class="sectionTitle">Схемы укладки</div>

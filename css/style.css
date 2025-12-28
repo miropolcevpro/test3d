@@ -341,3 +341,41 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   transition: transform .15s ease;
 }
 .techToggle[aria-expanded="true"] .chev{ transform: rotate(180deg); }
+
+
+/* Tech params toggle */
+.techHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+}
+.techTitle{
+  font-weight:700;
+}
+.btnSmall{
+  background:rgba(0,0,0,0.06);
+  border:none;
+  padding:8px 12px;
+  border-radius:10px;
+  font-weight:600;
+  cursor:pointer;
+}
+.btnSmall:active{ transform:scale(0.98); }
+.techBody{
+  position:relative;
+  padding-top:6px;
+}
+.techClose{
+  position:absolute;
+  top:6px;
+  right:8px;
+  width:30px;
+  height:30px;
+  border-radius:15px;
+  border:none;
+  background:rgba(0,0,0,0.06);
+  font-size:18px;
+  line-height:30px;
+  cursor:pointer;
+}

@@ -480,8 +480,8 @@ function openDetail(shapeId) {
     row.innerHTML = `<div class="kvK">${k}</div><div class="kvV">${v}</div>`;
     UI.detailTech.appendChild(row);
   }
-  UI.detailTech.hidden = true;
-  UI.btnTechToggle?.setAttribute('aria-expanded','false');
+  UI.techBody.hidden = true;
+  UI.btnTechToggle.hidden = false;
 
   // Layout buttons
   UI.layoutRow.querySelectorAll('.layoutCard').forEach(btn => {
@@ -1444,15 +1444,19 @@ UI.btnDetailBack?.addEventListener('click', () => {
   state.phase = 'catalog';
 });
 
-// Аккордеон характеристик
+// Аккордеон характеристик (по умолчанию скрыто)
 UI.btnTechToggle?.addEventListener('click', (e) => {
-  e?.preventDefault?.();
-  const expanded = UI.btnTechToggle.getAttribute('aria-expanded') === 'true';
-  const newExpanded = !expanded;
-  UI.btnTechToggle.setAttribute('aria-expanded', newExpanded ? 'true' : 'false');
-  if (UI.detailTech) UI.detailTech.hidden = !newExpanded;
+  e.preventDefault();
+  if (UI.detailTechCard?.hidden) return;
+  UI.techBody.hidden = false;
+  UI.btnTechToggle.hidden = true;
 });
 
+UI.btnTechClose?.addEventListener('click', (e) => {
+  e.preventDefault();
+  UI.techBody.hidden = true;
+  UI.btnTechToggle.hidden = false;
+});
 UI.btnViewAR?.addEventListener('click', async () => {
   await startAR();
 });
