@@ -1445,10 +1445,12 @@ UI.btnDetailBack?.addEventListener('click', () => {
 });
 
 // Аккордеон характеристик
-UI.btnTechToggle?.addEventListener('click', () => {
+UI.btnTechToggle?.addEventListener('click', (e) => {
+  e?.preventDefault?.();
   const expanded = UI.btnTechToggle.getAttribute('aria-expanded') === 'true';
-  UI.btnTechToggle.setAttribute('aria-expanded', expanded ? 'false' : 'true');
-  if (UI.detailTech) UI.detailTech.hidden = expanded ? true : false;
+  const newExpanded = !expanded;
+  UI.btnTechToggle.setAttribute('aria-expanded', newExpanded ? 'true' : 'false');
+  if (UI.detailTech) UI.detailTech.hidden = !newExpanded;
 });
 
 UI.btnViewAR?.addEventListener('click', async () => {
