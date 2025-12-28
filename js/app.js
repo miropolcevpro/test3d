@@ -1587,66 +1587,7 @@ window.addEventListener('resize', () => {
 // ------------------------
 // Main
 // ------------------------
-function initPaletteCarousel() {
-  const viewport = document.getElementById('paletteViewport');
-  const track = document.getElementById('paletteTrack');
-  const prev = document.getElementById('palettePrev');
-  const next = document.getElementById('paletteNext');
-  const dotsWrap = document.getElementById('paletteDots');
-  if (!viewport || !track || !prev || !next || !dotsWrap) return;
-
-  const slides = Array.from(track.children).filter(el => el.classList.contains('carouselSlide'));
-  if (!slides.length) return;
-
-  let index = 0;
-
-  const clamp = (v) => Math.max(0, Math.min(slides.length - 1, v));
-
-  dotsWrap.innerHTML = '';
-  const dots = slides.map((_, i) => {
-    const dot = document.createElement('button');
-    dot.type = 'button';
-    dot.className = 'carouselDot';
-    dot.setAttribute('aria-label', `Слайд ${i + 1}`);
-    dot.addEventListener('click', () => goTo(i, true));
-    dotsWrap.appendChild(dot);
-    return dot;
-  });
-
-  function updateUI() {
-    dots.forEach((d, i) => d.classList.toggle('active', i === index));
-    prev.disabled = index === 0;
-    next.disabled = index === slides.length - 1;
-  }
-
-  function goTo(i, smooth) {
-    index = clamp(i);
-    const left = index * viewport.clientWidth;
-    viewport.scrollTo({ left, behavior: smooth ? 'smooth' : 'auto' });
-    updateUI();
-  }
-
-  function recalcIndexFromScroll() {
-    const w = viewport.clientWidth || 1;
-    index = clamp(Math.round(viewport.scrollLeft / w));
-    updateUI();
-  }
-
-  let scrollTimer = null;
-  viewport.addEventListener('scroll', () => {
-    if (scrollTimer) clearTimeout(scrollTimer);
-    scrollTimer = setTimeout(recalcIndexFromScroll, 80);
-  }, { passive: true });
-
-  prev.addEventListener('click', () => goTo(index - 1, true));
-  next.addEventListener('click', () => goTo(index + 1, true));
-  window.addEventListener('resize', () => goTo(index, false));
-
-  goTo(0, false);
-}
-
 async function init() {
-  initPaletteCarousel();
   const data = await loadTiles();
   state.tiles = data.tiles || [];
 
