@@ -428,21 +428,3 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   box-shadow: 0 6px 18px rgba(0,0,0,0.12);
   scroll-snap-align: start;
 }
-
-
-/* StoneMix palette scroll indicator */
-.stonemixPaletteScrollbar{
-  height: 5px;
-  margin: 8px 8px 0;
-  background: rgba(0,0,0,0.10);
-  border-radius: 999px;
-  overflow: hidden;
-}
-.stonemixPaletteScrollbarThumb{
-  height: 100%;
-  width: 30%;
-  background: rgba(0,0,0,0.35);
-  border-radius: 999px;
-  transform: translateX(0%);
-  transition: width .12s ease, transform .12s ease;
-}
