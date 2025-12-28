@@ -417,12 +417,7 @@ function renderCatalog(list) {
     card.type = 'button';
     card.className = 'catalogCard catalogCard--square';
     card.style.backgroundImage = `url(${shape.icon || shape.hero || ''})`;
-
-    const title = document.createElement('div');
-    title.className = 'catalogCardTitle catalogCardTitle--small';
-    title.textContent = (shape.name || '').toUpperCase();
-
-    card.appendChild(title);
+    card.setAttribute('aria-label', shape.name || shape.id || 'Форма');
     card.addEventListener('click', () => openDetail(shape.id));
     UI.catalogCards.appendChild(card);
   });
@@ -434,7 +429,7 @@ function openDetail(shapeId) {
   state.selectedShape = s;
 
   // Fill UI
-  UI.detailTitle.textContent = shape.name;
+  UI.detailTitle.textContent = s.name;
   UI.detailName.textContent = s.name;
   UI.detailSub.textContent = s.subtitle || 'Тротуарная плитка';
   UI.detailHero.style.backgroundImage = `url(${s.hero || s.icon || ''})`;
