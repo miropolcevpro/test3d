@@ -138,27 +138,6 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
 
 .colorTechGrid{display:flex;flex-direction:column;gap:10px;margin:0 2px 6px;}
 .colorTechImg{width:100%;height:auto;display:block;border-radius: 5px;box-shadow:0 6px 18px rgba(0,0,0,0.06);}
-.stonemixPalette{margin:2px 2px 8px;}
-.subSectionTitle{margin:10px 0 10px;font-weight:900;font-size:18px;}
-.paletteScroller{
-  display:flex;
-  gap:12px;
-  overflow-x:auto;
-  -webkit-overflow-scrolling:touch;
-  padding:2px 2px 6px;
-  scroll-snap-type:x mandatory;
-  scrollbar-width:none;
-}
-.paletteScroller::-webkit-scrollbar{display:none;}
-.paletteCard{flex:0 0 calc((100% - 24px)/3);scroll-snap-align:start;}
-.paletteCard img{
-  width:100%;
-  height:auto;
-  display:block;
-  border-radius:5px;
-  border:1px solid rgba(0,0,0,0.08);
-  box-shadow:0 6px 18px rgba(0,0,0,0.06);
-}
 .layoutRow{display:flex;gap:10px;overflow:auto;padding-bottom:6px;}
 .layoutCard{min-width:120px;border:0;background:transparent;text-align:left;}
 .layoutThumb{height:72px;border-radius:14px;background:#ccc;background-size:cover;background-position:center;border:1px solid rgba(0,0,0,0.08);}
@@ -405,4 +384,65 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   font-size:18px;
   line-height:30px;
   cursor:pointer;
+}
+
+
+/* StoneMix palette (horizontal gallery, 3 items visible) */
+.stonemixPaletteBlock{
+  margin-top: 10px;
+  margin-bottom: 16px;
+}
+
+.stonemixPaletteTitle{
+  font-size: 16px;
+  font-weight: 700;
+  margin: 8px 0 10px;
+  opacity: 0.9;
+}
+
+.stonemixPaletteScroll{
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 2px 10px;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+}
+
+.stonemixPaletteScroll::-webkit-scrollbar{
+  height: 6px;
+}
+.stonemixPaletteScroll::-webkit-scrollbar-thumb{
+  background: rgba(0,0,0,0.18);
+  border-radius: 6px;
+}
+
+.stonemixPaletteItem{
+  flex: 0 0 calc((100% - 20px) / 3); /* 3 cards per viewport (2 gaps) */
+  aspect-ratio: 3 / 4;
+  border-radius: 5px;
+  border: 1px solid rgba(0,0,0,0.10);
+  background-size: cover;
+  background-position: center;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+  scroll-snap-align: start;
+}
+
+
+/* StoneMix palette scroll indicator */
+.stonemixPaletteScrollbar{
+  height: 5px;
+  margin: 8px 8px 0;
+  background: rgba(0,0,0,0.10);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.stonemixPaletteScrollbarThumb{
+  height: 100%;
+  width: 30%;
+  background: rgba(0,0,0,0.35);
+  border-radius: 999px;
+  transform: translateX(0%);
+  transition: width .12s ease, transform .12s ease;
 }
