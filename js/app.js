@@ -847,8 +847,7 @@ function resetAll(keepFloor = false) {
 
   if (line) {
     anchorGroup.remove(line);
-    line.geometry.dispose();
-    line.material.dispose();
+    disposeObject3D(line);
     line = null;
   }
 
@@ -889,70 +888,142 @@ function resetAll(keepFloor = false) {
 // ------------------------
 // Markers / line / fill
 // ------------------------
-function rebuildMarkersAndLine(closed = false) {
-  pointsGroup.clear();
-
-  const markerMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-  const markerGeo = new THREE.SphereGeometry(0.018, 18, 12);
-
-  const allOuter = state.points;
-  allOuter.forEach((p, i) => {
-    const m = new THREE.Mesh(markerGeo, markerMat);
-    m.position.copy(p);
-    m.position.y += 0.002;
-    pointsGroup.add(m);
-
-    if (i === 0) {
-      const ring = new THREE.Mesh(
-        new THREE.RingGeometry(0.03, 0.042, 24).rotateX(-Math.PI / 2),
-        new THREE.MeshBasicMaterial({ color: 0x2f6cff, transparent: true, opacity: 0.85 })
-      );
-      ring.name = 'firstRing';
-      ring.position.copy(p);
-      ring.position.y += 0.001;
-      pointsGroup.add(ring);
+function disposeObject3D(obj) {
+  if (!obj) return;
+  obj.traverse?.((n) => {
+    if (n.geometry) n.geometry.dispose?.();
+    if (n.material) {
+      if (Array.isArray(n.material)) n.material.forEach(m => m.dispose?.());
+      else n.material.dispose?.();
     }
   });
+}
 
-  // Hole markers (in cut mode)
-  if (state.phase === 'ar_cut') {
-    const holeMat = new THREE.MeshBasicMaterial({ color: 0x5aa7ff });
-    state.holePoints.forEach((p, i) => {
-      const m = new THREE.Mesh(markerGeo, holeMat);
-      m.position.copy(p);
-      m.position.y += 0.002;
-      pointsGroup.add(m);
-      if (i === 0) {
-        const ring = new THREE.Mesh(
-          new THREE.RingGeometry(0.028, 0.038, 22).rotateX(-Math.PI / 2),
-          new THREE.MeshBasicMaterial({ color: 0x5aa7ff, transparent: true, opacity: 0.85 })
-        );
-        ring.name = 'holeFirstRing';
-        ring.position.copy(p);
-        ring.position.y += 0.001;
-        pointsGroup.add(ring);
-      }
-    });
+// "Флажок" как в OZON: заметный маркер на полу (с большой hit-зоной)
+function createFlagMarker({
+  baseColor = 0xffffff,
+  ringColor = 0x2f6cff,
+  poleColor = 0xffffff,
+  withRing = false,
+} = {}) {
+  const g = new THREE.Group();
+  g.name = 'flagMarker';
+
+  // Небольшой диск на полу
+  const disk = new THREE.Mesh(
+    new THREE.CircleGeometry(0.018, 20).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({ color: baseColor })
+  );
+  disk.position.y = 0.001;
+  g.add(disk);
+
+  // Кольцо (используем для первой точки как подсветку)
+  if (withRing) {
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.028, 0.042, 26).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: ringColor, transparent: true, opacity: 0.85 })
+    );
+    ring.name = 'firstRing';
+    ring.position.y = 0.001;
+    g.add(ring);
   }
 
-  // Line
+  // Короткий "столбик" флажка
+  const pole = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.0035, 0.0035, 0.12, 10),
+    new THREE.MeshBasicMaterial({ color: poleColor })
+  );
+  pole.position.y = 0.06;
+  g.add(pole);
+
+  // Маленькая "головка" сверху
+  const top = new THREE.Mesh(
+    new THREE.SphereGeometry(0.008, 14, 10),
+    new THREE.MeshBasicMaterial({ color: poleColor })
+  );
+  top.position.y = 0.12;
+  g.add(top);
+
+  // Большая невидимая hit-зона (на будущее для редактирования)
+  const hit = new THREE.Mesh(
+    new THREE.SphereGeometry(0.06, 10, 8),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.0, depthWrite: false })
+  );
+  hit.name = 'hit';
+  hit.position.y = 0.06;
+  g.add(hit);
+
+  return g;
+}
+
+function rebuildThickLine(closed = false) {
+  // Remove previous
   if (line) {
     anchorGroup.remove(line);
-    line.geometry.dispose();
-    line.material.dispose();
+    disposeObject3D(line);
     line = null;
   }
 
   const pts = state.points.slice();
-  if (pts.length >= 2) {
-    const drawPts = pts.slice();
-    if (closed) drawPts.push(pts[0].clone());
+  if (pts.length < 2) return;
 
-    const geom = new THREE.BufferGeometry().setFromPoints(drawPts.map(v => new THREE.Vector3(v.x, v.y + 0.001, v.z)));
-    const mat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.75 });
-    line = new THREE.Line(geom, mat);
-    anchorGroup.add(line);
+  const drawPts = pts.slice();
+  if (closed) drawPts.push(pts[0].clone());
+
+  const group = new THREE.Group();
+  group.name = 'polyLine';
+  const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 });
+  const radius = 0.0045; // толщина линий как в OZON (видно на улице)
+
+  for (let i = 0; i < drawPts.length - 1; i++) {
+    const a = drawPts[i];
+    const b = drawPts[i + 1];
+    const len = distXZ(a, b);
+    if (len < 1e-6) continue;
+
+    const mid = new THREE.Vector3((a.x + b.x) / 2, state.floorY + 0.008, (a.z + b.z) / 2);
+    const cyl = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, len, 10), mat);
+    cyl.position.copy(mid);
+
+    // orient cylinder along segment on XZ
+    const dir = new THREE.Vector3(b.x - a.x, 0, b.z - a.z).normalize();
+    const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+    cyl.quaternion.copy(quat);
+
+    group.add(cyl);
   }
+
+  line = group;
+  anchorGroup.add(line);
+}
+function rebuildMarkersAndLine(closed = false) {
+  pointsGroup.clear();
+
+  // Флажки вместо "точек" — как в референсе OZON
+  const allOuter = state.points;
+  allOuter.forEach((p, i) => {
+    const flag = createFlagMarker({ withRing: i === 0 });
+    flag.position.copy(p);
+    pointsGroup.add(flag);
+  });
+
+  // Hole markers (in cut mode)
+  if (state.phase === 'ar_cut') {
+    state.holePoints.forEach((p, i) => {
+      const flag = createFlagMarker({
+        baseColor: 0x5aa7ff,
+        ringColor: 0x5aa7ff,
+        poleColor: 0xffffff,
+        withRing: i === 0,
+      });
+      flag.name = 'holeFlagMarker';
+      flag.position.copy(p);
+      pointsGroup.add(flag);
+    });
+  }
+
+  // Толстые линии контура (хорошо видно в светлую погоду)
+  rebuildThickLine(closed);
 }
 
 function rebuildFill() {
@@ -1230,7 +1301,11 @@ function updateXR(frame) {
   if (reticle.material?.color) {
     reticle.material.color.setHex(state.snapArmed ? 0x36d399 : 0x2f6cff);
   }
-  const firstRing = pointsGroup.children.find(c => c.name === 'firstRing');
+  // "firstRing" теперь находится внутри флажка (вложенный объект)
+  let firstRing = null;
+  pointsGroup.traverse((o) => {
+    if (!firstRing && o.name === 'firstRing') firstRing = o;
+  });
   if (firstRing?.material?.color) {
     firstRing.material.color.setHex(state.snapArmed ? 0x36d399 : 0x2f6cff);
   }
