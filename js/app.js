@@ -25,7 +25,10 @@ const UI = {
   detailName: document.getElementById('detailName'),
   detailSub: document.getElementById('detailSub'),
   detailTech: document.getElementById('detailTech'),
+  // Antika tech parameters panel
+  techBody: document.getElementById('techBody'),
   btnTechToggle: document.getElementById('btnTechToggle'),
+  btnTechClose: document.getElementById('btnTechClose'),
   layoutRow: document.getElementById('layoutRow'),
   colorRow: document.getElementById('colorRow'),
   btnViewAR: document.getElementById('btnViewAR'),
@@ -480,8 +483,8 @@ function openDetail(shapeId) {
     row.innerHTML = `<div class="kvK">${k}</div><div class="kvV">${v}</div>`;
     UI.detailTech.appendChild(row);
   }
-  UI.techBody.hidden = true;
-  UI.btnTechToggle.hidden = false;
+  if (UI.techBody) UI.techBody.hidden = true;
+  if (UI.btnTechToggle) UI.btnTechToggle.hidden = false;
 
   // Layout buttons
   UI.layoutRow.querySelectorAll('.layoutCard').forEach(btn => {
