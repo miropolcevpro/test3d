@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { loadTiles, loadShapes, clamp } from './utils.js';
+import { loadTiles, loadShapes, loadPalettes, clamp } from './utils.js';
 
 // ------------------------
 // UI
@@ -33,6 +33,11 @@ const UI = {
   colorRow: document.getElementById('colorRow'),
   btnViewAR: document.getElementById('btnViewAR'),
 
+  // Palette galleries (detail screen)
+  paletteStonemix: document.getElementById('paletteStonemix'),
+  paletteColormix: document.getElementById('paletteColormix'),
+  paletteMonotone: document.getElementById('paletteMonotone'),
+
   // AR
   btnArBack: document.getElementById('btnArBack'),
   btnArReset: document.getElementById('btnArReset'),
@@ -56,6 +61,20 @@ const UI = {
   toggleOcclusion: document.getElementById('toggleOcclusion'),
 };
 
+function renderPalette(scrollEl, items, itemClass) {
+  if (!scrollEl) return;
+  scrollEl.innerHTML = '';
+  if (!Array.isArray(items) || items.length === 0) return;
+  for (const it of items) {
+    const div = document.createElement('div');
+    div.className = itemClass;
+    div.setAttribute('role', 'img');
+    div.setAttribute('aria-label', it?.label || '');
+    div.style.backgroundImage = `url('${it?.src || ''}')`;
+    scrollEl.appendChild(div);
+  }
+}
+
 function show(el, on = true) {
   if (!el) return;
   if (on) el.removeAttribute('hidden');
@@ -74,6 +93,42 @@ function setActiveScreen(name) {
     const isActive = k === name;
     el.classList.toggle('screen--active', isActive);
     show(el, isActive);
+  }
+}
+
+// ------------------------
+// Palettes (static galleries inside detail screen)
+// Generated from assets/*_palette by scripts/sync-assets.mjs into assets/palettes.json
+// ------------------------
+function clearChildren(el) {
+  if (!el) return;
+  while (el.firstChild) el.removeChild(el.firstChild);
+}
+
+function renderPaletteScroll(scrollEl, items, itemClass) {
+  if (!scrollEl || !Array.isArray(items)) return;
+  clearChildren(scrollEl);
+  for (const it of items) {
+    const div = document.createElement('div');
+    div.className = itemClass;
+    div.setAttribute('role', 'img');
+    div.setAttribute('aria-label', it?.label || 'Палитра');
+    const src = it?.src;
+    if (src) div.style.backgroundImage = `url('${src}')`;
+    scrollEl.appendChild(div);
+  }
+}
+
+async function initPalettes() {
+  try {
+    const p = await loadPalettes();
+    state.palettes = p;
+    renderPaletteScroll(UI.paletteStonemix, p?.stonemix?.items, 'stonemixPaletteItem');
+    renderPaletteScroll(UI.paletteColormix, p?.colormix?.items, 'colormixPaletteItem');
+    renderPaletteScroll(UI.paletteMonotone, p?.monotone?.items, 'monotonePaletteItem');
+  } catch (e) {
+    // Palettes are optional; if not present we keep whatever is in HTML.
+    console.warn('palettes.json not loaded (optional):', e?.message || e);
   }
 }
 
@@ -102,6 +157,7 @@ const state = {
   selectedTile: null,
   shapes: [],
   selectedShape: null,
+  palettes: null,
   layout: 'straight', // straight | diagonal | stagger
 
   // internal guards
@@ -1590,6 +1646,9 @@ window.addEventListener('resize', () => {
 async function init() {
   const data = await loadTiles();
   state.tiles = data.tiles || [];
+
+  // palettes galleries (optional)
+  await initPalettes();
 
   // load формы
   try {

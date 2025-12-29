@@ -38,28 +38,56 @@ python -m http.server 8080
 
 
 
-## Авто-обновление контента (галерея/шапка/иконки форм)
+## Авто-обновление контента из папки `assets/`
 
-Чтобы при добавлении/замене изображений в архиве/репозитории контент автоматически подтягивался в приложении, используется генерация `shapes.json` из структуры папок.
+Чтобы при добавлении/замене файлов в `assets/` контент автоматически подтягивался в приложении, используется синхронизация JSON-файлов из структуры папок.
+
+Скрипт **обновляет**:
+- `shapes.json` (hero/icon/gallery форм)
+- `tiles.json` (texture/preview плитки)
 
 ### Правила по папкам
 - Шапка формы (hero): `assets/forms/<shapeId>.webp|png|jpg` (или `assets/forms/<shapeId>_hero.*`)
 - Иконка формы (thumb): `assets/forms/<shapeId>_thumb.*` (или `assets/forms/<shapeId>_icon.*`)
 - Галерея формы: `assets/gallery/<shapeId>/*.(webp|png|jpg)` (например `1.webp`, `2.webp`…)
 
-### Как работает
-Скрипт `scripts/sync-content.mjs`:
+### Как работает (формы)
+Скрипт `scripts/sync-assets.mjs`:
 - обновляет `hero/icon/gallery` в `shapes.json` по наличию файлов
 - добавляет `?v=<mtime>` к путям, чтобы не залипал кеш на телефонах
 - если `*_thumb` отсутствует — генерирует `assets/forms/<shapeId>_thumb.webp` из `hero` (в CI используется `sharp`)
 - если появился новый `assets/gallery/<newId>/...` — создаёт новую форму в `shapes.json` (остальные поля можно отредактировать вручную)
 
+### Как работает (плитка)
+Правило простое: всё, что лежит в `assets/textures/`, считается доступной плиткой.
+
+- `assets/textures/<key>.(png|jpg|webp)` — **обязательная** текстура
+- `assets/previews/<key>.(png|jpg|webp)` — **превью** (если не найдено, используется texture)
+
+Скрипт:
+- добавляет новые плитки в `tiles.json` по новым файлам в `assets/textures/`
+- удаляет из `tiles.json` плитки, для которых исчезла текстура
+- **не перезаписывает** поля, которые вы редактируете руками/через админку (`name`, `tileSizeM`, `recommendedLayouts`) — он обновляет только пути `texture/preview`
+
+#### Опционально: метаданные плитки
+Если хотите, чтобы имя/размеры автоматически подхватывались при добавлении новых файлов — можно создать `assets/tiles_meta.json`:
+
+```json
+{
+  "paver_grey": {
+    "name": "Плитка «Серый квадрат»",
+    "tileSizeM": { "w": 0.2, "h": 0.2 },
+    "recommendedLayouts": ["Прямая", "Диагональ 45°", "Вразбежку"]
+  }
+}
+```
+
 ### Локальный запуск
 ```bash
 npm install
-npm run sync:content
+npm run sync:assets
 ```
 
 ### GitHub Actions
-Workflow `.github/workflows/sync-content.yml` запускает синхронизацию на каждый push в `assets/forms/**` или `assets/gallery/**`
-и автоматически коммитит обновлённый `shapes.json` + сгенерированные thumbs.
+Workflow `.github/workflows/sync-content.yml` запускает синхронизацию на каждый push в `assets/**`
+и автоматически коммитит обновлённые `shapes.json` / `tiles.json` + сгенерированные thumbs.

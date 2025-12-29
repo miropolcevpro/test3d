@@ -10,6 +10,14 @@ export async function loadShapes() {
   return await res.json();
 }
 
+// Optional: palettes gallery (stonemix/colormix/monotone) generated from assets/*_palette.
+// If the file is missing, the caller can ignore the error.
+export async function loadPalettes() {
+  const res = await fetch('assets/palettes.json', { cache: 'no-store' });
+  if (!res.ok) throw new Error('Не удалось загрузить assets/palettes.json');
+  return await res.json();
+}
+
 export function clamp(v, lo, hi) {
   if (!isFinite(v)) return lo;
   return Math.min(hi, Math.max(lo, v));
