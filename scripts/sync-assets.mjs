@@ -400,7 +400,17 @@ async function syncPalettes() {
   for (const cfg of configs) {
     const all = listFilesRel(cfg.dirRel);
     // ignore already generated cards to avoid duplicates
-    const sources = sortPaletteFiles(all.filter((rel) => !path.basename(rel, path.extname(rel)).endsWith('_card')));
+    const sources = sortPaletteFiles(
+      all
+        // ignore already generated cards to avoid duplicates
+        .filter((rel) => !path.basename(rel, path.extname(rel)).endsWith('_card'))
+        // ignore temp/system files (e.g. _tmp.webp, .*)
+        .filter((rel) => {
+          const base = path.basename(rel, path.extname(rel));
+          if (base.startsWith('_') || base.startsWith('.')) return false;
+          return true;
+        })
+    );
 
     const items = [];
     for (const srcRel of sources) {

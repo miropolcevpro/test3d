@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2025-12-29T20:47:37.923Z",
+  "generatedAt": "2025-12-29T21:16:23Z",
   "stonemix": {
     "title": "Цветовая гамма Стоунмикс",
     "items": [
@@ -67,10 +67,6 @@
       {
         "src": "assets/stonemix_palette/stonemix_palette_16.webp?v=1767038604000",
         "label": "Коктебель"
-      },
-      {
-        "src": "assets/stonemix_palette/_tmp.webp?v=1767038604000",
-        "label": "tmp"
       }
     ]
   },
