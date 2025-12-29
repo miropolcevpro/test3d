@@ -36,3 +36,30 @@ python -m http.server 8080
 Окклюзия включается, если устройство/браузер отдаёт depth (`frame.getDepthInformation(view)`).
 Реализация — best-effort: сравнение глубины фрагмента заливки с глубиной сцены.
 
+
+
+## Авто-обновление контента (галерея/шапка/иконки форм)
+
+Чтобы при добавлении/замене изображений в архиве/репозитории контент автоматически подтягивался в приложении, используется генерация `shapes.json` из структуры папок.
+
+### Правила по папкам
+- Шапка формы (hero): `assets/forms/<shapeId>.webp|png|jpg` (или `assets/forms/<shapeId>_hero.*`)
+- Иконка формы (thumb): `assets/forms/<shapeId>_thumb.*` (или `assets/forms/<shapeId>_icon.*`)
+- Галерея формы: `assets/gallery/<shapeId>/*.(webp|png|jpg)` (например `1.webp`, `2.webp`…)
+
+### Как работает
+Скрипт `scripts/sync-content.mjs`:
+- обновляет `hero/icon/gallery` в `shapes.json` по наличию файлов
+- добавляет `?v=<mtime>` к путям, чтобы не залипал кеш на телефонах
+- если `*_thumb` отсутствует — генерирует `assets/forms/<shapeId>_thumb.webp` из `hero` (в CI используется `sharp`)
+- если появился новый `assets/gallery/<newId>/...` — создаёт новую форму в `shapes.json` (остальные поля можно отредактировать вручную)
+
+### Локальный запуск
+```bash
+npm install
+npm run sync:content
+```
+
+### GitHub Actions
+Workflow `.github/workflows/sync-content.yml` запускает синхронизацию на каждый push в `assets/forms/**` или `assets/gallery/**`
+и автоматически коммитит обновлённый `shapes.json` + сгенерированные thumbs.

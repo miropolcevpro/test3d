@@ -3,8 +3,8 @@
     {
       "id": "antika",
       "name": "Антика",
-      "icon": "assets/forms/antika_thumb.png",
-      "hero": "assets/forms/antika.png",
+      "icon": "assets/forms/antika_thumb.png?v=1767038604945",
+      "hero": "assets/forms/antika.png?v=1767038604944",
       "description": "Форма «Антика». Выберите цвет/поверхность и перейдите в AR-визуализацию.",
       "tileIds": [
         1,
@@ -20,23 +20,23 @@
         11,
         12
       ],
-    "tech": {
-      "Толщина": "60мм",
-      "Размер, мм": "118х98х95х60 / 108х88х95х60 / 97х77х95х60 / 87х67х95х60 / 76х56х95х60",
-      "Количество м² на поддоне": "10.2",
-      "Вес поддона, кг": "1400"
-    },
+      "tech": {
+        "Толщина": "60мм",
+        "Размер, мм": "118х98х95х60 / 108х88х95х60 / 97х77х95х60 / 87х67х95х60 / 76х56х95х60",
+        "Количество м² на поддоне": "10.2",
+        "Вес поддона, кг": "1400"
+      },
       "gallery": [
-        "assets/gallery/antika/1.webp",
-        "assets/gallery/antika/2.webp",
-        "assets/gallery/antika/3.webp"
+        "assets/gallery/antika/1.webp?v=1767038605035",
+        "assets/gallery/antika/2.webp?v=1767038605036",
+        "assets/gallery/antika/3.webp?v=1767038605039"
       ]
     },
     {
       "id": "bruschatka",
       "name": "Брусчатка",
-      "icon": "assets/forms/bruschatka_thumb.png",
-      "hero": "assets/forms/bruschatka.png",
+      "icon": "assets/forms/bruschatka_thumb.png?v=1767038604957",
+      "hero": "assets/forms/bruschatka.png?v=1767038604956",
       "description": "Форма «Брусчатка». Выберите цвет/поверхность и перейдите в AR-визуализацию.",
       "tileIds": [
         1,
@@ -61,8 +61,8 @@
     {
       "id": "klassika",
       "name": "Классика",
-      "icon": "assets/forms/klassika_thumb.png",
-      "hero": "assets/forms/klassika.png",
+      "icon": "assets/forms/klassika_thumb.png?v=1767038604962",
+      "hero": "assets/forms/klassika.png?v=1767038604960",
       "description": "Форма «Классика». Выберите цвет/поверхность и перейдите в AR-визуализацию.",
       "tileIds": [
         1,
@@ -87,8 +87,8 @@
     {
       "id": "poligonal",
       "name": "Полигональ",
-      "icon": "assets/forms/poligonal_thumb.png",
-      "hero": "assets/forms/poligonal.png",
+      "icon": "assets/forms/poligonal_thumb.png?v=1767038604992",
+      "hero": "assets/forms/poligonal.png?v=1767038604970",
       "description": "Форма «Полигональ». Выберите цвет/поверхность и перейдите в AR-визуализацию.",
       "tileIds": [
         1,
@@ -113,8 +113,8 @@
     {
       "id": "promenad2",
       "name": "Променад II",
-      "icon": "assets/forms/promenad2_thumb.png",
-      "hero": "assets/forms/promenad2.png",
+      "icon": "assets/forms/promenad2_thumb.png?v=1767038604996",
+      "hero": "assets/forms/promenad2.png?v=1767038604995",
       "description": "Форма «Променад II». Выберите цвет/поверхность и перейдите в AR-визуализацию.",
       "tileIds": [
         1,
@@ -139,8 +139,8 @@
     {
       "id": "new_gorod",
       "name": "Новый город",
-      "icon": "assets/forms/new_gorod_thumb.png",
-      "hero": "assets/forms/new_gorod.png",
+      "icon": "assets/forms/new_gorod_thumb.png?v=1767038605001",
+      "hero": "assets/forms/new_gorod.png?v=1767038604999",
       "description": "Форма «Новый город». Выберите цвет/поверхность и перейдите в AR-визуализацию.",
       "tileIds": [
         1,
@@ -165,8 +165,8 @@
     {
       "id": "old_gorod",
       "name": "Старый город",
-      "icon": "assets/forms/old_gorod_thumb.png",
-      "hero": "assets/forms/old_gorod.png",
+      "icon": "assets/forms/old_gorod_thumb.png?v=1767038605005",
+      "hero": "assets/forms/old_gorod.png?v=1767038605004",
       "description": "Форма «Старый город». Выберите цвет/поверхность и перейдите в AR-визуализацию.",
       "tileIds": [
         1,
@@ -191,8 +191,8 @@
     {
       "id": "rigel",
       "name": "Ригель",
-      "icon": "assets/forms/rigel_thumb.png",
-      "hero": "assets/forms/rigel.png",
+      "icon": "assets/forms/rigel_thumb.png?v=1767038605008",
+      "hero": "assets/forms/rigel.png?v=1767038605007",
       "description": "Форма «Ригель». Выберите цвет/поверхность и перейдите в AR-визуализацию.",
       "tileIds": [
         1,
@@ -217,8 +217,8 @@
     {
       "id": "paladio",
       "name": "Паладио",
-      "icon": "assets/forms/paladio_thumb.png",
-      "hero": "assets/forms/paladio.png",
+      "icon": "assets/forms/paladio_thumb.png?v=1767038605011",
+      "hero": "assets/forms/paladio.png?v=1767038605010",
       "description": "Форма «Паладио». Выберите цвет/поверхность и перейдите в AR-визуализацию.",
       "tileIds": [
         1,
@@ -243,8 +243,8 @@
     {
       "id": "gazonnaya_reshetka",
       "name": "Газонная решетка",
-      "icon": "assets/forms/gazonnaya_reshetka_thumb.png",
-      "hero": "assets/forms/gazonnaya_reshetka.png",
+      "icon": "assets/forms/gazonnaya_reshetka_thumb.png?v=1767038605015",
+      "hero": "assets/forms/gazonnaya_reshetka.png?v=1767038605014",
       "description": "Форма «Газонная решетка». Выберите цвет/поверхность и перейдите в AR-визуализацию.",
       "tileIds": [
         1,
@@ -269,8 +269,8 @@
     {
       "id": "megapolis",
       "name": "Мегаполис",
-      "icon": "assets/forms/megapolis_thumb.png",
-      "hero": "assets/forms/megapolis.png",
+      "icon": "assets/forms/megapolis_thumb.png?v=1767038605018",
+      "hero": "assets/forms/megapolis.png?v=1767038605017",
       "description": "Форма «Мегаполис». Выберите цвет/поверхность и перейдите в AR-визуализацию.",
       "tileIds": [
         1,
@@ -295,8 +295,8 @@
     {
       "id": "promenad1",
       "name": "Променад I",
-      "icon": "assets/forms/promenad1_thumb.png",
-      "hero": "assets/forms/promenad1.png",
+      "icon": "assets/forms/promenad1_thumb.png?v=1767038605033",
+      "hero": "assets/forms/promenad1.png?v=1767038605031",
       "description": "Форма «Променад I». Выберите цвет/поверхность и перейдите в AR-визуализацию.",
       "tileIds": [
         1,
