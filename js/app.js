@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { loadTiles, loadShapes, clamp } from './utils.js';
+import { loadTiles, loadShapes, clamp, initAutoTechPalettes, discoverShapeHeroGallery, withBust } from './utils.js';
 
 // ------------------------
 // UI
@@ -394,11 +394,10 @@ async function selectTile(tileId) {
 
   // update detail hero
   if (UI.detailHero) {
-    if (!(state.selectedShape && Array.isArray(state.selectedShape.gallery) && state.selectedShape.gallery.length)) {
-    if (!(state.selectedShape && Array.isArray(state.selectedShape.gallery) && state.selectedShape.gallery.length)) {
-    UI.detailHero.style.backgroundImage = `url(${t.preview})`;
-  }
-  }
+    const hasHeroGallery = !!(state.selectedShape && Array.isArray(state.selectedShape.gallery) && state.selectedShape.gallery.length);
+    if (!hasHeroGallery) {
+      UI.detailHero.style.backgroundImage = `url(${withBust(t.preview)})`;
+    }
   }
 
   // update selected in color rows
@@ -431,7 +430,7 @@ function renderCatalog(list) {
   });
 }
 
-function openDetail(shapeId) {
+async function openDetail(shapeId) {
   const s = state.shapes.find(x => x.id === shapeId);
   if (!s) return;
   state.selectedShape = s;
@@ -440,8 +439,17 @@ function openDetail(shapeId) {
   UI.detailTitle.textContent = s.name;
   UI.detailName.textContent = s.name;
   UI.detailSub.textContent = s.subtitle || 'Тротуарная плитка';
-  // Шапка: либо карусель из фото (если задано), либо одиночное изображение
-  const gallery = Array.isArray(s.gallery) ? s.gallery.filter(Boolean) : [];
+  // Шапка: предпочитаем авто-подхват из папки assets/gallery/<shapeId>/
+  // (чтобы новые файлы появлялись без правки shapes.json)
+  let gallery = await discoverShapeHeroGallery(s.id);
+  if (!gallery.length) {
+    gallery = Array.isArray(s.gallery) ? s.gallery.filter(Boolean) : [];
+  }
+  // cache-busting for replaced files
+  gallery = gallery.map((src) => withBust(src));
+  // keep in-memory for subsequent logic (e.g. selectTile)
+  s.gallery = gallery;
+
   if (gallery.length > 0) {
     UI.detailHero.style.backgroundImage = 'none';
     UI.detailHero.innerHTML = `
@@ -467,7 +475,7 @@ function openDetail(shapeId) {
     }, { passive: true });
   } else {
     UI.detailHero.innerHTML = '';
-    UI.detailHero.style.backgroundImage = `url(${s.hero || s.icon || ''})`;
+    UI.detailHero.style.backgroundImage = `url(${withBust(s.hero || s.icon || '')})`;
   }
 
   // tech
@@ -504,10 +512,10 @@ function openDetail(shapeId) {
   });
   setLayout(state.layout);
 
-  // Colors for this shape (fallback: first 8 tiles)
+  // Colors for this shape (fallback: all tiles)
   const allowed = Array.isArray(s.tileIds) && s.tileIds.length
     ? s.tileIds.map(id => state.tiles.find(t => t.id === id)).filter(Boolean)
-    : state.tiles.slice(0, 8);
+    : state.tiles;
   renderColorRow(UI.colorRow, allowed);
 
   // Choose default tile for this shape
@@ -1568,7 +1576,7 @@ UI.btnDone?.addEventListener('click', () => {
   });
   setLayout(state.layout);
 
-  renderColorRow(UI.finalColors, state.tiles.slice(0, 8));
+  renderColorRow(UI.finalColors, state.tiles);
 
   // hide hint
   show(UI.scanHint, false);
@@ -1612,6 +1620,10 @@ async function init() {
   renderCatalog(state.shapes);
   setActiveScreen('catalog');
   state.phase = 'catalog';
+
+  // Auto-fill "Доступно в технологиях" palettes by probing files in folders.
+  // Runs asynchronously and does not block app start.
+  initAutoTechPalettes().catch((e) => console.warn('auto palettes failed', e));
 
   // choose default tile
   const defaultId = state.tiles[0]?.id;
