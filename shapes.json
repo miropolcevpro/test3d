@@ -95,7 +95,8 @@
         "assets/gallery/klassika/2.webp",
         "assets/gallery/klassika/3.webp",
         "assets/gallery/klassika/4.webp"
-      ]
+      ],
+      "surfacePalette": "https://storage.yandexcloud.net/webar3dtexture/palettes/klassika.json"
     },
     {
       "id": "poligonal",
