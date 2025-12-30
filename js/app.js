@@ -3,24 +3,83 @@
 // Helps увидеть новые изображения сразу после загрузки на GitHub Pages,
 // даже если имя файла то же самое.
 // ------------------------------
-const ASSET_VER = (() => {
-  try {
-    const k = 'assetVer';
-    const v = sessionStorage.getItem(k);
-    if (v) return v;
-    const nv = Date.now().toString(36);
-    sessionStorage.setItem(k, nv);
-    return nv;
-  } catch (e) {
-    return Date.now().toString(36);
-  }
-})();
+const ASSET_VER = Date.now().toString(36);
 
 function withAssetVer(url) {
   if (!url || typeof url !== 'string') return url;
   // avoid double v=
   if (url.includes('v=')) return url;
   return url + (url.includes('?') ? '&' : '?') + 'v=' + ASSET_VER;
+}
+
+
+// ------------------------------
+// Palette auto-discovery (fast, low-404)
+// Rebuilds palette carousels from actual existing files on GitHub Pages.
+// Allows you to add/remove palette images by просто добавив файлы в папку.
+// Uses HEAD checks (no console 'Failed to load resource').
+// ------------------------------
+const _paletteCache = new Map(); // key -> Promise<string[]>
+
+async function discoverSequentialAssets(baseDir, filenamePrefix, maxItems = 40) {
+  const key = (baseDir || '') + '|' + (filenamePrefix || '') + '|' + String(maxItems);
+  if (_paletteCache.has(key)) return _paletteCache.get(key);
+
+  const p = (async () => {
+    if (!baseDir || !filenamePrefix) return [];
+    const base = baseDir.endsWith('/') ? baseDir : (baseDir + '/');
+    // determine naming style once: prefer 01.webp, fallback 1.webp
+    const paddedFirst = withAssetVer(base + filenamePrefix + '01.webp');
+    const plainFirst  = withAssetVer(base + filenamePrefix + '1.webp');
+
+    let style = null;
+    if (await _headOk(paddedFirst)) style = 'padded';
+    else if (await _headOk(plainFirst)) style = 'plain';
+    else return [];
+
+    const urls = [];
+    for (let i = 1; i <= maxItems; i++) {
+      const num = style === 'padded' ? String(i).padStart(2, '0') : String(i);
+      const url = withAssetVer(base + filenamePrefix + num + '.webp');
+      if (await _headOk(url)) urls.push(url);
+      else break;
+    }
+    return urls;
+  })();
+
+  _paletteCache.set(key, p);
+  return p;
+}
+
+function rebuildPalette(containerSelector, itemClass, baseDir, filenamePrefix, maxItems = 40) {
+  const el = document.querySelector(containerSelector);
+  if (!el) return;
+  discoverSequentialAssets(baseDir, filenamePrefix, maxItems).then((urls) => {
+    if (!Array.isArray(urls) || !urls.length) return;
+    // replace markup so new files appear automatically
+    el.innerHTML = '';
+    urls.forEach((src, idx) => {
+      const d = document.createElement('div');
+      d.className = itemClass;
+      d.setAttribute('role', 'img');
+      d.setAttribute('aria-label', 'Цвет ' + String(idx + 1).padStart(2, '0'));
+      d.style.backgroundImage = `url('${src}')`;
+      el.appendChild(d);
+    });
+  });
+}
+
+function initPalettesAsync() {
+  const run = () => {
+    rebuildPalette('.stonemixPaletteScroll', 'stonemixPaletteItem', 'assets/stonemix_palette', 'stonemix_palette_', 80);
+    rebuildPalette('.colormixPaletteScroll', 'colormixPaletteItem', 'assets/colormix_palette', 'colormix_palette_', 80);
+    rebuildPalette('.monotonePaletteScroll', 'monotonePaletteItem', 'assets/monotone_palette', 'monotone_palette_', 80);
+  };
+  if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+    window.requestIdleCallback(run, { timeout: 800 });
+  } else {
+    setTimeout(run, 0);
+  }
 }
 
 import * as THREE from 'three';
@@ -499,7 +558,20 @@ async function discoverGallery(shapeId, maxItems = 12) {
   })();
 
   _galleryCache.set(shapeId, p);
-  return p;
+  
+async function filterExistingUrls(urls) {
+  const list = Array.isArray(urls) ? urls.filter(Boolean) : [];
+  if (!list.length) return [];
+  // HEAD-check every url to avoid console 404 and to ignore missing files
+  const checked = [];
+  for (const u of list) {
+    const uu = withAssetVer(u);
+    if (await _headOk(uu)) checked.push(uu);
+  }
+  return checked;
+}
+
+return p;
 }
 
 function setDetailHeroGallery(gallery) {
@@ -550,8 +622,14 @@ function openDetail(shapeId) {
   // Шапка: либо карусель из фото (если задано), либо одиночное изображение
   const gallery = Array.isArray(s.gallery) ? s.gallery.filter(Boolean) : [];
   if (gallery.length > 0) {
-    // используем заданный список (и добавляем cache-bust)
-    setDetailHeroGallery(gallery.map(withAssetVer));
+    // Не спамим 404: сначала показываем hero/иконку, затем тихо фильтруем существующие файлы.
+    UI.detailHero.innerHTML = '';
+    UI.detailHero.style.backgroundImage = `url(${withAssetVer(s.hero || s.icon || 'assets/placeholders/placeholder.webp')})`;
+
+    filterExistingUrls(gallery).then((okList) => {
+      if (!state.selectedShape || state.selectedShape.id !== s.id) return;
+      if (Array.isArray(okList) && okList.length > 0) setDetailHeroGallery(okList);
+    });
   } else {
     UI.detailHero.innerHTML = '';
     UI.detailHero.style.backgroundImage = `url(${withAssetVer(s.hero || s.icon || 'assets/placeholders/placeholder.webp')})`;
