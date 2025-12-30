@@ -1,87 +1,3 @@
-// ------------------------------
-// Asset cache-busting (per session)
-// Helps увидеть новые изображения сразу после загрузки на GitHub Pages,
-// даже если имя файла то же самое.
-// ------------------------------
-const ASSET_VER = Date.now().toString(36);
-
-function withAssetVer(url) {
-  if (!url || typeof url !== 'string') return url;
-  // avoid double v=
-  if (url.includes('v=')) return url;
-  return url + (url.includes('?') ? '&' : '?') + 'v=' + ASSET_VER;
-}
-
-
-// ------------------------------
-// Palette auto-discovery (fast, low-404)
-// Rebuilds palette carousels from actual existing files on GitHub Pages.
-// Allows you to add/remove palette images by просто добавив файлы в папку.
-// Uses HEAD checks (no console 'Failed to load resource').
-// ------------------------------
-const _paletteCache = new Map(); // key -> Promise<string[]>
-
-async function discoverSequentialAssets(baseDir, filenamePrefix, maxItems = 40) {
-  const key = (baseDir || '') + '|' + (filenamePrefix || '') + '|' + String(maxItems);
-  if (_paletteCache.has(key)) return _paletteCache.get(key);
-
-  const p = (async () => {
-    if (!baseDir || !filenamePrefix) return [];
-    const base = baseDir.endsWith('/') ? baseDir : (baseDir + '/');
-    // determine naming style once: prefer 01.webp, fallback 1.webp
-    const paddedFirst = withAssetVer(base + filenamePrefix + '01.webp');
-    const plainFirst  = withAssetVer(base + filenamePrefix + '1.webp');
-
-    let style = null;
-    if (await _headOk(paddedFirst)) style = 'padded';
-    else if (await _headOk(plainFirst)) style = 'plain';
-    else return [];
-
-    const urls = [];
-    for (let i = 1; i <= maxItems; i++) {
-      const num = style === 'padded' ? String(i).padStart(2, '0') : String(i);
-      const url = withAssetVer(base + filenamePrefix + num + '.webp');
-      if (await _headOk(url)) urls.push(url);
-      else break;
-    }
-    return urls;
-  })();
-
-  _paletteCache.set(key, p);
-  return p;
-}
-
-function rebuildPalette(containerSelector, itemClass, baseDir, filenamePrefix, maxItems = 40) {
-  const el = document.querySelector(containerSelector);
-  if (!el) return;
-  discoverSequentialAssets(baseDir, filenamePrefix, maxItems).then((urls) => {
-    if (!Array.isArray(urls) || !urls.length) return;
-    // replace markup so new files appear automatically
-    el.innerHTML = '';
-    urls.forEach((src, idx) => {
-      const d = document.createElement('div');
-      d.className = itemClass;
-      d.setAttribute('role', 'img');
-      d.setAttribute('aria-label', 'Цвет ' + String(idx + 1).padStart(2, '0'));
-      d.style.backgroundImage = `url('${src}')`;
-      el.appendChild(d);
-    });
-  });
-}
-
-function initPalettesAsync() {
-  const run = () => {
-    rebuildPalette('.stonemixPaletteScroll', 'stonemixPaletteItem', 'assets/stonemix_palette', 'stonemix_palette_', 80);
-    rebuildPalette('.colormixPaletteScroll', 'colormixPaletteItem', 'assets/colormix_palette', 'colormix_palette_', 80);
-    rebuildPalette('.monotonePaletteScroll', 'monotonePaletteItem', 'assets/monotone_palette', 'monotone_palette_', 80);
-  };
-  if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-    window.requestIdleCallback(run, { timeout: 800 });
-  } else {
-    setTimeout(run, 0);
-  }
-}
-
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { loadTiles, loadShapes, clamp } from './utils.js';
@@ -515,101 +431,6 @@ function renderCatalog(list) {
   });
 }
 
-
-// ------------------------------
-// Gallery auto-discovery (fast, low-404)
-// If shape.gallery is missing/empty, we try assets/gallery/<shapeId>/01.webp,02.webp...
-// Stop on first miss to avoid dozens of 404 requests that slow down navigation.
-// ------------------------------
-const _galleryCache = new Map(); // shapeId -> Promise<string[]>
-
-async function _headOk(url) {
-  try {
-    const res = await fetch(url, { method: 'HEAD', cache: 'no-store' });
-    return !!res && res.ok;
-  } catch (e) {
-    return false;
-  }
-}
-
-async function discoverGallery(shapeId, maxItems = 12) {
-  if (!shapeId) return [];
-  if (_galleryCache.has(shapeId)) return _galleryCache.get(shapeId);
-
-  const p = (async () => {
-    const base = `assets/gallery/${shapeId}/`;
-    // determine naming style once: prefer 01.webp, fallback 1.webp
-    const paddedFirst = withAssetVer(base + '01.webp');
-    const plainFirst  = withAssetVer(base + '1.webp');
-
-    let style = null;
-    if (await _headOk(paddedFirst)) style = 'padded';
-    else if (await _headOk(plainFirst)) style = 'plain';
-    else return [];
-
-    const urls = [];
-    for (let i = 1; i <= maxItems; i++) {
-      const name = style === 'padded' ? String(i).padStart(2, '0') : String(i);
-      const url = withAssetVer(base + name + '.webp');
-      if (await _headOk(url)) urls.push(url);
-      else break; // stop on first miss to avoid many 404s
-    }
-    return urls;
-  })();
-
-  _galleryCache.set(shapeId, p);
-  
-async function filterExistingUrls(urls) {
-  const list = Array.isArray(urls) ? urls.filter(Boolean) : [];
-  if (!list.length) return [];
-  // HEAD-check every url to avoid console 404 and to ignore missing files
-  const checked = [];
-  for (const u of list) {
-    const uu = withAssetVer(u);
-    if (await _headOk(uu)) checked.push(uu);
-  }
-  return checked;
-}
-
-return p;
-}
-
-function setDetailHeroGallery(gallery) {
-  const safe = Array.isArray(gallery) ? gallery.filter(Boolean) : [];
-  if (!safe.length) return;
-
-  UI.detailHero.style.backgroundImage = 'none';
-  UI.detailHero.innerHTML = `
-    <div class="heroCarousel">
-      <div class="heroTrack" id="heroTrack">
-        ${safe.map((src, idx) => `
-          <div class="heroSlide" data-idx="${idx}">
-            <img src="${src}" alt="">
-          </div>`).join('')}
-      </div>
-      <div class="heroDots" id="heroDots">
-        ${safe.map((_, idx) => `<div class="heroDot ${idx===0?'active':''}" data-idx="${idx}"></div>`).join('')}
-      </div>
-    </div>
-  `;
-
-  const track = UI.detailHero.querySelector('#heroTrack');
-  const dots = [...UI.detailHero.querySelectorAll('.heroDot')];
-  const activateDot = (i) => dots.forEach((d, di) => d.classList.toggle('active', di === i));
-
-  // fallback на placeholder если картинка отсутствует
-  UI.detailHero.querySelectorAll('img').forEach(img => {
-    img.addEventListener('error', () => {
-      img.src = withAssetVer('assets/placeholders/placeholder.webp');
-    }, { once: true });
-  });
-
-  track?.addEventListener('scroll', () => {
-    const w = track.clientWidth || 1;
-    const idx = Math.round((track.scrollLeft || 0) / w);
-    activateDot(Math.max(0, Math.min(dots.length - 1, idx)));
-  }, { passive: true });
-}
 function openDetail(shapeId) {
   const s = state.shapes.find(x => x.id === shapeId);
   if (!s) return;
@@ -622,26 +443,31 @@ function openDetail(shapeId) {
   // Шапка: либо карусель из фото (если задано), либо одиночное изображение
   const gallery = Array.isArray(s.gallery) ? s.gallery.filter(Boolean) : [];
   if (gallery.length > 0) {
-    // Не спамим 404: сначала показываем hero/иконку, затем тихо фильтруем существующие файлы.
-    UI.detailHero.innerHTML = '';
-    UI.detailHero.style.backgroundImage = `url(${withAssetVer(s.hero || s.icon || 'assets/placeholders/placeholder.webp')})`;
-
-    filterExistingUrls(gallery).then((okList) => {
-      if (!state.selectedShape || state.selectedShape.id !== s.id) return;
-      if (Array.isArray(okList) && okList.length > 0) setDetailHeroGallery(okList);
-    });
+    UI.detailHero.style.backgroundImage = 'none';
+    UI.detailHero.innerHTML = `
+      <div class="heroCarousel">
+        <div class="heroTrack" id="heroTrack">
+          ${gallery.map((src, idx) => `
+            <div class="heroSlide" data-idx="${idx}">
+              <img src="${src}" alt="">
+            </div>`).join('')}
+        </div>
+        <div class="heroDots" id="heroDots">
+          ${gallery.map((_, idx) => `<div class="heroDot ${idx===0?'active':''}" data-idx="${idx}"></div>`).join('')}
+        </div>
+      </div>
+    `;
+    const track = UI.detailHero.querySelector('#heroTrack');
+    const dots = [...UI.detailHero.querySelectorAll('.heroDot')];
+    const activateDot = (i) => dots.forEach((d, di) => d.classList.toggle('active', di===i));
+    track.addEventListener('scroll', () => {
+      const w = track.clientWidth || 1;
+      const idx = Math.round(track.scrollLeft / w);
+      activateDot(Math.max(0, Math.min(dots.length-1, idx)));
+    }, { passive: true });
   } else {
     UI.detailHero.innerHTML = '';
-    UI.detailHero.style.backgroundImage = `url(${withAssetVer(s.hero || s.icon || 'assets/placeholders/placeholder.webp')})`;
-
-    // Если gallery не задана — попробуем аккуратно найти 01.webp,02.webp...
-    // Останавливаемся на первом пропуске и НЕ блокируем открытие страницы.
-    discoverGallery(s.id, 24).then((autoGallery) => {
-      if (!state.selectedShape || state.selectedShape.id !== s.id) return;
-      if (Array.isArray(autoGallery) && autoGallery.length > 0) {
-        setDetailHeroGallery(autoGallery);
-      }
-    });
+    UI.detailHero.style.backgroundImage = `url(${s.hero || s.icon || ''})`;
   }
 
   // tech
