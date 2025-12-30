@@ -56,13 +56,30 @@ export function withBust(url) {
   return url.includes('?') ? `${url}&v=${v}` : `${url}?v=${v}`;
 }
 
+// IMPORTANT:
+// Do NOT probe by assigning <img src> to non-existent files.
+// Browsers will spam console with "Failed to load resource (404)".
+// Instead, use fetch() to check existence; 404s remain only in Network tab.
 export async function probeImage(url) {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => resolve(true);
-    img.onerror = () => resolve(false);
-    img.src = withBust(url);
-  });
+  const u = withBust(url);
+  try {
+    // HEAD is lightweight and usually supported on GitHub Pages.
+    const r = await fetch(u, { method: 'HEAD', cache: 'no-store' });
+    return r.ok;
+  } catch (_) {
+    // Fallback to GET in case HEAD is blocked by some hosting.
+    try {
+      // Try to avoid downloading the whole file by requesting only first byte.
+      const r2 = await fetch(u, {
+        method: 'GET',
+        cache: 'no-store',
+        headers: { Range: 'bytes=0-0' },
+      });
+      return r2.ok;
+    } catch {
+      return false;
+    }
+  }
 }
 
 export function padNum(n, pad = 2) {
@@ -87,17 +104,38 @@ export async function discoverImagesByProbe(opts) {
     exts = ['webp', 'png', 'jpg', 'jpeg'],
     start = 1,
     max = 999,
-    maxMiss = 20,
+    // Stop after a small run of misses to avoid long scans.
+    // Assumption: numbering is sequential without large gaps.
+    maxMiss = 3,
   } = opts || {};
 
   const found = [];
   let miss = 0;
 
+  // Try to lock to a single extension based on the first existing file.
+  // This massively reduces probing attempts when your assets are consistently WebP.
+  let lockedExts = exts;
+  try {
+    const bases0 = (baseNamesFn(start) || []);
+    let detected = null;
+    for (const base of bases0) {
+      for (const ext of exts) {
+        // eslint-disable-next-line no-await-in-loop
+        if (await probeImage(`${base}.${ext}`)) {
+          detected = ext;
+          break;
+        }
+      }
+      if (detected) break;
+    }
+    if (detected) lockedExts = [detected];
+  } catch (_) {}
+
   for (let i = start; i <= max; i++) {
     let hit = false;
     const baseNames = baseNamesFn(i) || [];
     for (const base of baseNames) {
-      for (const ext of exts) {
+      for (const ext of lockedExts) {
         const url = `${base}.${ext}`;
         // eslint-disable-next-line no-await-in-loop
         if (await probeImage(url)) {
@@ -176,7 +214,8 @@ export async function discoverShapeHeroGallery(shapeId) {
       `${dir}/${padNum(i, 2)}`,
     ],
     start: 1,
-    max: 999,
-    maxMiss: 20,
+    // Hero galleries are usually short; keep probing light so opening a form is instant.
+    max: 200,
+    maxMiss: 3,
   });
 }
