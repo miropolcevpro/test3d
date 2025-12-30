@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { loadTiles, loadShapes, clamp, initAutoTechPalettes, discoverShapeHeroGallery, withBust } from './utils.js';
+import { loadTiles, loadShapes, clamp } from './utils.js';
 
 // ------------------------
 // UI
@@ -394,10 +394,11 @@ async function selectTile(tileId) {
 
   // update detail hero
   if (UI.detailHero) {
-    const hasHeroGallery = !!(state.selectedShape && Array.isArray(state.selectedShape.gallery) && state.selectedShape.gallery.length);
-    if (!hasHeroGallery) {
-      UI.detailHero.style.backgroundImage = `url(${withBust(t.preview)})`;
-    }
+    if (!(state.selectedShape && Array.isArray(state.selectedShape.gallery) && state.selectedShape.gallery.length)) {
+    if (!(state.selectedShape && Array.isArray(state.selectedShape.gallery) && state.selectedShape.gallery.length)) {
+    UI.detailHero.style.backgroundImage = `url(${t.preview})`;
+  }
+  }
   }
 
   // update selected in color rows
@@ -430,7 +431,80 @@ function renderCatalog(list) {
   });
 }
 
-async function openDetail(shapeId) {
+
+// ------------------------------
+// Gallery auto-discovery (fast, low-404)
+// If shape.gallery is missing/empty, we try assets/gallery/<shapeId>/01.webp,02.webp...
+// Stop on first miss to avoid dozens of 404 requests that slow down navigation.
+// ------------------------------
+const _galleryCache = new Map(); // shapeId -> Promise<string[]>
+
+async function _headOk(url) {
+  try {
+    const res = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+    return !!res && res.ok;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function discoverGallery(shapeId, max = 12) {
+  if (_galleryCache.has(shapeId)) return _galleryCache.get(shapeId);
+  const p = (async () => {
+    const base = `assets/gallery/${shapeId}/`;
+    const out = [];
+    for (let i = 1; i <= max; i++) {
+      const z = String(i).padStart(2, '0');
+      const candZ = `${base}${z}.webp`;
+      const candN = `${base}${i}.webp`;
+      if (await _headOk(candZ)) { out.push(candZ); continue; }
+      if (await _headOk(candN)) { out.push(candN); continue; }
+      break; // stop at the first gap
+    }
+    return out;
+  })();
+  _galleryCache.set(shapeId, p);
+  return p;
+}
+
+function setDetailHeroGallery(gallery) {
+  const safe = Array.isArray(gallery) ? gallery.filter(Boolean) : [];
+  if (!safe.length) return;
+  UI.detailHero.style.backgroundImage = 'none';
+  UI.detailHero.innerHTML = `
+    <div class="heroCarousel">
+      <div class="heroTrack" id="heroTrack">
+        ${safe.map((u, i) => `<img class="heroImg" src="${u}" alt="${UI.detailTitle.textContent} ${i+1}"
+           onerror="this.onerror=null;this.src='assets/placeholders/placeholder.webp';" />`).join('')}
+      </div>
+      <div class="heroDots" id="heroDots">
+        ${safe.map((_, i) => `<button class="heroDot ${i===0?'active':''}" data-i="${i}" aria-label="Фото ${i+1}"></button>`).join('')}
+      </div>
+    </div>
+  `;
+
+  // wire carousel controls
+  const track = UI.detailHero.querySelector('#heroTrack');
+  const dots = [...UI.detailHero.querySelectorAll('.heroDot')];
+  let cur = 0;
+  function go(i) {
+    cur = Math.max(0, Math.min(i, safe.length - 1));
+    track.style.transform = `translateX(${-cur * 100}%)`;
+    dots.forEach((d, idx) => d.classList.toggle('active', idx === cur));
+  }
+  dots.forEach(d => d.addEventListener('click', () => go(parseInt(d.dataset.i, 10))));
+  let startX = 0, dx = 0, dragging = false;
+  track.addEventListener('pointerdown', (e) => { dragging = true; startX = e.clientX; dx = 0; track.setPointerCapture(e.pointerId); });
+  track.addEventListener('pointermove', (e) => { if (!dragging) return; dx = e.clientX - startX; });
+  track.addEventListener('pointerup', () => {
+    if (!dragging) return;
+    dragging = false;
+    const threshold = 40;
+    if (dx < -threshold) go(cur + 1);
+    else if (dx > threshold) go(cur - 1);
+  });
+}
+function openDetail(shapeId) {
   const s = state.shapes.find(x => x.id === shapeId);
   if (!s) return;
   state.selectedShape = s;
@@ -439,44 +513,27 @@ async function openDetail(shapeId) {
   UI.detailTitle.textContent = s.name;
   UI.detailName.textContent = s.name;
   UI.detailSub.textContent = s.subtitle || 'Тротуарная плитка';
-  // Шапка: предпочитаем авто-подхват из папки assets/gallery/<shapeId>/
-  // (чтобы новые файлы появлялись без правки shapes.json)
-  let gallery = await discoverShapeHeroGallery(s.id);
-  if (!gallery.length) {
-    gallery = Array.isArray(s.gallery) ? s.gallery.filter(Boolean) : [];
-  }
-  // cache-busting for replaced files
-  gallery = gallery.map((src) => withBust(src));
-  // keep in-memory for subsequent logic (e.g. selectTile)
-  s.gallery = gallery;
+  // Шапка: либо карусель из фото (если задано), либо одиночное изображение/placeholder.
+  const gallery = Array.isArray(s.gallery) ? s.gallery.filter(Boolean) : [];
+
+  // Быстрый рендер (без ожидания загрузок) — это критично для мгновенного открытия формы.
+  UI.detailHero.innerHTML = '';
+  const fallbackHero = s.hero || s.icon || 'assets/placeholders/placeholder.webp';
+  UI.detailHero.style.backgroundImage = `url(${fallbackHero})`;
 
   if (gallery.length > 0) {
-    UI.detailHero.style.backgroundImage = 'none';
-    UI.detailHero.innerHTML = `
-      <div class="heroCarousel">
-        <div class="heroTrack" id="heroTrack">
-          ${gallery.map((src, idx) => `
-            <div class="heroSlide" data-idx="${idx}">
-              <img src="${src}" alt="">
-            </div>`).join('')}
-        </div>
-        <div class="heroDots" id="heroDots">
-          ${gallery.map((_, idx) => `<div class="heroDot ${idx===0?'active':''}" data-idx="${idx}"></div>`).join('')}
-        </div>
-      </div>
-    `;
-    const track = UI.detailHero.querySelector('#heroTrack');
-    const dots = [...UI.detailHero.querySelectorAll('.heroDot')];
-    const activateDot = (i) => dots.forEach((d, di) => d.classList.toggle('active', di===i));
-    track.addEventListener('scroll', () => {
-      const w = track.clientWidth || 1;
-      const idx = Math.round(track.scrollLeft / w);
-      activateDot(Math.max(0, Math.min(dots.length-1, idx)));
-    }, { passive: true });
+    setDetailHeroGallery(gallery);
   } else {
-    UI.detailHero.innerHTML = '';
-    UI.detailHero.style.backgroundImage = `url(${withBust(s.hero || s.icon || '')})`;
+    // Если gallery не задана — попробуем аккуратно найти 01.webp,02.webp... (останавливаемся на первом пропуске)
+    // и НЕ блокируем открытие страницы.
+    discoverGallery(s.id, 12).then((autoGallery) => {
+      if (!state.selectedShape || state.selectedShape.id !== s.id) return;
+      if (Array.isArray(autoGallery) && autoGallery.length > 0) {
+        setDetailHeroGallery(autoGallery);
+      }
+    });
   }
+
 
   // tech
   UI.detailTech.innerHTML = '';
@@ -512,10 +569,10 @@ async function openDetail(shapeId) {
   });
   setLayout(state.layout);
 
-  // Colors for this shape (fallback: all tiles)
+  // Colors for this shape (fallback: first 8 tiles)
   const allowed = Array.isArray(s.tileIds) && s.tileIds.length
     ? s.tileIds.map(id => state.tiles.find(t => t.id === id)).filter(Boolean)
-    : state.tiles;
+    : state.tiles.slice(0, 8);
   renderColorRow(UI.colorRow, allowed);
 
   // Choose default tile for this shape
@@ -1576,7 +1633,7 @@ UI.btnDone?.addEventListener('click', () => {
   });
   setLayout(state.layout);
 
-  renderColorRow(UI.finalColors, state.tiles);
+  renderColorRow(UI.finalColors, state.tiles.slice(0, 8));
 
   // hide hint
   show(UI.scanHint, false);
@@ -1620,10 +1677,6 @@ async function init() {
   renderCatalog(state.shapes);
   setActiveScreen('catalog');
   state.phase = 'catalog';
-
-  // Auto-fill "Доступно в технологиях" palettes by probing files in folders.
-  // Runs asynchronously and does not block app start.
-  initAutoTechPalettes().catch((e) => console.warn('auto palettes failed', e));
 
   // choose default tile
   const defaultId = state.tiles[0]?.id;
