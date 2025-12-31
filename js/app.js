@@ -168,7 +168,7 @@ renderer.xr.enabled = true;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 // Keep exposure conservative to avoid "washed" look on mobile camera backgrounds.
-renderer.toneMappingExposure = 1.12;
+renderer.toneMappingExposure = 1.00;
 
 const scene = new THREE.Scene();
 scene.background = null;
@@ -306,16 +306,16 @@ function makeTileMaterial(arg = {}) {
       uFillLightDir: { value: new THREE.Vector3(-1, 1.2, 0.6).normalize() },
       // 0..1 (typical 0.3-0.6). Higher = brighter but flatter.
       // Slightly reduced to prevent over-brightening compared to product photos.
-      uFillStrength: { value: 0.38 },
-      uAmbient: { value: 0.36 },
+      uFillStrength: { value: 0.34 },
+      uAmbient: { value: 0.32 },
 
       // environment (cheap IBL-style) for premium reflections
       uEnvSkyColor: { value: new THREE.Color(0x9ecbff) },
       uEnvGroundColor: { value: new THREE.Color(0x2f2f2f) },
       // Environment contribution: keep diffuse low to avoid "chalky" look,
       // keep spec moderate for premium feel without blowing highlights.
-      uEnvDiffuseStrength: { value: 0.10 },
-      uEnvSpecIntensity: { value: 0.24 },
+      uEnvDiffuseStrength: { value: 0.07 },
+      uEnvSpecIntensity: { value: 0.22 },
 
       // occlusion via depth
       uUseOcclusion: { value: 0 },
