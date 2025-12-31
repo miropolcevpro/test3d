@@ -294,7 +294,7 @@ function makeTileMaterial(arg = {}) {
       uAlbedoGain: { value: 1.0 },
       uRoughnessMult: { value: 1.0 },
       uSpecStrength: { value: 1.0 },
-      uColorBalance: { value: new THREE.Vector3(0.96, 1.0, 1.02) },
+      uColorBalance: { value: new THREE.Vector3(0.965, 1.0, 1.0) },
       uExposureMult: { value: 1.0 },
       // tiling + layout
       uTileSize: { value: new THREE.Vector2(0.2, 0.2) },
