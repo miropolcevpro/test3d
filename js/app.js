@@ -167,7 +167,7 @@ renderer.xr.enabled = true;
 // Rendering / color pipeline
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.15;
+renderer.toneMappingExposure = 1.25;
 
 const scene = new THREE.Scene();
 scene.background = null;
@@ -303,14 +303,14 @@ function makeTileMaterial(arg = {}) {
       // secondary fill light to brighten shadowed areas
       uFillLightDir: { value: new THREE.Vector3(-1, 1.2, 0.6).normalize() },
       // 0..1 (typical 0.3-0.6). Higher = brighter but flatter.
-      uFillStrength: { value: 0.45 },
-      uAmbient: { value: 0.42 },
+      uFillStrength: { value: 0.52 },
+      uAmbient: { value: 0.45 },
 
       // environment (cheap IBL-style) for premium reflections
       uEnvSkyColor: { value: new THREE.Color(0x9ecbff) },
       uEnvGroundColor: { value: new THREE.Color(0x2f2f2f) },
       uEnvDiffuseStrength: { value: 0.16 },
-      uEnvSpecIntensity: { value: 0.32 },
+      uEnvSpecIntensity: { value: 0.22 },
 
       // occlusion via depth
       uUseOcclusion: { value: 0 },
@@ -423,15 +423,13 @@ function makeTileMaterial(arg = {}) {
 
         // base color
         vec3 albedo = texture2D(uTex, uv).rgb;
-        // decode sRGB -> linear for correct lighting
-        albedo = pow(albedo, vec3(2.2));
 
         albedo *= uAlbedoGain;
         // AO (optional)
         float ao = 1.0;
         if (uHasAo == 1) {
           ao = texture2D(uAoTex, uv).r;
-          ao = mix(1.0, ao, 0.6);
+          ao = mix(1.0, ao, 0.7);
         }
 
         // normal + bump (optional)
@@ -473,7 +471,7 @@ function makeTileMaterial(arg = {}) {
         // Simple specular: roughness -> shininess
         float shininess = mix(120.0, 8.0, rough);
         float spec = pow(max(dot(Nw, H), 0.0), shininess) * (1.0 - rough);
-        spec *= 0.18;
+        spec *= 0.13;
 
         spec *= max(0.0, uSpecStrength);
         // Environment contribution (cheap IBL approximation)
@@ -490,20 +488,9 @@ function makeTileMaterial(arg = {}) {
         float light = uAmbient + (1.0 - uAmbient) * (diff + fill);
         light = clamp(light, 0.0, 1.35);
         vec3 color = (albedo * light * ao) + vec3(spec) + (albedo * envDiff * ao) + envSpec;
-
-        
-        // --- Post color tuning to better match photo preview (softer & brighter) ---
-        // Slight exposure lift
-        color *= 1.18;
-        // Mild tone mapping to reduce harsh contrast
-        color = color / (color + vec3(1.0));
-        // Slightly reduce saturation (AR tends to look more “juicy” than фото)
+        // mild desaturation to match real-life softer tones
         float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
-        color = mix(vec3(luma), color, 0.92);
-        // Slightly reduce contrast
-        color = mix(vec3(0.5), color, 0.95);
-        // Output encoding to sRGB
-        color = pow(max(color, 0.0), vec3(1.0/2.2));
+        color = mix(vec3(luma), color, 0.95);
 
         gl_FragColor = vec4(color, 0.98);
       }
