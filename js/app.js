@@ -168,7 +168,7 @@ renderer.xr.enabled = true;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 // Keep exposure conservative to avoid "washed" look on mobile camera backgrounds.
-renderer.toneMappingExposure = 1.00;
+renderer.toneMappingExposure = 0.95;
 
 const scene = new THREE.Scene();
 scene.background = null;
@@ -307,16 +307,16 @@ function makeTileMaterial(arg = {}) {
       uFillLightDir: { value: new THREE.Vector3(-1, 1.2, 0.6).normalize() },
       // 0..1 (typical 0.3-0.6). Higher = brighter but flatter.
       // Slightly reduced to prevent over-brightening compared to product photos.
-      uFillStrength: { value: 0.34 },
-      uAmbient: { value: 0.32 },
+      uFillStrength: { value: 0.26 },
+      uAmbient: { value: 0.25 },
 
       // environment (cheap IBL-style) for premium reflections
       uEnvSkyColor: { value: new THREE.Color(0x9ecbff) },
       uEnvGroundColor: { value: new THREE.Color(0x2f2f2f) },
       // Environment contribution: keep diffuse low to avoid "chalky" look,
       // keep spec moderate for premium feel without blowing highlights.
-      uEnvDiffuseStrength: { value: 0.07 },
-      uEnvSpecIntensity: { value: 0.22 },
+      uEnvDiffuseStrength: { value: 0.03 },
+      uEnvSpecIntensity: { value: 0.20 },
 
       // occlusion via depth
       uUseOcclusion: { value: 0 },
@@ -480,7 +480,8 @@ function makeTileMaterial(arg = {}) {
         // Simple specular: roughness -> shininess
         float shininess = mix(120.0, 8.0, rough);
         float spec = pow(max(dot(Nw, H), 0.0), shininess) * (1.0 - rough);
-        spec *= 0.18;
+        // Lower specular energy to avoid "washed" look on darker textures.
+        spec *= 0.12;
 
         spec *= max(0.0, uSpecStrength);
         // Environment contribution (cheap IBL approximation)
@@ -515,6 +516,55 @@ function distXZ(a, b) {
   const dx = a.x - b.x;
   const dz = a.z - b.z;
   return Math.hypot(dx, dz);
+}
+
+// ------------------------------------------------------------
+// Auto exposure for surfaces
+// ------------------------------------------------------------
+// Darker albedo textures tend to look "washed" in AR when using a global
+// lighting setup. To keep different surfaces closer to their reference photos,
+// we derive a gentle per-texture exposure multiplier from the albedo image.
+// Can be overridden per texture via params.exposureMult in palettes.
+function computeAutoExposureMultFromTexture(tex) {
+  try {
+    const img = tex && tex.image;
+    if (!img) return 1.0;
+
+    const w = Math.max(1, Math.min(64, img.naturalWidth || img.width || 64));
+    const h = Math.max(1, Math.min(64, img.naturalHeight || img.height || 64));
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return 1.0;
+    ctx.drawImage(img, 0, 0, w, h);
+    const data = ctx.getImageData(0, 0, w, h).data;
+
+    const srgbToLinear = (c) => {
+      c = c / 255;
+      return (c <= 0.04045) ? (c / 12.92) : Math.pow((c + 0.055) / 1.055, 2.4);
+    };
+
+    let sum = 0;
+    const n = w * h;
+    for (let i = 0; i < data.length; i += 4) {
+      const r = srgbToLinear(data[i]);
+      const g = srgbToLinear(data[i + 1]);
+      const b = srgbToLinear(data[i + 2]);
+      // linear luminance
+      sum += 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    }
+    const meanLuma = sum / Math.max(1, n);
+
+    // Map mean luminance -> exposure multiplier:
+    //  - dark textures get a lower multiplier (reduce wash)
+    //  - bright textures stay near 1.0
+    const em = clamp(0.62 + 0.70 * meanLuma, 0.70, 1.00);
+    return em;
+  } catch (_) {
+    // Cross-origin images without proper CORS headers will throw when reading pixels.
+    return 1.0;
+  }
 }
 
 function polyArea2(points) {
@@ -622,7 +672,11 @@ async function selectTile(tileOrId) {
   if (tileMaterial.uniforms.uRoughnessMult) tileMaterial.uniforms.uRoughnessMult.value = rm;
   if (tileMaterial.uniforms.uSpecStrength) tileMaterial.uniforms.uSpecStrength.value = ss;
 
-  const em = (params && typeof params.exposureMult === 'number') ? params.exposureMult : 1.0;
+  // Exposure: allow content override, otherwise auto-derive from albedo image.
+  // This helps keep dark textures from washing out while keeping bright ones natural.
+  const em = (params && typeof params.exposureMult === 'number')
+    ? params.exposureMult
+    : computeAutoExposureMultFromTexture(albedoTex);
   if (tileMaterial.uniforms.uExposureMult) tileMaterial.uniforms.uExposureMult.value = em;
 
   setLayout(state.layout);
