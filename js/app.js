@@ -288,6 +288,11 @@ function makeTileMaterial(arg = {}) {
       uNormalScale: { value: normalScale || 0.0 },
       uBumpScale: { value: bumpScale || 0.0 },
 
+
+      // per-texture material tuning
+      uAlbedoGain: { value: 1.0 },
+      uRoughnessMult: { value: 1.0 },
+      uSpecStrength: { value: 1.0 },
       // tiling + layout
       uTileSize: { value: new THREE.Vector2(0.2, 0.2) },
       uUvScale: { value: new THREE.Vector2(1, 1) }, // per-texture scaling: 0.5 => texture looks 2x bigger
@@ -295,7 +300,17 @@ function makeTileMaterial(arg = {}) {
 
       // lighting
       uLightDir: { value: new THREE.Vector3(1, 2, 1).normalize() },
+      // secondary fill light to brighten shadowed areas
+      uFillLightDir: { value: new THREE.Vector3(-1, 1.2, 0.6).normalize() },
+      // 0..1 (typical 0.3-0.6). Higher = brighter but flatter.
+      uFillStrength: { value: 0.45 },
       uAmbient: { value: 0.42 },
+
+      // environment (cheap IBL-style) for premium reflections
+      uEnvSkyColor: { value: new THREE.Color(0x9ecbff) },
+      uEnvGroundColor: { value: new THREE.Color(0x2f2f2f) },
+      uEnvDiffuseStrength: { value: 0.16 },
+      uEnvSpecIntensity: { value: 0.32 },
 
       // occlusion via depth
       uUseOcclusion: { value: 0 },
@@ -359,8 +374,19 @@ function makeTileMaterial(arg = {}) {
       uniform float uNormalScale;
       uniform float uBumpScale;
 
+      uniform float uAlbedoGain;
+      uniform float uRoughnessMult;
+      uniform float uSpecStrength;
       uniform vec3 uLightDir;
+      uniform vec3 uFillLightDir;
+      uniform float uFillStrength;
       uniform float uAmbient;
+
+      // simple analytic environment lighting (sky/ground) for added realism
+      uniform vec3 uEnvSkyColor;
+      uniform vec3 uEnvGroundColor;
+      uniform float uEnvDiffuseStrength;
+      uniform float uEnvSpecIntensity;
 
       uniform int uUseOcclusion;
       uniform sampler2D uDepthTex;
@@ -398,6 +424,7 @@ function makeTileMaterial(arg = {}) {
         // base color
         vec3 albedo = texture2D(uTex, uv).rgb;
 
+        albedo *= uAlbedoGain;
         // AO (optional)
         float ao = 1.0;
         if (uHasAo == 1) {
@@ -432,6 +459,7 @@ function makeTileMaterial(arg = {}) {
         if (uHasRough == 1) {
           rough = texture2D(uRoughTex, uv).r;
         }
+        rough *= max(0.0, uRoughnessMult);
         rough = clamp(rough, 0.04, 1.0);
 
         vec3 L = normalize(uLightDir);
@@ -445,8 +473,21 @@ function makeTileMaterial(arg = {}) {
         float spec = pow(max(dot(Nw, H), 0.0), shininess) * (1.0 - rough);
         spec *= 0.18;
 
-        float light = uAmbient + (1.0 - uAmbient) * diff;
-        vec3 color = (albedo * light * ao) + vec3(spec);
+        spec *= max(0.0, uSpecStrength);
+        // Environment contribution (cheap IBL approximation)
+        vec3 R = reflect(-V, Nw);
+        float rt = clamp(R.y * 0.5 + 0.5, 0.0, 1.0);
+        vec3 envCol = mix(uEnvGroundColor, uEnvSkyColor, smoothstep(0.0, 1.0, rt));
+        vec3 envDiff = envCol * uEnvDiffuseStrength;
+        float fres = pow(1.0 - max(dot(Nw, V), 0.0), 5.0);
+        vec3 envSpec = envCol * (0.04 + 0.96 * fres) * (1.0 - rough) * uEnvSpecIntensity;
+        envSpec *= max(0.0, uSpecStrength);
+        envSpec *= ao;
+
+        float fill = max(dot(Nw, normalize(uFillLightDir)), 0.0) * uFillStrength;
+        float light = uAmbient + (1.0 - uAmbient) * (diff + fill);
+        light = clamp(light, 0.0, 1.35);
+        vec3 color = (albedo * light * ao) + vec3(spec) + (albedo * envDiff * ao) + envSpec;
 
         gl_FragColor = vec4(color, 0.98);
       }
@@ -559,6 +600,15 @@ async function selectTile(tileOrId) {
     if (typeof uvp.y === 'number') uvScaleY = uvp.y;
   }
   if (tileMaterial.uniforms.uUvScale) tileMaterial.uniforms.uUvScale.value.set(uvScaleX, uvScaleY);
+
+
+  // Per-texture material tuning (content-controlled)
+  const ag = (params && typeof params.albedoGain === 'number') ? params.albedoGain : 1.0;
+  const rm = (params && typeof params.roughnessMult === 'number') ? params.roughnessMult : 1.0;
+  const ss = (params && typeof params.specStrength === 'number') ? params.specStrength : 1.0;
+  if (tileMaterial.uniforms.uAlbedoGain) tileMaterial.uniforms.uAlbedoGain.value = ag;
+  if (tileMaterial.uniforms.uRoughnessMult) tileMaterial.uniforms.uRoughnessMult.value = rm;
+  if (tileMaterial.uniforms.uSpecStrength) tileMaterial.uniforms.uSpecStrength.value = ss;
 
   setLayout(state.layout);
 
