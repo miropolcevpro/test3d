@@ -167,7 +167,7 @@ renderer.xr.enabled = true;
 // Rendering / color pipeline
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.15;
+renderer.toneMappingExposure = 1.25;
 
 const scene = new THREE.Scene();
 scene.background = null;
@@ -293,11 +293,7 @@ function makeTileMaterial(arg = {}) {
       uAlbedoGain: { value: 1.0 },
       uRoughnessMult: { value: 1.0 },
       uSpecStrength: { value: 1.0 },
-      // global color grading (AR)
-      uExposure: { value: 1.18 },
-      uSaturation: { value: 0.82 },
-      // reduce orange cast: slightly less red, a touch more blue
-      uWhiteBalance: { value: new THREE.Vector3(0.92, 1.00, 1.06) },
+      uColorBalance: { value: new THREE.Vector3(0.96, 1.0, 1.02) },
       // tiling + layout
       uTileSize: { value: new THREE.Vector2(0.2, 0.2) },
       uUvScale: { value: new THREE.Vector2(1, 1) }, // per-texture scaling: 0.5 => texture looks 2x bigger
@@ -382,9 +378,7 @@ function makeTileMaterial(arg = {}) {
       uniform float uAlbedoGain;
       uniform float uRoughnessMult;
       uniform float uSpecStrength;
-      uniform float uExposure;
-      uniform float uSaturation;
-      uniform vec3 uWhiteBalance;
+      uniform vec3 uColorBalance;
       uniform vec3 uLightDir;
       uniform vec3 uFillLightDir;
       uniform float uFillStrength;
@@ -413,21 +407,6 @@ function makeTileMaterial(arg = {}) {
         return normalize(T * nTS.x + B * nTS.y + N * nTS.z);
       }
 
-
-      vec3 srgbToLinear(vec3 c){
-        return pow(c, vec3(2.2));
-      }
-      vec3 linearToSrgb(vec3 c){
-        return pow(max(c, vec3(0.0)), vec3(1.0/2.2));
-      }
-      vec3 reinhardToneMap(vec3 c){
-        return c / (c + vec3(1.0));
-      }
-      vec3 applySaturation(vec3 c, float sat){
-        float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
-        return mix(vec3(l), c, sat);
-      }
-
       void main(){
         // occlusion (depth)
         if (uUseOcclusion == 1 && uDepthValid == 1) {
@@ -446,10 +425,9 @@ function makeTileMaterial(arg = {}) {
 
         // base color
         vec3 albedo = texture2D(uTex, uv).rgb;
-        albedo = srgbToLinear(albedo);
 
         albedo *= uAlbedoGain;
-        albedo *= uWhiteBalance;
+        albedo *= uColorBalance;
         // AO (optional)
         float ao = 1.0;
         if (uHasAo == 1) {
@@ -514,16 +492,13 @@ function makeTileMaterial(arg = {}) {
         light = clamp(light, 0.0, 1.35);
         vec3 color = (albedo * light * ao) + vec3(spec) + (albedo * envDiff * ao) + envSpec;
 
-        // global color grading to better match product photo (soft, less orange)
-        color *= uExposure;
-        color = reinhardToneMap(color);
-        color = applySaturation(color, uSaturation);
-        color = linearToSrgb(color);
-
         gl_FragColor = vec4(color, 0.98);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
       }
     `,
   });
+  mat.toneMapped = true;
   return mat;
 }
 
