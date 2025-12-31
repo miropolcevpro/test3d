@@ -490,7 +490,7 @@ function makeTileMaterial(arg = {}) {
         vec3 color = (albedo * light * ao) + vec3(spec) + (albedo * envDiff * ao) + envSpec;
         // mild desaturation to match real-life softer tones
         float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
-        color = mix(vec3(luma), color, 0.95);
+        color = mix(vec3(luma), color, 0.88);
 
         gl_FragColor = vec4(color, 0.98);
       }
