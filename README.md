@@ -36,3 +36,37 @@ python -m http.server 8080
 Окклюзия включается, если устройство/браузер отдаёт depth (`frame.getDepthInformation(view)`).
 Реализация — best-effort: сравнение глубины фрагмента заливки с глубиной сцены.
 
+
+
+## Палитры поверхностей (внешние текстуры)
+Проект поддерживает загрузку палитр из Object Storage по URL:
+- базовый URL задаётся в `SURFACE_PALETTE_BASE_URL` (см. `js/app.js`)
+- формат: `palettes/<shapeId>.json`
+
+### Пер-текстурные параметры `item.params`
+Можно настраивать материал и цвет для каждой текстуры (без правок кода):
+
+- `uvScale` или `repeatScale` (number или {x,y}): масштаб повторения UV (0.5 => текстура крупнее x2)
+- `albedoGain` (number): усиление albedo (1.0 = нейтрально)
+- `roughnessMult` (number): множитель roughness (1.0 = нейтрально)
+- `specStrength` (number): сила бликов (1.0 = нейтрально)
+- `exposureMult` (number): локальная экспозиция (0.75..1.05 обычно)
+- `contrast` (number): локальный контраст (0.9..1.15 обычно)
+- `saturation` (number): локальная насыщенность (0.85..1.05 обычно)
+- `gamma` (number): локальная гамма (0.9..1.15 обычно)
+- `colorBalance` (number | [r,g,b] | {r,g,b} | {x,y,z}): локальный баланс каналов (множитель). Пример: `[0.98, 1.0, 1.02]`
+- `envDiffuseMult` (number): локальный множитель влияния env diffuse (0.5..1.2)
+- `envSpecMult` (number): локальный множитель env spec (0.5..1.2)
+
+Пример:
+```json
+"params": {
+  "exposureMult": 0.82,
+  "contrast": 1.08,
+  "saturation": 0.92,
+  "gamma": 1.05,
+  "colorBalance": [0.98, 1.00, 1.01],
+  "envDiffuseMult": 0.8,
+  "envSpecMult": 0.7
+}
+```

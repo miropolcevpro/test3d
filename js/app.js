@@ -296,6 +296,11 @@ function makeTileMaterial(arg = {}) {
       uSpecStrength: { value: 1.0 },
       uColorBalance: { value: new THREE.Vector3(0.965, 1.0, 1.0) },
       uExposureMult: { value: 1.0 },
+      // per-texture grading controls (optional; default neutral)
+      uContrast: { value: 1.0 },      // 1.0 = neutral
+      uSaturation: { value: 1.0 },    // 1.0 = neutral
+      uGamma: { value: 1.0 },         // 1.0 = neutral
+      uTileColorBalance: { value: new THREE.Vector3(1.0, 1.0, 1.0) },
       // tiling + layout
       uTileSize: { value: new THREE.Vector2(0.2, 0.2) },
       uUvScale: { value: new THREE.Vector2(1, 1) }, // per-texture scaling: 0.5 => texture looks 2x bigger
@@ -317,6 +322,10 @@ function makeTileMaterial(arg = {}) {
       // keep spec moderate for premium feel without blowing highlights.
       uEnvDiffuseStrength: { value: 0.03 },
       uEnvSpecIntensity: { value: 0.20 },
+
+      // per-texture env multipliers (optional; default neutral)
+      uEnvDiffuseMult: { value: 1.0 },
+      uEnvSpecMult: { value: 1.0 },
 
       // occlusion via depth
       uUseOcclusion: { value: 0 },
@@ -390,11 +399,19 @@ function makeTileMaterial(arg = {}) {
       uniform float uAmbient;
       uniform float uExposureMult;
 
+      uniform float uContrast;
+      uniform float uSaturation;
+      uniform float uGamma;
+      uniform vec3 uTileColorBalance;
+
       // simple analytic environment lighting (sky/ground) for added realism
       uniform vec3 uEnvSkyColor;
       uniform vec3 uEnvGroundColor;
       uniform float uEnvDiffuseStrength;
       uniform float uEnvSpecIntensity;
+
+      uniform float uEnvDiffuseMult;
+      uniform float uEnvSpecMult;
 
       uniform int uUseOcclusion;
       uniform sampler2D uDepthTex;
@@ -433,7 +450,7 @@ function makeTileMaterial(arg = {}) {
         vec3 albedo = texture2D(uTex, uv).rgb;
 
         albedo *= uAlbedoGain;
-        albedo *= uColorBalance;
+        albedo *= (uColorBalance * uTileColorBalance);
         // AO (optional)
         float ao = 1.0;
         if (uHasAo == 1) {
@@ -488,9 +505,9 @@ function makeTileMaterial(arg = {}) {
         vec3 R = reflect(-V, Nw);
         float rt = clamp(R.y * 0.5 + 0.5, 0.0, 1.0);
         vec3 envCol = mix(uEnvGroundColor, uEnvSkyColor, smoothstep(0.0, 1.0, rt));
-        vec3 envDiff = envCol * uEnvDiffuseStrength;
+        vec3 envDiff = envCol * (uEnvDiffuseStrength * uEnvDiffuseMult);
         float fres = pow(1.0 - max(dot(Nw, V), 0.0), 5.0);
-        vec3 envSpec = envCol * (0.04 + 0.96 * fres) * (1.0 - rough) * uEnvSpecIntensity;
+        vec3 envSpec = envCol * (0.04 + 0.96 * fres) * (1.0 - rough) * (uEnvSpecIntensity * uEnvSpecMult);
         envSpec *= max(0.0, uSpecStrength);
         envSpec *= ao;
 
@@ -501,6 +518,17 @@ function makeTileMaterial(arg = {}) {
 
         gl_FragColor = vec4(color * uExposureMult, 0.98);
         #include <tonemapping_fragment>
+
+        // Per-texture grading applied AFTER tone mapping (keeps highlights stable):
+        // - saturation (1.0 = neutral)
+        // - contrast (1.0 = neutral)
+        // - gamma (1.0 = neutral; >1 brightens mid-tones)
+        float luma = dot(gl_FragColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+        gl_FragColor.rgb = mix(vec3(luma), gl_FragColor.rgb, clamp(uSaturation, 0.0, 2.0));
+        gl_FragColor.rgb = (gl_FragColor.rgb - 0.5) * clamp(uContrast, 0.5, 1.8) + 0.5;
+        gl_FragColor.rgb = max(gl_FragColor.rgb, vec3(0.0));
+        float g = max(0.25, min(4.0, uGamma));
+        gl_FragColor.rgb = pow(gl_FragColor.rgb, vec3(1.0 / g));
         #include <colorspace_fragment>
       }
     `,
@@ -678,6 +706,46 @@ async function selectTile(tileOrId) {
     ? params.exposureMult
     : computeAutoExposureMultFromTexture(albedoTex);
   if (tileMaterial.uniforms.uExposureMult) tileMaterial.uniforms.uExposureMult.value = em;
+
+  // Per-texture grading controls (optional, content-driven)
+  const contrast = (params && typeof params.contrast === 'number') ? params.contrast : 1.0;
+  const saturation = (params && typeof params.saturation === 'number') ? params.saturation : 1.0;
+  const gamma = (params && typeof params.gamma === 'number') ? params.gamma : 1.0;
+
+  if (tileMaterial.uniforms.uContrast) tileMaterial.uniforms.uContrast.value = contrast;
+  if (tileMaterial.uniforms.uSaturation) tileMaterial.uniforms.uSaturation.value = saturation;
+  if (tileMaterial.uniforms.uGamma) tileMaterial.uniforms.uGamma.value = gamma;
+
+  // Optional per-texture color-balance multiplier (multiplies global uColorBalance)
+  // Supported forms:
+  //  - number: 0.98
+  //  - array: [0.98, 1.0, 1.02]
+  //  - object: {r,g,b} or {x,y,z}
+  let cbx = 1.0, cby = 1.0, cbz = 1.0;
+  const cbp = params ? (params.colorBalance ?? params.tileColorBalance ?? params.wb ?? null) : null;
+  if (typeof cbp === 'number') {
+    cbx = cby = cbz = cbp;
+  } else if (Array.isArray(cbp) && cbp.length >= 3) {
+    cbx = Number(cbp[0]); cby = Number(cbp[1]); cbz = Number(cbp[2]);
+  } else if (cbp && typeof cbp === 'object') {
+    if (typeof cbp.r === 'number') cbx = cbp.r;
+    if (typeof cbp.g === 'number') cby = cbp.g;
+    if (typeof cbp.b === 'number') cbz = cbp.b;
+    if (typeof cbp.x === 'number') cbx = cbp.x;
+    if (typeof cbp.y === 'number') cby = cbp.y;
+    if (typeof cbp.z === 'number') cbz = cbp.z;
+  }
+  if (tileMaterial.uniforms.uTileColorBalance) tileMaterial.uniforms.uTileColorBalance.value.set(
+    (Number.isFinite(cbx) ? cbx : 1.0),
+    (Number.isFinite(cby) ? cby : 1.0),
+    (Number.isFinite(cbz) ? cbz : 1.0),
+  );
+
+  // Optional per-texture env multipliers (help dark textures avoid washout without changing globals)
+  const envDiffMult = (params && typeof params.envDiffuseMult === 'number') ? params.envDiffuseMult : 1.0;
+  const envSpecMult = (params && typeof params.envSpecMult === 'number') ? params.envSpecMult : 1.0;
+  if (tileMaterial.uniforms.uEnvDiffuseMult) tileMaterial.uniforms.uEnvDiffuseMult.value = envDiffMult;
+  if (tileMaterial.uniforms.uEnvSpecMult) tileMaterial.uniforms.uEnvSpecMult.value = envSpecMult;
 
   setLayout(state.layout);
 
