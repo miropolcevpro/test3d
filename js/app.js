@@ -295,6 +295,7 @@ function makeTileMaterial(arg = {}) {
       uRoughnessMult: { value: 1.0 },
       uSpecStrength: { value: 1.0 },
       uColorBalance: { value: new THREE.Vector3(0.96, 1.0, 1.02) },
+      uExposureMult: { value: 1.0 },
       // tiling + layout
       uTileSize: { value: new THREE.Vector2(0.2, 0.2) },
       uUvScale: { value: new THREE.Vector2(1, 1) }, // per-texture scaling: 0.5 => texture looks 2x bigger
@@ -387,6 +388,7 @@ function makeTileMaterial(arg = {}) {
       uniform vec3 uFillLightDir;
       uniform float uFillStrength;
       uniform float uAmbient;
+      uniform float uExposureMult;
 
       // simple analytic environment lighting (sky/ground) for added realism
       uniform vec3 uEnvSkyColor;
@@ -496,7 +498,7 @@ function makeTileMaterial(arg = {}) {
         light = clamp(light, 0.0, 1.35);
         vec3 color = (albedo * light * ao) + vec3(spec) + (albedo * envDiff * ao) + envSpec;
 
-        gl_FragColor = vec4(color, 0.98);
+        gl_FragColor = vec4(color * uExposureMult, 0.98);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
       }
@@ -619,6 +621,9 @@ async function selectTile(tileOrId) {
   if (tileMaterial.uniforms.uAlbedoGain) tileMaterial.uniforms.uAlbedoGain.value = ag;
   if (tileMaterial.uniforms.uRoughnessMult) tileMaterial.uniforms.uRoughnessMult.value = rm;
   if (tileMaterial.uniforms.uSpecStrength) tileMaterial.uniforms.uSpecStrength.value = ss;
+
+  const em = (params && typeof params.exposureMult === 'number') ? params.exposureMult : 1.0;
+  if (tileMaterial.uniforms.uExposureMult) tileMaterial.uniforms.uExposureMult.value = em;
 
   setLayout(state.layout);
 
