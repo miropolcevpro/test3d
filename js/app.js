@@ -303,14 +303,14 @@ function makeTileMaterial(arg = {}) {
       // secondary fill light to brighten shadowed areas
       uFillLightDir: { value: new THREE.Vector3(-1, 1.2, 0.6).normalize() },
       // 0..1 (typical 0.3-0.6). Higher = brighter but flatter.
-      uFillStrength: { value: 0.55 },
-      uAmbient: { value: 0.48 },
+      uFillStrength: { value: 0.45 },
+      uAmbient: { value: 0.42 },
 
       // environment (cheap IBL-style) for premium reflections
       uEnvSkyColor: { value: new THREE.Color(0x9ecbff) },
       uEnvGroundColor: { value: new THREE.Color(0x2f2f2f) },
-      uEnvDiffuseStrength: { value: 0.22 },
-      uEnvSpecIntensity: { value: 0.26 },
+      uEnvDiffuseStrength: { value: 0.16 },
+      uEnvSpecIntensity: { value: 0.32 },
 
       // occlusion via depth
       uUseOcclusion: { value: 0 },
@@ -356,8 +356,6 @@ function makeTileMaterial(arg = {}) {
     `,
     fragmentShader: `
       precision highp float;
-      #include <tonemapping_pars_fragment>
-      #include <colorspace_pars_fragment>
       varying vec2 vUv;
       varying vec3 vNormalW;
       varying vec3 vViewPos;
@@ -397,14 +395,6 @@ function makeTileMaterial(arg = {}) {
 
       vec2 safeFract(vec2 v){ return v - floor(v); }
 
-vec3 srgbToLinear(vec3 c){
-  // Accurate sRGB EOTF (per-channel)
-  vec3 lt = step(vec3(0.04045), c);
-  vec3 a = c / 12.92;
-  vec3 b = pow((c + 0.055) / 1.055, vec3(2.4));
-  return mix(a, b, lt);
-}
-
       // Tangent basis for a horizontal XZ plane:
       // T = +X, B = +Z, N = +Y in model space. In our app the fill mesh stays horizontal,
       // so this approximation is stable and fast.
@@ -433,8 +423,8 @@ vec3 srgbToLinear(vec3 c){
 
         // base color
         vec3 albedo = texture2D(uTex, uv).rgb;
-
-        albedo = srgbToLinear(albedo);
+        // decode sRGB -> linear for correct lighting
+        albedo = pow(albedo, vec3(2.2));
 
         albedo *= uAlbedoGain;
         // AO (optional)
@@ -501,13 +491,24 @@ vec3 srgbToLinear(vec3 c){
         light = clamp(light, 0.0, 1.35);
         vec3 color = (albedo * light * ao) + vec3(spec) + (albedo * envDiff * ao) + envSpec;
 
+        
+        // --- Post color tuning to better match photo preview (softer & brighter) ---
+        // Slight exposure lift
+        color *= 1.18;
+        // Mild tone mapping to reduce harsh contrast
+        color = color / (color + vec3(1.0));
+        // Slightly reduce saturation (AR tends to look more “juicy” than фото)
+        float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
+        color = mix(vec3(luma), color, 0.92);
+        // Slightly reduce contrast
+        color = mix(vec3(0.5), color, 0.95);
+        // Output encoding to sRGB
+        color = pow(max(color, 0.0), vec3(1.0/2.2));
+
         gl_FragColor = vec4(color, 0.98);
-        #include <tonemapping_fragment>
-        #include <colorspace_fragment>
       }
     `,
   });
-  mat.toneMapped = true;
   return mat;
 }
 
