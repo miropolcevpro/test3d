@@ -975,6 +975,9 @@ async function openDetail(shapeId) {
   const defaultTile = allowed[0] || state.tiles[0];
   if (defaultTile) await selectTile(defaultTile);
 
+  // Update AR entry UI (Chrome-only gating)
+  updateArEntryUI();
+
   setActiveScreen('detail');
   state.phase = 'detail';
 }
@@ -1015,18 +1018,199 @@ async function checkXrSupport() {
   }
 }
 
+
+// --- AR launch gating: Chrome-only on Android + ARCore helper ---
+const ARCORE_PLAY_URL = 'https://play.google.com/store/apps/details?id=com.google.ar.core';
+
+function getArEnv() {
+  const ua = navigator.userAgent || '';
+  const isAndroid = /Android/i.test(ua);
+
+  // "Real" Chrome on Android (exclude common alternative browsers + WebViews)
+  const hasChrome = /Chrome\/\d+/i.test(ua);
+  const isWebView = /\bwv\b/i.test(ua) || (/Version\/\d+/i.test(ua) && hasChrome);
+  const isAlt =
+    /(EdgA|OPR|YaBrowser|SamsungBrowser|MiuiBrowser|UCBrowser|DuckDuckGo|Brave|Vivaldi|Firefox|FxiOS)/i.test(ua);
+
+  const isChrome = isAndroid && hasChrome && !isWebView && !isAlt;
+
+  return { ua, isAndroid, isChrome, isWebView };
+}
+
+function makeChromeIntent(url) {
+  const clean = String(url || '').replace(/^https?:\/\//i, '');
+  return `intent://${clean}#Intent;scheme=https;package=com.android.chrome;end`;
+}
+
+function openInChrome(url) {
+  const target = url || window.location.href;
+  try {
+    window.location.href = makeChromeIntent(target);
+  } catch (e) {
+    // fallback: just open normally
+    window.location.href = target;
+  }
+}
+
+function openArcoreInstall() {
+  // Try market:// first (opens Play Store app), fallback to https
+  try {
+    window.location.href = 'market://details?id=com.google.ar.core';
+    setTimeout(() => {
+      window.open(ARCORE_PLAY_URL, '_blank');
+    }, 700);
+  } catch (e) {
+    window.open(ARCORE_PLAY_URL, '_blank');
+  }
+}
+
+function ensureArHelpUI() {
+  if (document.getElementById('arHelpModalOverlay')) return;
+
+  // styles
+  const style = document.createElement('style');
+  style.id = 'arHelpStyles';
+  style.textContent = `
+    .arBlocked { opacity: 0.6; filter: grayscale(0.1); }
+    #arHelpModalOverlay{ position:fixed; inset:0; background:rgba(0,0,0,0.55); display:none; align-items:center; justify-content:center; z-index:99999; padding:16px; }
+    #arHelpModal{ width:min(520px, 100%); background:rgba(18,18,18,0.95); color:#fff; border-radius:16px; padding:16px; box-shadow:0 10px 40px rgba(0,0,0,0.5); font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; }
+    #arHelpTitle{ font-size:18px; font-weight:700; margin:0 0 8px 0; }
+    #arHelpText{ font-size:14px; line-height:1.35; opacity:0.95; margin:0 0 12px 0; white-space:pre-line; }
+    #arHelpBtns{ display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end; }
+    .arHelpBtn{ border:0; border-radius:12px; padding:10px 12px; font-weight:600; cursor:pointer; }
+    .arHelpBtnPrimary{ background:#ffffff; color:#111; }
+    .arHelpBtnSecondary{ background:rgba(255,255,255,0.12); color:#fff; }
+    #arChromeHint{ margin-top:10px; padding:10px 12px; border-radius:12px; background:rgba(0,0,0,0.06); color:#222; font-size:13px; line-height:1.25; }
+    #arChromeHint button{ margin-top:8px; width:100%; border:0; border-radius:12px; padding:10px 12px; font-weight:700; cursor:pointer; }
+  `;
+  document.head.appendChild(style);
+
+  // modal
+  const overlay = document.createElement('div');
+  overlay.id = 'arHelpModalOverlay';
+  overlay.innerHTML = `
+    <div id="arHelpModal" role="dialog" aria-modal="true" aria-labelledby="arHelpTitle">
+      <div id="arHelpTitle">Не удалось запустить AR</div>
+      <div id="arHelpText"></div>
+      <div id="arHelpBtns">
+        <button id="arHelpBtnChrome" class="arHelpBtn arHelpBtnPrimary" style="display:none;">Открыть в Chrome</button>
+        <button id="arHelpBtnArcore" class="arHelpBtn arHelpBtnSecondary" style="display:none;">Установить/обновить ARCore</button>
+        <button id="arHelpBtnOk" class="arHelpBtn arHelpBtnSecondary">ОК</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const close = () => { overlay.style.display = 'none'; };
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  overlay.querySelector('#arHelpBtnOk').addEventListener('click', close);
+  overlay.querySelector('#arHelpBtnChrome').addEventListener('click', () => openInChrome(window.location.href));
+  overlay.querySelector('#arHelpBtnArcore').addEventListener('click', openArcoreInstall);
+}
+
+function showArHelp(kind, err) {
+  ensureArHelpUI();
+
+  const env = getArEnv();
+  const overlay = document.getElementById('arHelpModalOverlay');
+  const titleEl = overlay.querySelector('#arHelpTitle');
+  const textEl = overlay.querySelector('#arHelpText');
+  const btnChrome = overlay.querySelector('#arHelpBtnChrome');
+  const btnArcore = overlay.querySelector('#arHelpBtnArcore');
+
+  btnChrome.style.display = 'none';
+  btnArcore.style.display = 'none';
+
+  let title = 'Не удалось запустить AR';
+  let msg = 'Попробуйте ещё раз.';
+
+  if (kind === 'NEED_CHROME') {
+    title = 'AR работает только в Google Chrome';
+    msg = 'Откройте этот сайт в Google Chrome на Android.\nВо встроенных браузерах (Telegram/WhatsApp/и т.п.) AR обычно не запускается.';
+    btnChrome.style.display = env.isAndroid ? 'inline-block' : 'none';
+  } else if (kind === 'NO_WEBXR') {
+    title = 'WebXR недоступен';
+    msg = 'Ваш браузер не поддерживает WebXR AR.\nОткройте сайт в Google Chrome на Android.';
+    btnChrome.style.display = env.isAndroid ? 'inline-block' : 'none';
+    btnArcore.style.display = env.isAndroid ? 'inline-block' : 'none';
+  } else if (kind === 'AR_NOT_SUPPORTED') {
+    title = 'AR недоступен на этом устройстве';
+    msg = 'Не удалось включить immersive-ar.\nУстановите/обновите Google Play Services for AR (ARCore) и попробуйте снова.\nЕсли устройство не поддерживает ARCore — AR может не запуститься.';
+    btnArcore.style.display = env.isAndroid ? 'inline-block' : 'none';
+  } else if (kind === 'CAMERA_DENIED') {
+    title = 'Нет доступа к камере';
+    msg = 'Разрешите доступ к камере для браузера и для сайта, затем попробуйте снова.\n(Настройки → Приложения → Chrome → Разрешения → Камера)';
+    btnChrome.style.display = env.isAndroid ? 'inline-block' : 'none';
+  } else if (kind === 'AR_START_FAILED') {
+    const name = err?.name || '';
+    if (name === 'NotAllowedError' || name === 'SecurityError') {
+      return showArHelp('CAMERA_DENIED', err);
+    }
+    if (name === 'NotSupportedError') {
+      return showArHelp('AR_NOT_SUPPORTED', err);
+    }
+    title = 'Не удалось запустить AR';
+    msg = 'Попробуйте открыть сайт в Google Chrome.\nЕсли не помогает — установите/обновите ARCore.';
+    btnChrome.style.display = env.isAndroid ? 'inline-block' : 'none';
+    btnArcore.style.display = env.isAndroid ? 'inline-block' : 'none';
+  }
+
+  titleEl.textContent = title;
+  textEl.textContent = msg;
+
+  overlay.style.display = 'flex';
+}
+
+function updateArEntryUI() {
+  const env = getArEnv();
+  const btn = UI?.btnViewAR;
+  if (!btn) return;
+
+  // Remove old hint if any
+  let hint = document.getElementById('arChromeHint');
+
+  if (env.isAndroid && !env.isChrome) {
+    btn.classList.add('arBlocked');
+    btn.setAttribute('aria-disabled', 'true');
+
+    if (!hint) {
+      hint = document.createElement('div');
+      hint.id = 'arChromeHint';
+      hint.innerHTML = `
+        <div><b>AR работает только в Google Chrome на Android.</b><br/>Откройте страницу в Chrome, чтобы запустить AR.</div>
+        <button type="button" id="btnOpenInChrome">Открыть в Chrome</button>
+      `;
+      // Insert right after the AR button
+      btn.parentElement?.appendChild(hint);
+      hint.querySelector('#btnOpenInChrome')?.addEventListener('click', () => openInChrome(window.location.href));
+    } else {
+      hint.style.display = '';
+    }
+  } else {
+    btn.classList.remove('arBlocked');
+    btn.removeAttribute('aria-disabled');
+    if (hint) hint.style.display = 'none';
+  }
+}
+
 async function startAR() {
   if (state._startingAR) return;
   state._startingAR = true;
   try {
 
+  const env = getArEnv();
+  if (env.isAndroid && !env.isChrome) {
+    showArHelp('NEED_CHROME');
+    return;
+  }
+
   if (!navigator.xr) {
-    alert('WebXR недоступен в этом браузере. Откройте сайт в Chrome на Android.');
+    showArHelp('NO_WEBXR');
     return;
   }
   const supported = await checkXrSupport();
   if (!supported) {
-    alert('immersive-ar не поддерживается. Нужен Chrome на Android с ARCore.');
+    showArHelp('AR_NOT_SUPPORTED');
     return;
   }
 
@@ -1050,7 +1234,7 @@ async function startAR() {
     session = await navigator.xr.requestSession('immersive-ar', sessionInit);
   } catch (e) {
     console.error(e);
-    alert('Не удалось запустить AR-сессию. Проверьте разрешения камеры.');
+    showArHelp('AR_START_FAILED', e);
     return;
   }
 
@@ -1942,7 +2126,13 @@ UI.btnTechClose?.addEventListener('click', (e) => {
   UI.techBody.hidden = true;
   UI.btnTechToggle.hidden = false;
 });
-UI.btnViewAR?.addEventListener('click', async () => {
+UI.btnViewAR?.addEventListener('click', async (ev) => {
+  const env = getArEnv();
+  if (env.isAndroid && !env.isChrome) {
+    // Do not start AR outside Chrome on Android
+    showArHelp('NEED_CHROME');
+    return;
+  }
   await startAR();
 });
 
@@ -2092,6 +2282,9 @@ async function init() {
 
   // set initial layout
   setLayout('straight');
+
+  // Apply AR entry gating UI (safe on all devices)
+  updateArEntryUI();
 }
 
 renderer.setAnimationLoop((t, frame) => {
