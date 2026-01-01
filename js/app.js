@@ -1021,6 +1021,7 @@ async function checkXrSupport() {
 
 // --- AR launch gating: Chrome-only on Android + ARCore helper ---
 const ARCORE_PLAY_URL = 'https://play.google.com/store/apps/details?id=com.google.ar.core';
+const ARCORE_ALT_URL = 'https://apkpure.com/ru/google-play-services-for-ar-2025/com.google.ar.core';
 
 function getArEnv() {
   const ua = navigator.userAgent || '';
@@ -1094,9 +1095,11 @@ function ensureArHelpUI() {
       <div id="arHelpText"></div>
       <div id="arHelpBtns">
         <button id="arHelpBtnChrome" class="arHelpBtn arHelpBtnPrimary" style="display:none;">Открыть в Chrome</button>
-        <button id="arHelpBtnArcore" class="arHelpBtn arHelpBtnSecondary" style="display:none;">Установить/обновить ARCore</button>
+        <button id="arHelpBtnArcorePlay" class="arHelpBtn arHelpBtnSecondary" style="display:none;">Скачать из Play Market</button>
+        <button id="arHelpBtnArcoreAlt" class="arHelpBtn arHelpBtnSecondary" style="display:none;">Скачать APK (альтернативный источник)</button>
         <button id="arHelpBtnOk" class="arHelpBtn arHelpBtnSecondary">ОК</button>
       </div>
+      <div id="arHelpAltNote" style="display:none; font-size:12px; line-height:1.3; opacity:0.85; margin-top:8px;">Скчать в обход Play Market. Устанавливайте только если доверяете источнику.</div>
     </div>
   `;
   document.body.appendChild(overlay);
@@ -1105,7 +1108,8 @@ function ensureArHelpUI() {
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
   overlay.querySelector('#arHelpBtnOk').addEventListener('click', close);
   overlay.querySelector('#arHelpBtnChrome').addEventListener('click', () => openInChrome(window.location.href));
-  overlay.querySelector('#arHelpBtnArcore').addEventListener('click', openArcoreInstall);
+  overlay.querySelector('#arHelpBtnArcorePlay').addEventListener('click', openArcoreInstall);
+  overlay.querySelector('#arHelpBtnArcoreAlt').addEventListener('click', () => window.open(ARCORE_ALT_URL, '_blank'));
 }
 
 function showArHelp(kind, err) {
@@ -1116,10 +1120,14 @@ function showArHelp(kind, err) {
   const titleEl = overlay.querySelector('#arHelpTitle');
   const textEl = overlay.querySelector('#arHelpText');
   const btnChrome = overlay.querySelector('#arHelpBtnChrome');
-  const btnArcore = overlay.querySelector('#arHelpBtnArcore');
+  const btnArcorePlay = overlay.querySelector('#arHelpBtnArcorePlay');
+  const btnArcoreAlt = overlay.querySelector('#arHelpBtnArcoreAlt');
+  const altNote = overlay.querySelector('#arHelpAltNote');
 
   btnChrome.style.display = 'none';
-  btnArcore.style.display = 'none';
+  btnArcorePlay.style.display = 'none';
+  btnArcoreAlt.style.display = 'none';
+  if (altNote) altNote.style.display = 'none';
 
   let title = 'Не удалось запустить AR';
   let msg = 'Попробуйте ещё раз.';
@@ -1132,11 +1140,15 @@ function showArHelp(kind, err) {
     title = 'WebXR недоступен';
     msg = 'Ваш браузер не поддерживает WebXR AR.\nОткройте сайт в Google Chrome на Android.';
     btnChrome.style.display = env.isAndroid ? 'inline-block' : 'none';
-    btnArcore.style.display = env.isAndroid ? 'inline-block' : 'none';
+    btnArcorePlay.style.display = env.isAndroid ? 'inline-block' : 'none';
+    btnArcoreAlt.style.display = env.isAndroid ? 'inline-block' : 'none';
+    if (altNote) altNote.style.display = env.isAndroid ? 'block' : 'none';
   } else if (kind === 'AR_NOT_SUPPORTED') {
     title = 'AR недоступен на этом устройстве';
     msg = 'Не удалось включить immersive-ar.\nУстановите/обновите Google Play Services for AR (ARCore) и попробуйте снова.\nЕсли устройство не поддерживает ARCore — AR может не запуститься.';
-    btnArcore.style.display = env.isAndroid ? 'inline-block' : 'none';
+    btnArcorePlay.style.display = env.isAndroid ? 'inline-block' : 'none';
+    btnArcoreAlt.style.display = env.isAndroid ? 'inline-block' : 'none';
+    if (altNote) altNote.style.display = env.isAndroid ? 'block' : 'none';
   } else if (kind === 'CAMERA_DENIED') {
     title = 'Нет доступа к камере';
     msg = 'Разрешите доступ к камере для браузера и для сайта, затем попробуйте снова.\n(Настройки → Приложения → Chrome → Разрешения → Камера)';
@@ -1152,7 +1164,9 @@ function showArHelp(kind, err) {
     title = 'Не удалось запустить AR';
     msg = 'Попробуйте открыть сайт в Google Chrome.\nЕсли не помогает — установите/обновите ARCore.';
     btnChrome.style.display = env.isAndroid ? 'inline-block' : 'none';
-    btnArcore.style.display = env.isAndroid ? 'inline-block' : 'none';
+    btnArcorePlay.style.display = env.isAndroid ? 'inline-block' : 'none';
+    btnArcoreAlt.style.display = env.isAndroid ? 'inline-block' : 'none';
+    if (altNote) altNote.style.display = env.isAndroid ? 'block' : 'none';
   }
 
   titleEl.textContent = title;
