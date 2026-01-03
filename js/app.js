@@ -253,6 +253,19 @@ function prepMapTex(tex, isColor = false) {
   return tex;
 }
 
+let __fallbackWhiteTex = null;
+function getFallbackWhiteTex() {
+  if (__fallbackWhiteTex) return __fallbackWhiteTex;
+  const data = new Uint8Array([255, 255, 255, 255]);
+  const tex = new THREE.DataTexture(data, 1, 1, THREE.RGBAFormat);
+  tex.needsUpdate = true;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  __fallbackWhiteTex = tex;
+  return tex;
+}
+
+
 function makeTileMaterial(arg = {}) {
   // Support both: makeTileMaterial({ ... }) and makeTileMaterial(texture)
   if (arg && arg.isTexture) arg = { albedoTex: arg };
@@ -632,13 +645,52 @@ async function selectTile(tileOrId) {
   // External textures (e.g., Object Storage) require CORS; keep crossOrigin anonymous.
   try { loader.setCrossOrigin?.('anonymous'); } catch (_) {}
 
-  const [albedoTex, normalTex, roughTex, aoTex, heightTex] = await Promise.all([
-    loader.loadAsync(albedoUrl),
-    normalUrl ? loader.loadAsync(normalUrl) : Promise.resolve(null),
-    roughUrl ? loader.loadAsync(roughUrl) : Promise.resolve(null),
-    aoUrl ? loader.loadAsync(aoUrl) : Promise.resolve(null),
-    heightUrl ? loader.loadAsync(heightUrl) : Promise.resolve(null),
-  ]);
+  // Soft-fallback: do not crash if some maps 404 (missing in bucket).
+  const loadTexSafe = async (url, label) => {
+    if (!url) return null;
+    try {
+      return await loader.loadAsync(url);
+    } catch (e) {
+      console.warn(`[surfaces] failed to load ${label}: ${url}`, e);
+      return null;
+    }
+  };
+
+  const preferredQuality = getPreferredSurfaceQuality();
+
+  // Silent try-load (no warnings). Used for optional 2k attempts.
+  const tryLoad = async (url) => {
+    if (!url) return null;
+    try {
+      return await loader.loadAsync(url);
+    } catch (_) {
+      return null;
+    }
+  };
+
+  // Auto 1k/2k: on capable devices prefer 2k, otherwise 1k. If 2k asset is missing, fall back to original URL.
+  const loadTexSmart = async (url, label) => {
+    if (!url) return null;
+    if (preferredQuality === '2k') {
+      const cand = make2kCandidateUrl(url);
+      if (cand && cand !== url) {
+        const tex2 = await tryLoad(cand);
+        if (tex2) return tex2;
+      }
+    }
+    return await loadRequired(url, label);
+  };
+
+  let albedoTex = await loadTexSmart(albedoUrl, 'albedo');
+  const normalTex = await loadTexSmart(normalUrl, 'normal');
+  const roughTex = await loadTexSmart(roughUrl, 'roughness');
+  const aoTex = await loadTexSmart(aoUrl, 'ao');
+  const heightTex = await loadTexSmart(heightUrl, 'height');
+
+  if (!albedoTex) {
+    // Keep flow working even if base map is missing.
+    albedoTex = getFallbackWhiteTex();
+  }
 
   tileMaterial = makeTileMaterial({
     albedoTex,
@@ -971,6 +1023,17 @@ async function openDetail(shapeId) {
   // Swatches. For per-shape palette: click -> apply + start AR.
   renderColorRow(UI.colorRow, allowed, { startArOnClick: paletteActive });
 
+  // Prefetch: warm cache for first swatches + default tile maps (non-blocking)
+  try {
+    const previewUrls = (allowed || []).slice(0, 14).map(getTilePreviewUrl).filter(Boolean);
+    prefetchImageUrls(previewUrls, 4);
+    const defaultForPrefetch = (allowed && allowed[0]) ? allowed[0] : null;
+    if (defaultForPrefetch) {
+      prefetchImageUrls(getTileMapUrls(defaultForPrefetch), 3);
+    }
+  } catch (_) {}
+
+
   // Choose default surface/tile for this shape
   const defaultTile = allowed[0] || state.tiles[0];
   if (defaultTile) await selectTile(defaultTile);
@@ -982,17 +1045,109 @@ async function openDetail(shapeId) {
   state.phase = 'detail';
 }
 
+
+
+// ------------------------
+// Preview lazy-load + prefetch (performance/stability)
+// ------------------------
+function getTilePreviewUrl(t) {
+  return (t && (t.preview || (t.maps && t.maps.albedo) || t.texture)) ? (t.preview || (t.maps && t.maps.albedo) || t.texture) : '';
+}
+
+function getTileMapUrls(t) {
+  if (!t) return [];
+  const m = (t.maps && typeof t.maps === 'object') ? t.maps : {};
+  const albedo = m.albedo || t.texture || '';
+  const normal = m.normal || '';
+  const rough  = m.roughness || '';
+  const ao     = m.ao || '';
+  const height = m.height || '';
+  return [albedo, normal, rough, ao, height].filter(Boolean);
+}
+
+// Prefetch a list of image URLs with small concurrency.
+// Never throws — safe to fire-and-forget.
+function prefetchImageUrls(urls, concurrency = 3) {
+  try {
+    const unique = Array.from(new Set((urls || []).filter(Boolean)));
+    if (!unique.length) return Promise.resolve([]);
+    let i = 0;
+
+    const loadOne = (url) => new Promise((resolve) => {
+      const img = new Image();
+      img.decoding = 'async';
+      img.onload = () => resolve({ url, ok: true });
+      img.onerror = () => resolve({ url, ok: false });
+      // Some browsers benefit from setting referrerPolicy for cross-origin assets
+      try { img.referrerPolicy = 'no-referrer'; } catch (_) {}
+      img.src = url;
+    });
+
+    const workers = new Array(Math.max(1, Math.min(concurrency, 6))).fill(0).map(async () => {
+      while (i < unique.length) {
+        const url = unique[i++];
+        await loadOne(url);
+      }
+    });
+
+    return Promise.all(workers);
+  } catch (_) {
+    return Promise.resolve([]);
+  }
+}
+
+let _lazySwatchObserver = null;
+
+function ensureLazySwatchObserver() {
+  if (_lazySwatchObserver) return _lazySwatchObserver;
+
+  _lazySwatchObserver = new IntersectionObserver((entries) => {
+    entries.forEach((e) => {
+      if (!e.isIntersecting) return;
+      const el = e.target;
+      const bg = el?.dataset?.bg;
+      if (bg && !el.dataset.bgLoaded) {
+        el.style.backgroundImage = `url(${bg})`;
+        el.dataset.bgLoaded = '1';
+      }
+      _lazySwatchObserver.unobserve(el);
+    });
+  }, {
+    root: null,
+    rootMargin: '250px',
+    threshold: 0.01
+  });
+
+  return _lazySwatchObserver;
+}
+
+function setupLazySwatches(container) {
+  if (!container) return;
+  const io = ensureLazySwatchObserver();
+  container.querySelectorAll('.swatch[data-bg]').forEach((el) => {
+    if (el.dataset.bgLoaded) return;
+    io.observe(el);
+  });
+}
+
 function renderColorRow(container, tiles, opts = {}) {
   if (!container) return;
   container.innerHTML = '';
   const startArOnClick = Boolean(opts.startArOnClick);
 
-  tiles.forEach(t => {
+  tiles.forEach((t, idx) => {
     const sw = document.createElement('button');
     sw.type = 'button';
     sw.className = 'swatch';
     sw.dataset.tileId = String(t.id);
-    sw.style.backgroundImage = `url(${t.preview || (t.maps && t.maps.albedo) || t.texture || ''})`;
+        const bgUrl = getTilePreviewUrl(t);
+    sw.dataset.bg = bgUrl;
+    // Eagerly paint the first few items for a snappy first render; lazy-load the rest.
+    const eagerCount = (typeof opts.eagerCount === 'number') ? opts.eagerCount : 10;
+    if (idx < eagerCount && bgUrl) {
+      sw.style.backgroundImage = `url(${bgUrl})`;
+      sw.dataset.bgLoaded = '1';
+    }
     sw.title = t.name || 'Текстура';
     sw.addEventListener('click', async () => {
       await selectTile(t);
@@ -1004,6 +1159,8 @@ function renderColorRow(container, tiles, opts = {}) {
     });
     container.appendChild(sw);
   });
+  // Lazy-load the rest of swatch previews
+  setupLazySwatches(container);
 }
 
 // ------------------------
@@ -1020,6 +1177,52 @@ async function checkXrSupport() {
 
 
 // --- AR launch gating: Chrome-only on Android + ARCore helper ---
+// --- Surface quality (1k/2k) auto-select ---
+// Heuristic: prefer 2k on capable Android devices (more RAM/cores, big screen, good network), otherwise 1k.
+// You can override via URL param ?tex=1k or ?tex=2k
+function getPreferredSurfaceQuality() {
+  try {
+    const sp = new URLSearchParams(window.location.search || '');
+    const forced = (sp.get('tex') || '').toLowerCase();
+    if (forced === '1k' || forced === '2k') return forced;
+
+    const dm = typeof navigator.deviceMemory === 'number' ? navigator.deviceMemory : 0;
+    const hc = typeof navigator.hardwareConcurrency === 'number' ? navigator.hardwareConcurrency : 0;
+    const dpr = typeof window.devicePixelRatio === 'number' ? window.devicePixelRatio : 1;
+    const minPx = Math.min(window.screen?.width || 0, window.screen?.height || 0) * dpr;
+
+    const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+    const saveData = !!(conn && conn.saveData);
+    const eff = (conn && conn.effectiveType) ? String(conn.effectiveType) : '';
+
+    if (saveData) return '1k';
+    if (/slow-2g|2g/i.test(eff)) return '1k';
+
+    // Strong devices: 2k
+    if (dm >= 4 && hc >= 6 && minPx >= 1080 && !/3g/i.test(eff)) return '2k';
+    // Mid devices: 2k if screen is decent and network not too slow
+    if (dm >= 3 && hc >= 4 && minPx >= 900 && !/3g/i.test(eff)) return '2k';
+
+    return '1k';
+  } catch {
+    return '1k';
+  }
+}
+
+function make2kCandidateUrl(url) {
+  if (!url || typeof url !== 'string') return null;
+  let u = url;
+  let changed = false;
+
+  // Folder convention
+  if (u.includes('/1k/')) { u = u.replace('/1k/', '/2k/'); changed = true; }
+
+  // Filename convention
+  if (u.includes('_1k_')) { u = u.replace('_1k_', '_2k_'); changed = true; }
+  if (!changed) return null;
+  return u;
+}
+
 const ARCORE_PLAY_URL = 'https://play.google.com/store/apps/details?id=com.google.ar.core';
 const ARCORE_ALT_URL = 'https://apkpure.com/ru/google-play-services-for-ar-2025/com.google.ar.core';
 
@@ -1054,6 +1257,7 @@ function openInChrome(url) {
 }
 
 function openArcoreInstall() {
+
   // Try market:// first (opens Play Store app), fallback to https
   try {
     window.location.href = 'market://details?id=com.google.ar.core';
@@ -1062,6 +1266,15 @@ function openArcoreInstall() {
     }, 700);
   } catch (e) {
     window.open(ARCORE_PLAY_URL, '_blank');
+  }
+}
+
+
+function openArcoreAlt() {
+  try {
+    window.open(ARCORE_ALT_URL, '_blank');
+  } catch (e) {
+    window.location.href = ARCORE_ALT_URL;
   }
 }
 
@@ -1096,10 +1309,11 @@ function ensureArHelpUI() {
       <div id="arHelpBtns">
         <button id="arHelpBtnChrome" class="arHelpBtn arHelpBtnPrimary" style="display:none;">Открыть в Chrome</button>
         <button id="arHelpBtnArcorePlay" class="arHelpBtn arHelpBtnSecondary" style="display:none;">Скачать из Play Market</button>
+        <div id="arHelpArcoreNote" style="display:none; margin-top:6px; font-size:12px; opacity:0.85;">Если Play Market недоступен, скачайте напрямую по ссылке ниже.</div>
         <button id="arHelpBtnArcoreAlt" class="arHelpBtn arHelpBtnSecondary" style="display:none;">Скачать APK (альтернативный источник)</button>
+        <div id="arHelpArcoreWarn" style="display:none; margin-top:6px; font-size:11px; opacity:0.75;">Скчать в обход Play Market. Устанавливайте только если доверяете источнику.</div>
         <button id="arHelpBtnOk" class="arHelpBtn arHelpBtnSecondary">ОК</button>
       </div>
-      <div id="arHelpAltNote" style="display:none; font-size:12px; line-height:1.3; opacity:0.85; margin-top:8px;">Скчать в обход Play Market. Устанавливайте только если доверяете источнику.</div>
     </div>
   `;
   document.body.appendChild(overlay);
@@ -1109,7 +1323,7 @@ function ensureArHelpUI() {
   overlay.querySelector('#arHelpBtnOk').addEventListener('click', close);
   overlay.querySelector('#arHelpBtnChrome').addEventListener('click', () => openInChrome(window.location.href));
   overlay.querySelector('#arHelpBtnArcorePlay').addEventListener('click', openArcoreInstall);
-  overlay.querySelector('#arHelpBtnArcoreAlt').addEventListener('click', () => window.open(ARCORE_ALT_URL, '_blank'));
+  overlay.querySelector('#arHelpBtnArcoreAlt').addEventListener('click', openArcoreAlt);
 }
 
 function showArHelp(kind, err) {
@@ -1122,12 +1336,14 @@ function showArHelp(kind, err) {
   const btnChrome = overlay.querySelector('#arHelpBtnChrome');
   const btnArcorePlay = overlay.querySelector('#arHelpBtnArcorePlay');
   const btnArcoreAlt = overlay.querySelector('#arHelpBtnArcoreAlt');
-  const altNote = overlay.querySelector('#arHelpAltNote');
+  const arcoreNote = overlay.querySelector('#arHelpArcoreNote');
+  const arcoreWarn = overlay.querySelector('#arHelpArcoreWarn');
 
   btnChrome.style.display = 'none';
   btnArcorePlay.style.display = 'none';
   btnArcoreAlt.style.display = 'none';
-  if (altNote) altNote.style.display = 'none';
+  arcoreNote.style.display = 'none';
+  arcoreWarn.style.display = 'none';
 
   let title = 'Не удалось запустить AR';
   let msg = 'Попробуйте ещё раз.';
@@ -1142,13 +1358,15 @@ function showArHelp(kind, err) {
     btnChrome.style.display = env.isAndroid ? 'inline-block' : 'none';
     btnArcorePlay.style.display = env.isAndroid ? 'inline-block' : 'none';
     btnArcoreAlt.style.display = env.isAndroid ? 'inline-block' : 'none';
-    if (altNote) altNote.style.display = env.isAndroid ? 'block' : 'none';
+    arcoreNote.style.display = env.isAndroid ? 'block' : 'none';
+    arcoreWarn.style.display = env.isAndroid ? 'block' : 'none';
   } else if (kind === 'AR_NOT_SUPPORTED') {
     title = 'AR недоступен на этом устройстве';
     msg = 'Не удалось включить immersive-ar.\nУстановите/обновите Google Play Services for AR (ARCore) и попробуйте снова.\nЕсли устройство не поддерживает ARCore — AR может не запуститься.';
     btnArcorePlay.style.display = env.isAndroid ? 'inline-block' : 'none';
     btnArcoreAlt.style.display = env.isAndroid ? 'inline-block' : 'none';
-    if (altNote) altNote.style.display = env.isAndroid ? 'block' : 'none';
+    arcoreNote.style.display = env.isAndroid ? 'block' : 'none';
+    arcoreWarn.style.display = env.isAndroid ? 'block' : 'none';
   } else if (kind === 'CAMERA_DENIED') {
     title = 'Нет доступа к камере';
     msg = 'Разрешите доступ к камере для браузера и для сайта, затем попробуйте снова.\n(Настройки → Приложения → Chrome → Разрешения → Камера)';
@@ -1166,7 +1384,8 @@ function showArHelp(kind, err) {
     btnChrome.style.display = env.isAndroid ? 'inline-block' : 'none';
     btnArcorePlay.style.display = env.isAndroid ? 'inline-block' : 'none';
     btnArcoreAlt.style.display = env.isAndroid ? 'inline-block' : 'none';
-    if (altNote) altNote.style.display = env.isAndroid ? 'block' : 'none';
+    arcoreNote.style.display = env.isAndroid ? 'block' : 'none';
+    arcoreWarn.style.display = env.isAndroid ? 'block' : 'none';
   }
 
   titleEl.textContent = title;
