@@ -656,6 +656,9 @@ async function selectTile(tileOrId) {
     }
   };
 
+  // Required load wrapper (kept for backward compatibility).
+  const loadRequired = loadTexSafe;
+
   const preferredQuality = getPreferredSurfaceQuality();
 
   // Silent try-load (no warnings). Used for optional 2k attempts.
