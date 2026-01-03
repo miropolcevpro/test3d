@@ -90,6 +90,13 @@ input:focus,select:focus{border-color:rgba(78,118,137,.65)}
 .btn:hover{filter:brightness(1.05)}
 .btn:disabled{opacity:.5; cursor:not-allowed}
 
+.btn--ghost{
+  background:transparent;
+  color:var(--text);
+  border:1px solid var(--line);
+}
+.btn--ghost:hover{filter:none; border-color:rgba(255,255,255,.18)}
+
 .status{
   margin-top:10px;
   font-size:12px;

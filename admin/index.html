@@ -12,7 +12,7 @@
       <div class="dot"></div>
       <div>
         <div class="title">Админка контента</div>
-        <div class="subtitle">Шаг 1 — чтение данных (без загрузки и правок)</div>
+        <div class="subtitle">Шаг 2 — backend + JWT (чтение через API)</div>
       </div>
     </div>
     <div class="links">
@@ -25,26 +25,30 @@
     <section class="card" id="loginCard">
       <h2>Вход</h2>
       <p class="muted">
-        На этом шаге авторизация ещё не подключена. В ШАГЕ 2 добавим backend и JWT-логин.
+        Введите логин и пароль. Админка работает через backend API (JWT).
       </p>
       <div class="row">
         <label class="field">
           <span>Логин</span>
-          <input type="text" placeholder="demo" disabled />
+          <input id="loginUser" type="text" placeholder="admin" autocomplete="username" />
         </label>
         <label class="field">
           <span>Пароль</span>
-          <input type="password" placeholder="••••••" disabled />
+          <input id="loginPass" type="password" placeholder="••••••" autocomplete="current-password" />
         </label>
-        <button class="btn" disabled>Войти</button>
+        <button class="btn" id="btnLogin">Войти</button>
       </div>
+      <div class="status" id="loginStatus"></div>
+      <p class="muted mt">
+        Backend URL задаётся в <code>admin/config.js</code> (переменная <code>API_BASE_URL</code>).
+      </p>
     </section>
 
-    <section class="card">
+    <section class="card" id="mainCard" hidden>
       <h2>Формы</h2>
       <p class="muted">
-        Список форм читается из <code>shapes.json</code>. При выборе формы пытаемся загрузить палитру с бакета по
-        <code>/palettes/&lt;shapeId&gt;.json</code>. Если файла нет — показываем предупреждение (без ошибок/падений).
+        Список форм загружается через backend: <code>GET /api/shapes</code>. Палитра формы: <code>GET /api/palettes/&lt;shapeId&gt;</code>.
+        Если палитры нет (404 в бакете) — backend вернёт пустой шаблон.
       </p>
 
       <div class="row">
@@ -55,12 +59,8 @@
           </select>
         </label>
 
-        <label class="field">
-          <span>Источник палитр</span>
-          <input id="bucketBase" type="text" value="https://storage.yandexcloud.net/webar3dtexture/" />
-        </label>
-
         <button class="btn" id="reloadBtn" title="Перезагрузить список и палитру">Обновить</button>
+        <button class="btn btn--ghost" id="btnLogout" title="Выйти">Выйти</button>
       </div>
 
       <div class="status" id="status"></div>
@@ -71,6 +71,7 @@
     </section>
   </main>
 
+  <script src="./config.js"></script>
   <script src="./admin.js"></script>
 </body>
 </html>
