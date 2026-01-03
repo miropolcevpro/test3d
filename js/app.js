@@ -150,6 +150,35 @@ const state = {
   closed: false,
 };
 
+
+// ------------------------
+// Texture loading limiter (prevents spikes when user rapidly switches textures)
+// ------------------------
+const TEX_LOAD_MAX_PARALLEL = 3;
+let _texLoadActive = 0;
+const _texLoadQueue = [];
+function _pumpTexLoadQueue() {
+  while (_texLoadActive < TEX_LOAD_MAX_PARALLEL && _texLoadQueue.length) {
+    const job = _texLoadQueue.shift();
+    _texLoadActive++;
+    Promise.resolve()
+      .then(job.fn)
+      .then(
+        (res) => { _texLoadActive--; job.resolve(res); _pumpTexLoadQueue(); },
+        (err) => { _texLoadActive--; job.reject(err); _pumpTexLoadQueue(); }
+      );
+  }
+}
+function runWithTexLoadLimit(fn) {
+  return new Promise((resolve, reject) => {
+    _texLoadQueue.push({ fn, resolve, reject });
+    _pumpTexLoadQueue();
+  });
+}
+
+// Selection guard: only the latest selected texture is allowed to apply
+let _selectTileSeq = 0;
+
 const SNAP_DIST_M = 0.10;
 
 // ------------------------
@@ -629,6 +658,11 @@ async function selectTile(tileOrId) {
   }
   if (!t) return;
 
+  // Guard against rapid re-selection: if user clicks another tile while we are still loading,
+  // older loads won't overwrite the latest selection/material.
+  const _mySeq = ++_selectTileSeq;
+  const isStale = () => _mySeq !== _selectTileSeq;
+
   state.selectedTile = t;
 
   const albedoUrl = (t.maps && t.maps.albedo) ? t.maps.albedo : t.texture;
@@ -649,7 +683,7 @@ async function selectTile(tileOrId) {
   const loadTexSafe = async (url, label) => {
     if (!url) return null;
     try {
-      return await loader.loadAsync(url);
+      return await runWithTexLoadLimit(() => loader.loadAsync(url));
     } catch (e) {
       console.warn(`[surfaces] failed to load ${label}: ${url}`, e);
       return null;
@@ -665,7 +699,7 @@ async function selectTile(tileOrId) {
   const tryLoad = async (url) => {
     if (!url) return null;
     try {
-      return await loader.loadAsync(url);
+      return await runWithTexLoadLimit(() => loader.loadAsync(url));
     } catch (_) {
       return null;
     }
@@ -674,26 +708,36 @@ async function selectTile(tileOrId) {
   // Auto 1k/2k: on capable devices prefer 2k, otherwise 1k. If 2k asset is missing, fall back to original URL.
   const loadTexSmart = async (url, label) => {
     if (!url) return null;
+    if (isStale()) return null;
     if (preferredQuality === '2k') {
       const cand = make2kCandidateUrl(url);
       if (cand && cand !== url) {
         const tex2 = await tryLoad(cand);
+        if (isStale()) return null;
         if (tex2) return tex2;
       }
     }
+        if (isStale()) return null;
     return await loadRequired(url, label);
   };
 
   let albedoTex = await loadTexSmart(albedoUrl, 'albedo');
+  if (isStale()) return;
   const normalTex = await loadTexSmart(normalUrl, 'normal');
+  if (isStale()) return;
   const roughTex = await loadTexSmart(roughUrl, 'roughness');
+  if (isStale()) return;
   const aoTex = await loadTexSmart(aoUrl, 'ao');
+  if (isStale()) return;
   const heightTex = await loadTexSmart(heightUrl, 'height');
+  if (isStale()) return;
 
   if (!albedoTex) {
     // Keep flow working even if base map is missing.
     albedoTex = getFallbackWhiteTex();
   }
+
+  if (isStale()) return;
 
   tileMaterial = makeTileMaterial({
     albedoTex,
@@ -704,6 +748,8 @@ async function selectTile(tileOrId) {
     normalScale: ns,
     bumpScale: bs,
   });
+  if (isStale()) return;
+
 
   const size = t.tileSizeM || { w: 0.2, h: 0.2 };
   tileMaterial.uniforms.uTileSize.value.set(size.w, size.h);
