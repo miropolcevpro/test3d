@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Админка контента — WebAR плитка</title>
+  <link rel="stylesheet" href="./admin.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="dot"></div>
+      <div>
+        <div class="title">Админка контента</div>
+        <div class="subtitle">Шаг 1 — чтение данных (без загрузки и правок)</div>
+      </div>
+    </div>
+    <div class="links">
+      <a class="link" href="../index.html">Открыть сайт</a>
+      <a class="link" href="../palette-validator.html">Валидатор палитры</a>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="card" id="loginCard">
+      <h2>Вход</h2>
+      <p class="muted">
+        На этом шаге авторизация ещё не подключена. В ШАГЕ 2 добавим backend и JWT-логин.
+      </p>
+      <div class="row">
+        <label class="field">
+          <span>Логин</span>
+          <input type="text" placeholder="demo" disabled />
+        </label>
+        <label class="field">
+          <span>Пароль</span>
+          <input type="password" placeholder="••••••" disabled />
+        </label>
+        <button class="btn" disabled>Войти</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Формы</h2>
+      <p class="muted">
+        Список форм читается из <code>shapes.json</code>. При выборе формы пытаемся загрузить палитру с бакета по
+        <code>/palettes/&lt;shapeId&gt;.json</code>. Если файла нет — показываем предупреждение (без ошибок/падений).
+      </p>
+
+      <div class="row">
+        <label class="field grow">
+          <span>Выберите форму</span>
+          <select id="shapeSelect">
+            <option value="">Загрузка…</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>Источник палитр</span>
+          <input id="bucketBase" type="text" value="https://storage.yandexcloud.net/webar3dtexture/" />
+        </label>
+
+        <button class="btn" id="reloadBtn" title="Перезагрузить список и палитру">Обновить</button>
+      </div>
+
+      <div class="status" id="status"></div>
+
+      <h3 class="mt">Текстуры формы</h3>
+      <div class="grid" id="texturesGrid"></div>
+      <div class="empty" id="emptyState">Выберите форму, чтобы увидеть список текстур.</div>
+    </section>
+  </main>
+
+  <script src="./admin.js"></script>
+</body>
+</html>
