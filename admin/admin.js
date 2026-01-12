@@ -3,6 +3,22 @@
   const API_BASE_URL = (window.API_BASE_URL || '').replace(/\/+$/, '');
   const TOKEN_KEY = 'admin_jwt';
 
+  // In GitHub Pages the admin lives under /<repo>/admin/, while site assets are under /<repo>/assets/.
+  // Resolve any relative asset paths (e.g. "assets/forms/klassika.png") against the site root ("/<repo>/").
+  const SITE_BASE_URL = (() => {
+    const basePath = window.location.pathname.replace(/\/admin\/.*$/, '/');
+    return window.location.origin + basePath;
+  })();
+
+  function resolveSiteUrl(u) {
+    if (!u) return '';
+    try {
+      return new URL(u, SITE_BASE_URL).toString();
+    } catch {
+      return u;
+    }
+  }
+
   const $ = (id) => document.getElementById(id);
 
   // Auth / common
@@ -182,7 +198,7 @@
       const id = sh?.id || '';
       const name = sh?.name || id;
       const desc = sh?.description || '';
-      const icon = sh?.icon || sh?.hero || '';
+      const icon = resolveSiteUrl(sh?.icon || sh?.hero || '');
 
       const card = document.createElement('div');
       card.className = 'shapeCard';
@@ -216,7 +232,7 @@
   function renderShapeHeader(shape) {
     const id = shape?.id || '';
     const name = shape?.name || id;
-    const hero = shape?.hero || shape?.icon || '';
+    const hero = resolveSiteUrl(shape?.hero || shape?.icon || '');
     const desc = shape?.description || '';
 
     elShapeTitle.textContent = id ? `shapeId: ${id}` : '';
