@@ -1,10 +1,11 @@
-/* Admin (Step 2) — backend + JWT (read-only via API) */
+/* Admin (Step 3 start) — shapes list + shape details (read-only palette), router scaffold */
 (() => {
   const API_BASE_URL = (window.API_BASE_URL || '').replace(/\/+$/, '');
   const TOKEN_KEY = 'admin_jwt';
 
   const $ = (id) => document.getElementById(id);
 
+  // Auth / common
   const elLoginCard = $('loginCard');
   const elMainCard = $('mainCard');
   const elLoginUser = $('loginUser');
@@ -12,12 +13,33 @@
   const elBtnLogin = $('btnLogin');
   const elBtnLogout = $('btnLogout');
   const elLoginStatus = $('loginStatus');
-
-  const elSelect = $('shapeSelect');
-  const elGrid = $('texturesGrid');
-  const elEmpty = $('emptyState');
   const elStatus = $('status');
   const elReload = $('reloadBtn');
+
+  // Views
+  const elViewShapes = $('viewShapes');
+  const elShapesGrid = $('shapesGrid');
+  const elShapesEmpty = $('shapesEmpty');
+  const elShapeSearch = $('shapeSearch');
+
+  const elViewShape = $('viewShape');
+  const elBackBtn = $('backBtn');
+  const elShapeHeader = $('shapeHeader');
+  const elShapeTitle = $('shapeTitle');
+  const elShapeTabs = $('shapeTabs');
+  const elPaneTextures = $('paneTextures');
+  const elPaneUpload = $('paneUpload');
+  const elPaneSettings = $('paneSettings');
+  const elBtnUploadGo = $('btnUploadGo');
+
+  const elTexturesGrid = $('texturesGrid');
+  const elEmptyTextures = $('emptyState');
+
+  /** @type {{ shapes: any[], paletteByShapeId: Map<string, any> }} */
+  const state = {
+    shapes: [],
+    paletteByShapeId: new Map(),
+  };
 
   function setStatus(el, type, msg) {
     if (!el) return;
@@ -28,11 +50,11 @@
 
   function escapeHtml(s) {
     return String(s ?? '')
-      .replaceAll('&','&amp;')
-      .replaceAll('<','&lt;')
-      .replaceAll('>','&gt;')
-      .replaceAll('"','&quot;')
-      .replaceAll("'",'&#39;');
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
   }
 
   function getToken() {
@@ -50,16 +72,13 @@
     headers.set('Accept', 'application/json');
     const token = getToken();
     if (token) headers.set('Authorization', `Bearer ${token}`);
-    if (opts.body && !(opts.body instanceof FormData)) {
-      headers.set('Content-Type', 'application/json');
-    }
+    if (opts.body && !(opts.body instanceof FormData)) headers.set('Content-Type', 'application/json');
 
     const res = await fetch(url, { ...opts, headers, cache: 'no-store' });
     let json = null;
     const ct = res.headers.get('content-type') || '';
-    if (ct.includes('application/json')) {
-      json = await res.json().catch(() => null);
-    } else {
+    if (ct.includes('application/json')) json = await res.json().catch(() => null);
+    else {
       const text = await res.text().catch(() => '');
       json = text ? { message: text } : null;
     }
@@ -82,37 +101,127 @@
     setStatus(elLoginStatus, '', `Подключение к API: ${API_BASE_URL} ...`);
     const json = await apiFetch('/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ username, password })
+      body: JSON.stringify({ username, password }),
     });
     if (!json?.token) throw new Error('Не получили token от backend');
     setToken(json.token);
   }
 
-  async function loadShapes() {
-    setStatus(elStatus, '', 'Загружаем формы…');
-    elSelect.innerHTML = '<option value="">Загрузка…</option>';
+  function parseRoute() {
+    const h = (location.hash || '').replace(/^#/, '');
+    const parts = h.split('/').filter(Boolean);
+    // Supported:
+    //  - #/forms
+    //  - #/shape/<id>/<tab>
+    if (parts.length === 0) return { name: 'forms' };
+    if (parts[0] === 'forms') return { name: 'forms' };
+    if (parts[0] === 'shape') {
+      return {
+        name: 'shape',
+        id: parts[1] || '',
+        tab: parts[2] || 'textures',
+      };
+    }
+    return { name: 'forms' };
+  }
 
-    const data = await apiFetch('/api/shapes');
-    const ids = Array.isArray(data?.shapes) ? data.shapes : [];
-    const unique = Array.from(new Set(ids)).sort((a,b)=>a.localeCompare(b));
+  function setActiveTab(tab) {
+    const panes = {
+      textures: elPaneTextures,
+      upload: elPaneUpload,
+      settings: elPaneSettings,
+    };
+    for (const [k, el] of Object.entries(panes)) {
+      if (!el) continue;
+      el.hidden = k !== tab;
+    }
+    if (elShapeTabs) {
+      for (const btn of elShapeTabs.querySelectorAll('.tab')) {
+        btn.classList.toggle('active', btn.dataset.tab === tab);
+      }
+    }
+  }
 
-    elSelect.innerHTML = '<option value="">— выберите —</option>' + unique.map(id => (
-      `<option value="${escapeHtml(id)}">${escapeHtml(id)}</option>`
-    )).join('');
+  function showView(name) {
+    elViewShapes.hidden = name !== 'forms';
+    elViewShape.hidden = name !== 'shape';
+  }
 
-    setStatus(elStatus, 'ok', `Загружено форм: ${unique.length}`);
+  function renderShapesList(filterText = '') {
+    const q = (filterText || '').trim().toLowerCase();
+    const shapes = state.shapes || [];
+    const filtered = !q
+      ? shapes
+      : shapes.filter(s => {
+          const id = String(s?.id || '').toLowerCase();
+          const name = String(s?.name || '').toLowerCase();
+          return id.includes(q) || name.includes(q);
+        });
+
+    elShapesGrid.innerHTML = '';
+    elShapesEmpty.style.display = filtered.length ? 'none' : 'block';
+
+    const frag = document.createDocumentFragment();
+    for (const sh of filtered) {
+      const id = sh?.id || '';
+      const name = sh?.name || id;
+      const desc = sh?.description || '';
+      const icon = sh?.icon || sh?.hero || '';
+
+      const card = document.createElement('div');
+      card.className = 'shapeCard';
+      card.setAttribute('role', 'button');
+      card.tabIndex = 0;
+      card.innerHTML = `
+        <div class="shapeThumb">
+          ${icon ? `<img alt="" loading="lazy" src="${escapeHtml(icon)}" />` : ''}
+        </div>
+        <div class="shapeBody">
+          <div class="shapeName">${escapeHtml(name)}</div>
+          <div class="shapeId">${escapeHtml(id)}</div>
+          <div class="shapeDesc">${escapeHtml(desc)}</div>
+        </div>
+      `;
+      const go = () => {
+        location.hash = `#/shape/${encodeURIComponent(id)}/textures`;
+      };
+      card.addEventListener('click', go);
+      card.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          go();
+        }
+      });
+      frag.appendChild(card);
+    }
+    elShapesGrid.appendChild(frag);
+  }
+
+  function renderShapeHeader(shape) {
+    const id = shape?.id || '';
+    const name = shape?.name || id;
+    const hero = shape?.hero || shape?.icon || '';
+    const desc = shape?.description || '';
+
+    elShapeTitle.textContent = id ? `shapeId: ${id}` : '';
+    elShapeHeader.innerHTML = `
+      ${hero ? `<img class="shapeHero" alt="" loading="lazy" src="${escapeHtml(hero)}" />` : ''}
+      <div class="shapeInfo">
+        <div class="hName">${escapeHtml(name)}</div>
+        <div class="hMeta">${escapeHtml(id)}</div>
+        ${desc ? `<div class="hDesc">${escapeHtml(desc)}</div>` : ''}
+      </div>
+    `;
   }
 
   function renderTextures(items) {
-    elGrid.innerHTML = '';
-    if (!items || !items.length) {
-      elEmpty.style.display = 'block';
-      return;
-    }
-    elEmpty.style.display = 'none';
+    elTexturesGrid.innerHTML = '';
+    const list = Array.isArray(items) ? items : [];
+    elEmptyTextures.style.display = list.length ? 'none' : 'block';
+    if (!list.length) return;
 
     const frag = document.createDocumentFragment();
-    for (const it of items) {
+    for (const it of list) {
       const id = it?.id || it?.textureId || '';
       const name = it?.name || id || '(без названия)';
       const previewUrl = it?.previewUrl || it?.preview || it?.maps?.albedoUrl || it?.maps?.albedo || '';
@@ -128,35 +237,78 @@
       `;
       frag.appendChild(card);
     }
-    elGrid.appendChild(frag);
+    elTexturesGrid.appendChild(frag);
   }
 
-  async function loadPalette(shapeId) {
-    elGrid.innerHTML = '';
-    elEmpty.style.display = 'block';
+  async function ensureShapesLoaded() {
+    if (!API_BASE_URL) throw new Error('API_BASE_URL не задан. Проверьте admin/config.js');
+    setStatus(elStatus, '', 'Загружаем формы…');
+    const data = await apiFetch('/api/shapes');
+    const shapes = Array.isArray(data?.shapes) ? data.shapes : [];
+    state.shapes = shapes;
+    setStatus(elStatus, 'ok', `Загружено форм: ${shapes.length}`);
+  }
 
-    if (!shapeId) {
-      setStatus(elStatus, '', '');
-      return;
-    }
-
+  async function ensurePaletteLoaded(shapeId) {
+    if (!shapeId) return null;
+    if (state.paletteByShapeId.has(shapeId)) return state.paletteByShapeId.get(shapeId);
     setStatus(elStatus, '', `Загружаем палитру формы: ${shapeId} …`);
-
     const palette = await apiFetch('/api/palettes/' + encodeURIComponent(shapeId));
+    state.paletteByShapeId.set(shapeId, palette);
     const items = Array.isArray(palette?.items) ? palette.items : [];
-
     if (palette?._meta?.missing) {
       setStatus(elStatus, 'warn', `Палитра для формы "${shapeId}" не найдена в бакете — возвращён пустой шаблон.`);
     } else {
       setStatus(elStatus, 'ok', `Палитра загружена: ${items.length} текстур`);
     }
+    return palette;
+  }
 
-    renderTextures(items);
+  function findShapeById(shapeId) {
+    return (state.shapes || []).find(s => String(s?.id) === String(shapeId)) || null;
+  }
+
+  async function renderRoute() {
+    const r = parseRoute();
+    if (r.name === 'forms') {
+      showView('forms');
+      renderShapesList(elShapeSearch.value);
+      return;
+    }
+
+    if (r.name === 'shape') {
+      const shapeId = decodeURIComponent(r.id || '');
+      if (!shapeId) {
+        location.hash = '#/forms';
+        return;
+      }
+      showView('shape');
+      setActiveTab(r.tab);
+
+      const shape = findShapeById(shapeId);
+      if (!shape) {
+        setStatus(elStatus, 'warn', `Форма "${shapeId}" не найдена в shapes.json. Обновите список.`);
+        elShapeHeader.innerHTML = '';
+      } else {
+        renderShapeHeader(shape);
+      }
+
+      if (r.tab === 'textures') {
+        const palette = await ensurePaletteLoaded(shapeId);
+        renderTextures(Array.isArray(palette?.items) ? palette.items : []);
+      }
+      return;
+    }
   }
 
   async function initAfterLogin() {
-    await loadShapes();
-    await loadPalette(elSelect.value);
+    await ensureShapesLoaded();
+    state.paletteByShapeId.clear();
+    renderShapesList(elShapeSearch.value);
+
+    // Default route
+    if (!location.hash) location.hash = '#/forms';
+    await renderRoute();
   }
 
   function bindUI() {
@@ -193,25 +345,65 @@
       showLoggedInUI(false);
       setStatus(elStatus, '', '');
       setStatus(elLoginStatus, '', '');
+      state.shapes = [];
+      state.paletteByShapeId.clear();
     });
-
-    elSelect.addEventListener('change', () => loadPalette(elSelect.value));
 
     elReload.addEventListener('click', async () => {
       try {
-        await loadShapes();
-        await loadPalette(elSelect.value);
+        await ensureShapesLoaded();
+        state.paletteByShapeId.clear();
+        await renderRoute();
       } catch (e) {
         console.warn(e);
         setStatus(elStatus, 'err', `Ошибка обновления: ${e.message}`);
       }
+    });
+
+    elShapeSearch.addEventListener('input', () => {
+      if (parseRoute().name !== 'forms') return;
+      renderShapesList(elShapeSearch.value);
+    });
+
+    elBackBtn.addEventListener('click', () => {
+      location.hash = '#/forms';
+    });
+
+    // Tabs
+    elShapeTabs.addEventListener('click', (e) => {
+      const btn = e.target.closest('.tab');
+      if (!btn) return;
+      const tab = btn.dataset.tab;
+      const r = parseRoute();
+      if (r.name !== 'shape') return;
+      const id = r.id || '';
+      location.hash = `#/shape/${id}/${tab}`;
+    });
+
+    // Quick action to upload tab
+    elBtnUploadGo.addEventListener('click', () => {
+      const r = parseRoute();
+      if (r.name !== 'shape') return;
+      location.hash = `#/shape/${r.id || ''}/upload`;
+    });
+
+    window.addEventListener('hashchange', () => {
+      // no await
+      renderRoute().catch((e) => {
+        console.warn(e);
+        setStatus(elStatus, 'err', `Ошибка: ${e.message}`);
+      });
     });
   }
 
   async function init() {
     bindUI();
 
-    // если токен уже есть — попробуем сразу загрузить данные
+    if (!API_BASE_URL) {
+      setStatus(elLoginStatus, 'warn', 'API_BASE_URL не задан. Укажите его в admin/config.js');
+    }
+
+    // try restore
     if (getToken()) {
       showLoggedInUI(true);
       try {
@@ -224,10 +416,7 @@
       }
     } else {
       showLoggedInUI(false);
-    }
-
-    if (!API_BASE_URL) {
-      setStatus(elLoginStatus, 'warn', 'API_BASE_URL не задан. Укажите его в admin/config.js');
+      if (!location.hash) location.hash = '#/forms';
     }
   }
 

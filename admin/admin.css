@@ -116,6 +116,87 @@ input:focus,select:focus{border-color:rgba(78,118,137,.65)}
   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
   gap:12px;
 }
+
+.shapesGrid{
+  display:grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap:12px;
+}
+
+.shapeCard{
+  display:flex;
+  gap:12px;
+  border:1px solid var(--line);
+  border-radius:16px;
+  overflow:hidden;
+  background:rgba(0,0,0,.22);
+  cursor:pointer;
+  min-height:110px;
+}
+.shapeCard:hover{border-color:rgba(255,255,255,.18)}
+.shapeThumb{
+  width:110px;
+  flex:0 0 110px;
+  background:rgba(255,255,255,.06);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+.shapeThumb img{width:100%; height:100%; object-fit:cover; display:block}
+.shapeBody{padding:10px 10px 12px; display:flex; flex-direction:column; gap:6px}
+.shapeBody .shapeName{font-weight:800; font-size:14px; line-height:1.25}
+.shapeBody .shapeId{font-size:11px; color:var(--muted)}
+.shapeBody .shapeDesc{font-size:12px; color:var(--muted); line-height:1.35}
+
+.shapeTop{display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:10px}
+.shapeTitle{font-size:12px; color:var(--muted)}
+
+.shapeHeader{
+  margin-top:12px;
+  border:1px solid var(--line);
+  border-radius:16px;
+  overflow:hidden;
+  background:rgba(0,0,0,.18);
+}
+.shapeHero{
+  width:100%;
+  max-height:240px;
+  object-fit:cover;
+  display:block;
+  background:rgba(255,255,255,.06);
+}
+.shapeInfo{padding:12px}
+.shapeInfo .hName{font-weight:900; font-size:16px; margin-bottom:4px}
+.shapeInfo .hMeta{font-size:12px; color:var(--muted); margin-bottom:8px}
+.shapeInfo .hDesc{font-size:12px; color:var(--muted); line-height:1.5}
+
+.tabs{display:flex; gap:8px; flex-wrap:wrap; margin-top:12px}
+.tab{
+  padding:9px 12px;
+  border-radius:12px;
+  border:1px solid var(--line);
+  background:rgba(0,0,0,.12);
+  color:var(--text);
+  cursor:pointer;
+  font-weight:700;
+  font-size:12px;
+}
+.tab:hover{border-color:rgba(255,255,255,.18)}
+.tab.active{border-color:rgba(78,118,137,.65); background:rgba(78,118,137,.18)}
+
+.tabPane{margin-top:12px}
+.paneHead{display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap}
+
+.hint{
+  margin-top:10px;
+  padding:10px 12px;
+  border-radius:12px;
+  border:1px dashed var(--line);
+  background:rgba(0,0,0,.18);
+  color:var(--muted);
+  font-size:12px;
+  line-height:1.5;
+}
 .tile{
   border:1px solid var(--line);
   border-radius:14px;

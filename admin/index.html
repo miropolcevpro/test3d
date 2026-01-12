@@ -12,7 +12,7 @@
       <div class="dot"></div>
       <div>
         <div class="title">Админка контента</div>
-        <div class="subtitle">Шаг 2 — backend + JWT (чтение через API)</div>
+        <div class="subtitle">Шаг 3 (начало) — формы, навигация, подготовка к загрузкам</div>
       </div>
     </div>
     <div class="links">
@@ -45,18 +45,17 @@
     </section>
 
     <section class="card" id="mainCard" hidden>
-      <h2>Формы</h2>
+      <h2>Контент</h2>
       <p class="muted">
-        Список форм загружается через backend: <code>GET /api/shapes</code>. Палитра формы: <code>GET /api/palettes/&lt;shapeId&gt;</code>.
-        Если палитры нет (404 в бакете) — backend вернёт пустой шаблон.
+        Данные загружаются через backend API (JWT):
+        <code>GET /api/shapes</code>, <code>GET /api/palettes/&lt;shapeId&gt;</code>.
+        Если палитры нет (404 в бакете), backend возвращает пустой шаблон.
       </p>
 
       <div class="row">
         <label class="field grow">
-          <span>Выберите форму</span>
-          <select id="shapeSelect">
-            <option value="">Загрузка…</option>
-          </select>
+          <span>Поиск формы</span>
+          <input id="shapeSearch" type="text" placeholder="Например: klassika или Классика" />
         </label>
 
         <button class="btn" id="reloadBtn" title="Перезагрузить список и палитру">Обновить</button>
@@ -65,9 +64,59 @@
 
       <div class="status" id="status"></div>
 
-      <h3 class="mt">Текстуры формы</h3>
-      <div class="grid" id="texturesGrid"></div>
-      <div class="empty" id="emptyState">Выберите форму, чтобы увидеть список текстур.</div>
+      <!-- VIEW: shapes list -->
+      <section id="viewShapes">
+        <h3 class="mt">Формы</h3>
+        <div class="shapesGrid" id="shapesGrid"></div>
+        <div class="empty" id="shapesEmpty">Формы не найдены.</div>
+      </section>
+
+      <!-- VIEW: single shape -->
+      <section id="viewShape" hidden>
+        <div class="shapeTop">
+          <button class="btn btn--ghost" id="backBtn">← Назад к формам</button>
+          <div class="shapeTitle" id="shapeTitle"></div>
+        </div>
+        <div class="shapeHeader" id="shapeHeader"></div>
+
+        <div class="tabs" id="shapeTabs">
+          <button class="tab" data-tab="textures">Текстуры</button>
+          <button class="tab" data-tab="upload">Загрузка</button>
+          <button class="tab" data-tab="settings">Настройки палитры</button>
+        </div>
+
+        <div class="tabPane" id="paneTextures">
+          <div class="paneHead">
+            <h3>Текстуры формы</h3>
+            <button class="btn" id="btnUploadGo" title="Перейти к загрузке">Загрузить текстуры</button>
+          </div>
+          <div class="grid" id="texturesGrid"></div>
+          <div class="empty" id="emptyState">В палитре пока нет текстур.</div>
+        </div>
+
+        <div class="tabPane" id="paneUpload" hidden>
+          <h3>Загрузка</h3>
+          <p class="muted">
+            Здесь будет загрузка ZIP и отдельных файлов с подсказками, прогрессом и отчётом.
+            В текущей итерации мы подготовили экран формы и навигацию.
+          </p>
+          <div class="hint">
+            Рекомендации по структуре:
+            <code>surfaces/&lt;shapeId&gt;/&lt;textureId&gt;/1k/...</code> и (опционально) <code>2k/...</code>.
+            Обязательные карты: <code>albedo</code>, <code>normal</code>, <code>roughness</code>, <code>height</code>.
+          </div>
+        </div>
+
+        <div class="tabPane" id="paneSettings" hidden>
+          <h3>Настройки палитры</h3>
+          <p class="muted">
+            Здесь будут дефолтные настройки масштаба и цветопередачи для формы (safe-fallback на сайте).
+          </p>
+          <div class="hint">
+            Примеры: default tile size, uvScale, exposure/contrast/saturation, roughness/spec strength.
+          </div>
+        </div>
+      </section>
     </section>
   </main>
 
