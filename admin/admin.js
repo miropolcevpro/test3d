@@ -47,6 +47,8 @@
   const elPaneUpload = $('paneUpload');
   const elPaneSettings = $('paneSettings');
   const elBtnUploadGo = $('btnUploadGo');
+  const elBtnPaletteSave = $('btnPaletteSave');
+  const elPaletteStatus = $('paletteStatus');
 
   // Upload UI
   const elUploadTextureId = $('uploadTextureId');
@@ -66,6 +68,7 @@
   // Palette settings UI
   const elSettingsStatus = $('settingsStatus');
   const elBtnSettingsReload = $('btnSettingsReload');
+  const elBtnSettingsReset = $('btnSettingsReset');
   const elBtnSettingsSave = $('btnSettingsSave');
   const elSettingsTileW = $('settingsTileW');
   const elSettingsTileH = $('settingsTileH');
@@ -81,6 +84,30 @@
   const elTexturesGrid = $('texturesGrid');
   const elEmptyTextures = $('emptyState');
 
+  // Modal: ZIP mapping
+  const elMapModal = $('mapModal');
+  const elMapModalTitle = $('mapModalTitle');
+  const elMapModalSubtitle = $('mapModalSubtitle');
+  const elMapModalHint = $('mapModalHint');
+  const elMapTbody = $('mapTbody');
+  const elMapModalStatus = $('mapModalStatus');
+  const elMapModalApplyBtn = $('mapModalApplyBtn');
+  const elMapModalCancelBtn = $('mapModalCancelBtn');
+  const elMapModalCloseBtn = $('mapModalCloseBtn');
+
+  // Modal: texture params
+  const elTexModal = $('texModal');
+  const elTexModalTitle = $('texModalTitle');
+  const elTexModalSubtitle = $('texModalSubtitle');
+  const elTexModalStatus = $('texModalStatus');
+  const elTexModalCloseBtn = $('texModalCloseBtn');
+  const elTexParams = $('texParams');
+  const elTexPreview = $('texPreview');
+  const elTexPreviewHint = $('texPreviewHint');
+  const elTexResetBtn = $('texResetBtn');
+  const elTexRevertBtn = $('texRevertBtn');
+  const elTexSaveBtn = $('texSaveBtn');
+
   /** @type {{ shapes: any[], paletteByShapeId: Map<string, any> }} */
   const state = {
     shapes: [],
@@ -88,6 +115,96 @@
     paletteSettingsByShapeId: new Map(),
     uploadTasks: [],
   };
+
+  // Recommended defaults (used for Reset buttons in UI). These are safe neutral values.
+  const RECOMMENDED_DEFAULTS = {
+    tileSizeMm: { w: 115, h: 115 },
+    uvScale: 1.0,
+    exposureMult: 1.0,
+    contrast: 1.0,
+    saturation: 1.0,
+    roughnessMult: 1.0,
+    specStrength: 1.0,
+    normalScale: 1.0,
+    bumpScale: 1.0,
+  };
+
+  const TEXTURE_PARAM_SCHEMA = [
+    {
+      key: 'uvScale',
+      label: 'uvScale (масштаб узора)',
+      min: 0.5,
+      max: 2.0,
+      step: 0.01,
+      help: 'Влияет на размер узора на поверхности. Меньше 1 — узор крупнее. Больше 1 — узор мельче.',
+    },
+    {
+      key: 'exposureMult',
+      label: 'exposureMult (яркость)',
+      min: 0.6,
+      max: 1.6,
+      step: 0.01,
+      help: 'Локальная яркость/экспозиция конкретной текстуры. Уменьшайте при пересвете тёмных плиток.',
+    },
+    {
+      key: 'contrast',
+      label: 'contrast (контраст)',
+      min: 0.7,
+      max: 1.3,
+      step: 0.01,
+      help: 'Контраст текстуры. Слишком высокий контраст может делать плитку “грязной” или неестественной в AR.',
+    },
+    {
+      key: 'saturation',
+      label: 'saturation (насыщенность)',
+      min: 0.0,
+      max: 1.5,
+      step: 0.01,
+      help: 'Насыщенность цвета. Используйте аккуратно: большие значения часто выглядят нереалистично в AR.',
+    },
+    {
+      key: 'roughnessMult',
+      label: 'roughnessMult (матовость)',
+      min: 0.5,
+      max: 1.6,
+      step: 0.01,
+      help: 'Матовость. Больше — меньше бликов (более матовая поверхность). Меньше — больше бликов.',
+    },
+    {
+      key: 'specStrength',
+      label: 'specStrength (сила блика)',
+      min: 0.0,
+      max: 1.2,
+      step: 0.01,
+      help: 'Сила бликов/“пластика”. Если плитка выглядит пластиковой — уменьшайте.',
+    },
+    {
+      key: 'normalScale',
+      label: 'normalScale (рельеф normal)',
+      min: 0.0,
+      max: 2.0,
+      step: 0.01,
+      help: 'Сила normalMap. Слишком большое значение даёт шум/пластик. Часто достаточно 0.6–1.2.',
+    },
+    {
+      key: 'bumpScale',
+      label: 'bumpScale (рельеф height)',
+      min: 0.0,
+      max: 2.0,
+      step: 0.01,
+      help: 'Сила heightMap как bump. Слишком большое значение даёт неестественные тени. Начните с 0.2–1.0.',
+    },
+  ];
+
+  // ZIP mapping modal runtime
+  let mapModalResolve = null;
+  let mapModalReject = null;
+  let currentMapTask = null;
+
+  // Texture params modal runtime
+  let currentTexShapeId = '';
+  let currentTexItemId = '';
+  let currentTexSnapshot = null;
 
   function setStatus(el, type, msg) {
     if (!el) return;
@@ -117,11 +234,13 @@
   function detectMapType(filename) {
     const n = String(filename || '').toLowerCase();
     const checks = [
-      ['albedo', ['_albedo', 'albedo', 'basecolor', 'diffuse']],
-      ['normal', ['_normal', 'normal']],
-      ['roughness', ['_roughness', 'roughness', 'rgh']],
-      ['height', ['_height', 'height', 'displacement', 'bump']],
-      ['ao', ['_ao', 'ambientocclusion', 'occlusion']],
+      // We accept both strict suffixes (_albedo, _normal, ...) and common synonyms.
+      // NOTE: we intentionally do NOT auto-map "gloss" to roughness because it's inverted.
+      ['albedo', ['_albedo', 'albedo', 'basecolor', 'base_color', 'basecolour', 'diffuse', 'diff', 'color', 'colour', 'col', 'albd']],
+      ['normal', ['_normal', 'normal', 'nrm', 'nor'] ],
+      ['roughness', ['_roughness', 'roughness', 'rough', 'rgh'] ],
+      ['height', ['_height', 'height', 'disp', 'displ', 'displacement', 'bump'] ],
+      ['ao', ['_ao', 'ao', 'ambientocclusion', 'ambient_occlusion', 'occlusion', 'occ'] ],
     ];
     for (const [type, keys] of checks) {
       for (const k of keys) {
@@ -145,8 +264,158 @@
     return new Promise(r => setTimeout(r, ms));
   }
 
+  function fmtSize(bytes) {
+    const b = Number(bytes || 0);
+    if (!Number.isFinite(b) || b <= 0) return '—';
+    if (b < 1024) return b + ' B';
+    const kb = b / 1024;
+    if (kb < 1024) return kb.toFixed(1) + ' KB';
+    const mb = kb / 1024;
+    if (mb < 1024) return mb.toFixed(2) + ' MB';
+    const gb = mb / 1024;
+    return gb.toFixed(2) + ' GB';
+  }
+
+  function openZipMappingModal(task) {
+    if (!elMapModal) {
+      return Promise.reject(new Error('map_modal_not_found'));
+    }
+    return new Promise((resolve, reject) => {
+      // Reset
+      setStatus(elMapModalStatus, '', '');
+      elMapTbody.innerHTML = '';
+
+      const textureId = task.textureId;
+      const quality = task.quality;
+      const shapeId = task.shapeId;
+      elMapModalTitle.textContent = 'Сопоставление карт';
+      elMapModalSubtitle.textContent = `Форма: ${shapeId} • Текстура: ${textureId} • ${quality}`;
+      elMapModalHint.textContent = 'ZIP содержит файлы без стандартных суффиксов. Выберите, какой файл соответствует каждой карте. Обязательные карты: albedo, normal, roughness, height.';
+
+      const entries = task.entries || [];
+      const byPath = new Map(entries.map(e => [e.originalPath, e]));
+      const suggested = task.suggested || new Map();
+
+      const rows = [
+        { type: 'albedo', required: true },
+        { type: 'normal', required: true },
+        { type: 'roughness', required: true },
+        { type: 'height', required: true },
+        { type: 'ao', required: false },
+      ];
+
+      const selects = new Map();
+
+      for (const row of rows) {
+        const tr = document.createElement('tr');
+
+        const tdType = document.createElement('td');
+        tdType.innerHTML = row.required
+          ? `<b>${escapeHtml(row.type)}</b> <span class="uploadPill">обяз.</span>`
+          : `<b>${escapeHtml(row.type)}</b> <span class="uploadPill">опц.</span>`;
+        tr.appendChild(tdType);
+
+        const tdSel = document.createElement('td');
+        const sel = document.createElement('select');
+        sel.className = 'mapSelect';
+        const optEmpty = document.createElement('option');
+        optEmpty.value = '';
+        optEmpty.textContent = '— не выбрано —';
+        sel.appendChild(optEmpty);
+
+        for (const e of entries) {
+          const o = document.createElement('option');
+          o.value = e.originalPath;
+          o.textContent = e.filename;
+          sel.appendChild(o);
+        }
+
+        const s = suggested.get(row.type);
+        if (s && byPath.has(s)) sel.value = s;
+
+        tdSel.appendChild(sel);
+        tr.appendChild(tdSel);
+
+        const tdSize = document.createElement('td');
+        const picked = byPath.get(sel.value);
+        tdSize.textContent = fmtSize(picked?.file?.size || 0);
+        tr.appendChild(tdSize);
+
+        sel.addEventListener('change', () => {
+          const ee = byPath.get(sel.value);
+          tdSize.textContent = fmtSize(ee?.file?.size || 0);
+        });
+
+        selects.set(row.type, sel);
+        elMapTbody.appendChild(tr);
+      }
+
+      const close = () => {
+        elMapModal.hidden = true;
+        document.body.style.overflow = '';
+      };
+
+      const onCancel = () => {
+        cleanup();
+        close();
+        reject(new Error('upload_cancelled'));
+      };
+
+      const onApply = () => {
+        // Validate required
+        const required = ['albedo', 'normal', 'roughness', 'height'];
+        for (const t of required) {
+          const v = selects.get(t)?.value || '';
+          if (!v) {
+            setStatus(elMapModalStatus, 'err', `Выберите файл для обязательной карты: ${t}`);
+            return;
+          }
+        }
+        // Validate uniqueness (avoid selecting the same file for different required maps)
+        const used = new Set();
+        for (const t of required) {
+          const v = selects.get(t).value;
+          if (used.has(v)) {
+            setStatus(elMapModalStatus, 'err', 'Один и тот же файл выбран для нескольких обязательных карт. Проверьте сопоставление.');
+            return;
+          }
+          used.add(v);
+        }
+
+        const mapping = new Map();
+        for (const [t, sel] of selects.entries()) {
+          const v = sel.value;
+          if (v) mapping.set(t, v);
+        }
+        cleanup();
+        close();
+        resolve(mapping);
+      };
+
+      const onBackdrop = (e) => {
+        const act = e.target?.getAttribute?.('data-action');
+        if (act === 'close') onCancel();
+      };
+
+      const cleanup = () => {
+        elMapModalApplyBtn?.removeEventListener('click', onApply);
+        elMapModalCancelBtn?.removeEventListener('click', onCancel);
+        elMapModalCloseBtn?.removeEventListener('click', onCancel);
+        elMapModal?.removeEventListener('click', onBackdrop);
+      };
+
+      elMapModalApplyBtn?.addEventListener('click', onApply);
+      elMapModalCancelBtn?.addEventListener('click', onCancel);
+      elMapModalCloseBtn?.addEventListener('click', onCancel);
+      elMapModal?.addEventListener('click', onBackdrop);
+
+      elMapModal.hidden = false;
+      document.body.style.overflow = 'hidden';
+    });
+  }
+
   async function unzipToFiles(zipFile) {
-    if (!zipFile) return { files: [], meta: {} };
+    if (!zipFile) return { files: [], meta: { structured: false, shapeIds: [], textureIds: [], qualities: [] } };
     if (typeof DecompressionStream !== 'function') {
       throw new Error('ZIP распаковка не поддерживается: требуется современный Chrome (DecompressionStream)');
     }
@@ -171,7 +440,12 @@
     const cdOffset = dv.getUint32(eocd + 16, true);
     let ptr = cdOffset;
     const files = [];
-    const meta = {};
+
+    // meta collector (for "умная сборка" из ZIP)
+    const shapeIds = new Set();
+    const textureIds = new Set();
+    const qualities = new Set();
+    let structured = false;
 
     const CDFH = 0x02014b50;
     const LFH = 0x04034b50;
@@ -190,12 +464,17 @@
 
       if (name.endsWith('/')) continue;
 
-      // Parse some meta if zip has full paths
-      const m = name.match(/surfaces\/([^/]+)\/([^/]+)\/(1k|2k)\//);
+      const normName = name.replace(/\\/g, '/');
+
+      // Extract meta if ZIP has full paths
+      const idx = normName.indexOf('surfaces/');
+      const rel = idx >= 0 ? normName.slice(idx) : normName;
+      const m = rel.match(/^surfaces\/([^/]+)\/([^/]+)\/(1k|2k)\//);
       if (m) {
-        meta.shapeId = meta.shapeId || m[1];
-        meta.textureId = meta.textureId || m[2];
-        meta.quality = meta.quality || m[3];
+        structured = true;
+        shapeIds.add(m[1]);
+        textureIds.add(m[2]);
+        qualities.add(m[3]);
       }
 
       // Local header
@@ -220,15 +499,24 @@
       if (uncompSize && out.byteLength !== uncompSize) {
         // best-effort; continue
       }
-      const base = name.split('/').pop();
+
+      const base = normName.split('/').pop();
       const file = new File([out], base, { type: guessMimeByExt(base) });
-      files.push({ file, originalPath: name });
+      files.push({ file, originalPath: normName });
     }
 
-    return { files, meta };
+    return {
+      files,
+      meta: {
+        structured,
+        shapeIds: Array.from(shapeIds),
+        textureIds: Array.from(textureIds),
+        qualities: Array.from(qualities),
+      },
+    };
   }
 
-  function getToken() {
+function getToken() {
     return sessionStorage.getItem(TOKEN_KEY) || '';
   }
 
@@ -397,6 +685,13 @@
       const name = it?.name || id || '(без названия)';
       const previewUrl = it?.previewUrl || it?.preview || it?.maps?.albedoUrl || it?.maps?.albedo || '';
 
+      const hasTileOverride = !!it?.tileSizeM;
+      const hasParams = it?.params && typeof it.params === 'object' && Object.keys(it.params).length > 0;
+      const pills = [
+        hasTileOverride ? '<span class="pill pill--set">tileSize</span>' : '<span class="pill">tileSize: default</span>',
+        hasParams ? '<span class="pill pill--set">params</span>' : '<span class="pill">params: default</span>',
+      ].join(' ');
+
       const card = document.createElement('div');
       card.className = 'tile';
       card.innerHTML = `
@@ -404,8 +699,22 @@
         <div class="meta">
           <div class="name">${escapeHtml(name)}</div>
           <div class="id">${escapeHtml(id)}</div>
+          <div class="muted mtSm">${pills}</div>
+          <div class="row" style="justify-content:flex-end; gap:8px; margin-top:10px;">
+            <button class="btn btn--ghost btn--sm" data-action="edit" data-id="${escapeHtml(id)}">Настроить</button>
+          </div>
         </div>
       `;
+      card.querySelector('[data-action="edit"]').addEventListener('click', (e) => {
+        e.stopPropagation();
+        const r = parseRoute();
+        if (r.name !== 'shape') return;
+        const shapeId = decodeURIComponent(r.id || '');
+        openTextureParamsModal(shapeId, id).catch(err => {
+          console.warn(err);
+          setStatus(elPaletteStatus, 'err', `Не удалось открыть редактор: ${err.message}`);
+        });
+      });
       frag.appendChild(card);
     }
     elTexturesGrid.appendChild(frag);
@@ -489,7 +798,7 @@
       const st = t.status || 'pending';
       const stClass = st === 'done' ? 'uploadOk' : (st === 'error' ? 'uploadErr' : (st === 'uploading' ? 'uploadWarn' : ''));
       tr.innerHTML = `
-        <td><span class="uploadPill">${escapeHtml(t.mapType || '?')}</span></td>
+        <td><span class="uploadPill">${escapeHtml((t.textureId ? (t.textureId + ' / ') : '') + (t.mapType || '?'))}</span></td>
         <td>${escapeHtml(t.fileName || '')}<div class="muted mono">${escapeHtml((t.sizeMB || 0).toFixed ? t.sizeMB.toFixed(2) : '')} MB</div></td>
         <td class="mono">${escapeHtml(t.key || '')}</td>
         <td>${escapeHtml(String(pct))}%</td>
@@ -610,7 +919,189 @@
     return out;
   }
 
-  function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, tileSizeMOrNull) {
+  
+  function buildTasksFromZipStructured(currentShapeId, zipEntries, mappingOverrides) {
+    const tasks = [];
+    const textures = new Map(); // textureId -> { textureId, qualities:Set, mapsByQuality: Map(quality -> Set(mapType)) }
+    const foundShapeIds = new Set();
+    const errors = [];
+    const skipped = [];
+    const mappingNeeded = [];
+
+    const overrides = mappingOverrides instanceof Map ? mappingOverrides : new Map();
+
+    // 1) Build groups: (textureId|quality) -> entries[]
+    const groups = new Map();
+    for (const e of (zipEntries || [])) {
+      const origPath = String(e?.originalPath || '').replace(/\\/g, '/');
+      const idx = origPath.indexOf('surfaces/');
+      if (idx < 0) continue;
+      const rel = origPath.slice(idx);
+      const m = rel.match(/^surfaces\/([^/]+)\/([^/]+)\/(1k|2k)\/(.+)$/);
+      if (!m) continue;
+
+      const shapeIdInZip = m[1];
+      const textureId = m[2];
+      const quality = m[3];
+      const filename = m[4].split('/').pop();
+
+      foundShapeIds.add(shapeIdInZip);
+      if (currentShapeId && shapeIdInZip !== currentShapeId) {
+        // mismatch will be handled by the caller (we only build tasks for current shape)
+        continue;
+      }
+
+      const groupKey = `${textureId}|${quality}`;
+      if (!groups.has(groupKey)) {
+        groups.set(groupKey, { groupKey, shapeId: currentShapeId, textureId, quality, entries: [] });
+      }
+      groups.get(groupKey).entries.push({
+        originalPath: rel,
+        filename,
+        file: e.file,
+      });
+    }
+
+    // 2) Validate that each texture has 1k folder (required)
+    const texturesSeen = new Map(); // textureId -> Set(qualities)
+    for (const g of groups.values()) {
+      if (!texturesSeen.has(g.textureId)) texturesSeen.set(g.textureId, new Set());
+      texturesSeen.get(g.textureId).add(g.quality);
+    }
+    for (const [texId, qs] of texturesSeen.entries()) {
+      if (!qs.has('1k')) {
+        errors.push(`Текстура "${texId}": отсутствует папка 1k (1k обязателен)`);
+      }
+    }
+
+    const required = ['albedo', 'normal', 'roughness', 'height'];
+
+    // 3) Build mapping for each group
+    for (const g of groups.values()) {
+      const byType = new Map(); // mapType -> entry
+
+      // auto-detect
+      for (const ent of g.entries) {
+        const t = detectMapType(ent.filename);
+        if (!t) continue;
+        if (!byType.has(t)) byType.set(t, ent);
+      }
+
+      // apply manual overrides if any
+      const ov = overrides.get(g.groupKey);
+      if (ov && ov instanceof Map) {
+        for (const [mapType, path] of ov.entries()) {
+          const found = g.entries.find(x => x.originalPath === path);
+          if (found) byType.set(mapType, found);
+        }
+      }
+
+      // if it's 1k and required maps are missing, request mapping
+      if (g.quality === '1k') {
+        const missing = required.filter(t => !byType.has(t));
+        if (missing.length) {
+          // Prepare suggested mapping for modal (what we already auto-guessed)
+          const suggested = new Map();
+          for (const [k, v] of byType.entries()) suggested.set(k, v.originalPath);
+          mappingNeeded.push({
+            groupKey: g.groupKey,
+            shapeId: g.shapeId,
+            textureId: g.textureId,
+            quality: g.quality,
+            entries: g.entries.map(x => ({ originalPath: x.originalPath, filename: x.filename, file: x.file })),
+            suggested,
+            missing,
+          });
+          continue;
+        }
+      }
+
+      // Build tasks from resolved mapping; include optional AO if present/mapped
+      const allowed = ['albedo', 'normal', 'roughness', 'height', 'ao'];
+      for (const mapType of allowed) {
+        const ent = byType.get(mapType);
+        if (!ent) {
+          // ignore optional missing
+          continue;
+        }
+        if (!ent.file) continue;
+        const fileName = standardMapFilename(g.textureId, mapType, ent.filename);
+        const key = `surfaces/${currentShapeId}/${g.textureId}/${g.quality}/${fileName}`;
+        tasks.push({
+          mapType,
+          textureId: g.textureId,
+          quality: g.quality,
+          file: ent.file,
+          fileName,
+          key,
+          contentType: (ent.file && ent.file.type) ? ent.file.type : guessMimeByExt(fileName),
+          status: 'pending',
+          sentBytes: 0,
+          totalBytes: ent.file?.size || 0,
+          sizeMB: (ent.file?.size || 0) / (1024 * 1024),
+        });
+
+        // meta
+        let info = textures.get(g.textureId);
+        if (!info) {
+          info = { textureId: g.textureId, qualities: new Set(), mapsByQuality: new Map() };
+          textures.set(g.textureId, info);
+        }
+        info.qualities.add(g.quality);
+        if (!info.mapsByQuality.has(g.quality)) info.mapsByQuality.set(g.quality, new Set());
+        info.mapsByQuality.get(g.quality).add(mapType);
+      }
+
+      // track extra files that we didn't map (for info only)
+      const mappedPaths = new Set(Array.from(byType.values()).map(x => x.originalPath));
+      for (const ent of g.entries) {
+        if (!mappedPaths.has(ent.originalPath)) {
+          skipped.push({ reason: 'unmapped_file', path: ent.originalPath });
+        }
+      }
+    }
+
+    // 4) If mappingNeeded is empty, validate required maps again (in case overrides were provided but still missing)
+    if (!mappingNeeded.length) {
+      for (const [textureId, info] of textures.entries()) {
+        const maps1k = info.mapsByQuality.get('1k') || new Set();
+        for (const t of required) {
+          if (!maps1k.has(t)) {
+            errors.push(`Текстура "${textureId}": отсутствует обязательная карта "${t}" в 1k`);
+          }
+        }
+      }
+    }
+
+    tasks.sort((a, b) => {
+      const k1 = `${a.textureId || ''}|${a.quality || ''}|${a.mapType || ''}`;
+      const k2 = `${b.textureId || ''}|${b.quality || ''}|${b.mapType || ''}`;
+      return k1.localeCompare(k2);
+    });
+
+    return {
+      tasks,
+      textures,
+      foundShapeIds: Array.from(foundShapeIds),
+      skipped,
+      errors,
+      mappingNeeded,
+    };
+  }
+
+  function groupTasksByTexture(tasks, quality) {
+    const out = new Map(); // textureId -> tasks[]
+    for (const t of (tasks || [])) {
+      if (quality && t.quality !== quality) continue;
+      const id = t.textureId || '';
+      if (!id) continue;
+      if (!out.has(id)) out.set(id, []);
+      out.get(id).push(t);
+    }
+    return out;
+  }
+
+function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, tileSizeMOrNull) {
     const maps = {};
     for (const t of tasks) {
       const rel = `surfaces/${shapeId}/${textureId}/${quality}/${t.fileName}`;
@@ -705,12 +1196,265 @@
     };
   }
 
+  function getDefaultsForShape(shapeId) {
+    const s = state.paletteSettingsByShapeId.get(shapeId);
+    const d = (s && s.defaults && typeof s.defaults === 'object') ? s.defaults : {};
+    const tileM = (d.tileSizeM && typeof d.tileSizeM === 'object') ? d.tileSizeM : {};
+    const wMm = (typeof tileM.w === 'number') ? Math.round(tileM.w * 1000) : RECOMMENDED_DEFAULTS.tileSizeMm.w;
+    const hMm = (typeof tileM.h === 'number') ? Math.round(tileM.h * 1000) : RECOMMENDED_DEFAULTS.tileSizeMm.h;
+    return {
+      tileSizeMm: { w: wMm, h: hMm },
+      uvScale: (typeof d.uvScale === 'number') ? d.uvScale : RECOMMENDED_DEFAULTS.uvScale,
+      exposureMult: (typeof d.exposureMult === 'number') ? d.exposureMult : RECOMMENDED_DEFAULTS.exposureMult,
+      contrast: (typeof d.contrast === 'number') ? d.contrast : RECOMMENDED_DEFAULTS.contrast,
+      saturation: (typeof d.saturation === 'number') ? d.saturation : RECOMMENDED_DEFAULTS.saturation,
+      roughnessMult: (typeof d.roughnessMult === 'number') ? d.roughnessMult : RECOMMENDED_DEFAULTS.roughnessMult,
+      specStrength: (typeof d.specStrength === 'number') ? d.specStrength : RECOMMENDED_DEFAULTS.specStrength,
+      normalScale: (typeof d.normalScale === 'number') ? d.normalScale : RECOMMENDED_DEFAULTS.normalScale,
+      bumpScale: (typeof d.bumpScale === 'number') ? d.bumpScale : RECOMMENDED_DEFAULTS.bumpScale,
+    };
+  }
+
+  function deepClone(obj) {
+    return JSON.parse(JSON.stringify(obj || null));
+  }
+
+  function findPaletteItem(palette, itemId) {
+    const items = Array.isArray(palette?.items) ? palette.items : [];
+    return items.find(x => x && (x.id === itemId || x.textureId === itemId)) || null;
+  }
+
+  function showTexModal(open) {
+    if (!elTexModal) return;
+    elTexModal.hidden = !open;
+  }
+
+  function closeTexModal() {
+    currentTexShapeId = '';
+    currentTexItemId = '';
+    currentTexSnapshot = null;
+    if (elTexParams) elTexParams.innerHTML = '';
+    if (elTexPreview) elTexPreview.removeAttribute('src');
+    setStatus(elTexModalStatus, '', '');
+    showTexModal(false);
+  }
+
+  function buildParamRow({ key, label, min, max, step, help }, value, defaultValue, isOverride) {
+    const row = document.createElement('div');
+    row.className = 'paramRow';
+    const meta = isOverride ? `Переопределено • default: ${defaultValue}` : `По умолчанию: ${defaultValue}`;
+    row.innerHTML = `
+      <div class="paramTop">
+        <div class="paramLabel">${escapeHtml(label)} <span class="paramHelp" title="${escapeHtml(help)}">i</span></div>
+        <div class="paramMeta">${escapeHtml(meta)}</div>
+      </div>
+      <div class="paramControls">
+        <input type="range" min="${escapeHtml(min)}" max="${escapeHtml(max)}" step="${escapeHtml(step)}" value="${escapeHtml(value)}" />
+        <input type="number" step="${escapeHtml(step)}" min="${escapeHtml(min)}" max="${escapeHtml(max)}" value="${escapeHtml(value)}" />
+      </div>
+      <div class="paramNote">Подсказка: наведите на <b>i</b>, чтобы увидеть описание влияния параметра.</div>
+    `;
+    const range = row.querySelector('input[type="range"]');
+    const numInput = row.querySelector('input[type="number"]');
+    const onSync = (v) => {
+      const n = Number(v);
+      if (!Number.isFinite(n)) return;
+      range.value = String(n);
+      numInput.value = String(n);
+      row.dispatchEvent(new CustomEvent('param-change', { detail: { key, value: n } }));
+    };
+    range.addEventListener('input', () => onSync(range.value));
+    numInput.addEventListener('input', () => onSync(numInput.value));
+    return row;
+  }
+
+  async function openTextureParamsModal(shapeId, itemId) {
+    if (!shapeId || !itemId) return;
+    await ensurePaletteLoaded(shapeId);
+    await ensurePaletteSettingsLoaded(shapeId);
+    const palette = state.paletteByShapeId.get(shapeId);
+    const item = findPaletteItem(palette, itemId);
+    if (!item) throw new Error(`item_not_found: ${itemId}`);
+
+    currentTexShapeId = shapeId;
+    currentTexItemId = itemId;
+    currentTexSnapshot = deepClone({ tileSizeM: item.tileSizeM || null, params: item.params || {} });
+
+    elTexModalTitle.textContent = 'Настройка текстуры';
+    elTexModalSubtitle.textContent = `Форма: ${shapeId} • Текстура: ${itemId}`;
+
+    const previewUrl = item?.previewUrl || item?.preview || item?.maps?.albedoUrl || item?.maps?.albedo || '';
+    if (elTexPreview && previewUrl) {
+      elTexPreview.src = previewUrl;
+      elTexPreviewHint.textContent = 'Превью: albedo (из палитры)';
+    } else {
+      elTexPreviewHint.textContent = 'Превью недоступно (в palletes/*.json нет preview/albedo)';
+    }
+
+    const defaults = getDefaultsForShape(shapeId);
+
+    // Build UI
+    elTexParams.innerHTML = '';
+
+    // Tile size (mm)
+    const tileOverride = item.tileSizeM && typeof item.tileSizeM === 'object'
+      ? { w: Math.round(item.tileSizeM.w * 1000), h: Math.round(item.tileSizeM.h * 1000) }
+      : null;
+    const tileEffective = tileOverride || defaults.tileSizeMm;
+    const tileBlock = document.createElement('div');
+    tileBlock.className = 'paramRow';
+    tileBlock.innerHTML = `
+      <div class="paramTop">
+        <div class="paramLabel">Размер модуля (мм) <span class="paramHelp" title="Физический размер плитки. Влияет на повтор текстуры (repeat) и на реалистичность масштаба в AR.">i</span></div>
+        <div class="paramMeta">${tileOverride ? 'Переопределено' : 'По умолчанию'} • default: ${defaults.tileSizeMm.w}×${defaults.tileSizeMm.h}</div>
+      </div>
+      <div class="paramControls">
+        <div style="display:flex; gap:10px; align-items:center;">
+          <label class="field" style="margin:0;">
+            <span class="muted">Ширина</span>
+            <input id="texTileW" type="number" min="10" max="1000" step="1" value="${escapeHtml(tileEffective.w)}" />
+          </label>
+          <label class="field" style="margin:0;">
+            <span class="muted">Высота</span>
+            <input id="texTileH" type="number" min="10" max="1000" step="1" value="${escapeHtml(tileEffective.h)}" />
+          </label>
+        </div>
+        <div></div>
+      </div>
+      <div class="paramNote">Рекомендация: используйте реальные размеры плитки из ТЗ/каталога. Для квадрата 115×115 мм — это базовый дефолт.</div>
+    `;
+    elTexParams.appendChild(tileBlock);
+
+    // Params
+    const curParams = (item.params && typeof item.params === 'object') ? item.params : {};
+    for (const schema of TEXTURE_PARAM_SCHEMA) {
+      const defVal = defaults[schema.key];
+      const raw = (typeof curParams[schema.key] === 'number') ? curParams[schema.key] : defVal;
+      const isOverride = typeof curParams[schema.key] === 'number';
+      const row = buildParamRow(schema, raw, defVal, isOverride);
+      row.addEventListener('param-change', (e) => {
+        // store temp on DOM dataset
+        row.dataset.value = String(e.detail.value);
+      });
+      row.dataset.key = schema.key;
+      row.dataset.value = String(raw);
+      elTexParams.appendChild(row);
+    }
+
+    // Bind modal buttons
+    const applyDraftToUI = (snap) => {
+      const d = getDefaultsForShape(shapeId);
+      const tW = tileBlock.querySelector('#texTileW');
+      const tH = tileBlock.querySelector('#texTileH');
+      const tile = snap.tileSizeM && typeof snap.tileSizeM === 'object'
+        ? { w: Math.round(snap.tileSizeM.w * 1000), h: Math.round(snap.tileSizeM.h * 1000) }
+        : d.tileSizeMm;
+      tW.value = String(tile.w);
+      tH.value = String(tile.h);
+      for (const row of elTexParams.querySelectorAll('.paramRow')) {
+        const k = row.dataset.key;
+        if (!k) continue;
+        const inputRange = row.querySelector('input[type="range"]');
+        const inputNum = row.querySelector('input[type="number"]');
+        const v = (snap.params && typeof snap.params[k] === 'number') ? snap.params[k] : d[k];
+        if (inputRange) inputRange.value = String(v);
+        if (inputNum) inputNum.value = String(v);
+        row.dataset.value = String(v);
+      }
+    };
+
+    elTexRevertBtn.onclick = () => {
+      if (!currentTexSnapshot) return;
+      applyDraftToUI(currentTexSnapshot);
+      setStatus(elTexModalStatus, 'ok', 'Изменения в окне отменены.');
+    };
+
+    elTexResetBtn.onclick = () => {
+      const blank = { tileSizeM: null, params: {} };
+      applyDraftToUI(blank);
+      setStatus(elTexModalStatus, 'warn', 'Переопределения очищены. Нажмите «Сохранить», чтобы применить.');
+    };
+
+    elTexSaveBtn.onclick = async () => {
+      try {
+        elTexSaveBtn.disabled = true;
+        setStatus(elTexModalStatus, '', 'Сохраняем…');
+        const paletteNow = state.paletteByShapeId.get(shapeId) || { shapeId, items: [] };
+        const items = Array.isArray(paletteNow.items) ? [...paletteNow.items] : [];
+        const idx = items.findIndex(x => x && (x.id === itemId || x.textureId === itemId));
+        if (idx < 0) throw new Error('item_not_found_in_palette');
+        const nextItem = deepClone(items[idx]);
+        const defs = getDefaultsForShape(shapeId);
+
+        // Tile override
+        const tW = Number(tileBlock.querySelector('#texTileW').value);
+        const tH = Number(tileBlock.querySelector('#texTileH').value);
+        if (Number.isFinite(tW) && Number.isFinite(tH)) {
+          if (Math.round(tW) === Math.round(defs.tileSizeMm.w) && Math.round(tH) === Math.round(defs.tileSizeMm.h)) {
+            delete nextItem.tileSizeM;
+          } else {
+            nextItem.tileSizeM = { w: Math.max(1, tW) / 1000, h: Math.max(1, tH) / 1000 };
+          }
+        }
+
+        // Params overrides
+        const p = (nextItem.params && typeof nextItem.params === 'object') ? { ...nextItem.params } : {};
+        for (const schema of TEXTURE_PARAM_SCHEMA) {
+          const k = schema.key;
+          const row = elTexParams.querySelector(`.paramRow[data-key="${k}"]`);
+          if (!row) continue;
+          const v = Number(row.dataset.value);
+          if (!Number.isFinite(v)) continue;
+          const defVal = defs[k];
+          if (Number.isFinite(defVal) && Math.abs(v - defVal) < 1e-9) {
+            delete p[k];
+          } else {
+            p[k] = v;
+          }
+        }
+        // Clean empty params
+        if (Object.keys(p).length) nextItem.params = p;
+        else delete nextItem.params;
+
+        items[idx] = nextItem;
+        const nextPalette = { shapeId, items };
+        await savePalette(shapeId, nextPalette);
+        state.paletteByShapeId.delete(shapeId);
+        const fresh = await ensurePaletteLoaded(shapeId);
+        renderTextures(Array.isArray(fresh?.items) ? fresh.items : []);
+        setStatus(elPaletteStatus, 'ok', 'Палитра сохранена.');
+        setStatus(elTexModalStatus, 'ok', 'Сохранено.');
+        currentTexSnapshot = deepClone({ tileSizeM: nextItem.tileSizeM || null, params: nextItem.params || {} });
+      } catch (e) {
+        console.warn(e);
+        setStatus(elTexModalStatus, 'err', `Ошибка сохранения: ${e.message}`);
+      } finally {
+        elTexSaveBtn.disabled = false;
+      }
+    };
+
+    // Modal close interactions
+    const bindClose = () => {
+      if (!elTexModal) return;
+      elTexModal.querySelectorAll('[data-action="close"]').forEach(el => {
+        el.addEventListener('click', () => closeTexModal());
+      });
+      elTexModalCloseBtn?.addEventListener('click', () => closeTexModal());
+    };
+    bindClose();
+
+    showTexModal(true);
+    setStatus(elTexModalStatus, '', '');
+  }
+
   function findShapeById(shapeId) {
     return (state.shapes || []).find(s => String(s?.id) === String(shapeId)) || null;
   }
 
   async function renderRoute() {
     const r = parseRoute();
+    // Clear per-view statuses
+    setStatus(elPaletteStatus, '', '');
     if (r.name === 'forms') {
       showView('forms');
       renderShapesList(elShapeSearch.value);
@@ -840,102 +1584,231 @@
       location.hash = `#/shape/${r.id || ''}/upload`;
     });
 
+    // Manual palette save (useful after multiple edits)
+    elBtnPaletteSave?.addEventListener('click', async () => {
+      const r = parseRoute();
+      if (r.name !== 'shape') return;
+      const shapeId = decodeURIComponent(r.id || '');
+      if (!shapeId) return;
+      try {
+        const palette = state.paletteByShapeId.get(shapeId) || (await ensurePaletteLoaded(shapeId));
+        const items = Array.isArray(palette?.items) ? palette.items : [];
+        setStatus(elPaletteStatus, '', 'Сохраняем палитру…');
+        await savePalette(shapeId, { shapeId, items });
+        setStatus(elPaletteStatus, 'ok', 'Палитра сохранена.');
+      } catch (e) {
+        console.warn(e);
+        setStatus(elPaletteStatus, 'err', `Ошибка сохранения палитры: ${e.message}`);
+      }
+    });
+
     // Upload actions
     elUploadClearBtn?.addEventListener('click', () => {
       clearUploadUI();
     });
 
     elUploadStartBtn?.addEventListener('click', async () => {
-      const r = parseRoute();
-      if (r.name !== 'shape') return;
-      const shapeId = decodeURIComponent(r.id || '');
-      const textureId = normalizeTextureId(elUploadTextureId?.value);
-      const quality = String(elUploadQuality?.value || '1k');
-      const displayName = String(elUploadTextureName?.value || '').trim();
+          const r = parseRoute();
+          if (r.name !== 'shape') return;
+          const shapeId = decodeURIComponent(r.id || '');
+          const quality = String(elUploadQuality?.value || '1k');
+          const manualTextureId = normalizeTextureId(elUploadTextureId?.value);
+          const displayName = String(elUploadTextureName?.value || '').trim();
 
-      if (!shapeId) {
-        setStatus(elUploadStatus, 'err', 'Неизвестна форма (shapeId).');
-        return;
-      }
-      if (!textureId) {
-        setStatus(elUploadStatus, 'err', 'Укажите textureId.');
-        return;
-      }
-
-      try {
-        setStatus(elUploadStatus, '', 'Подготавливаем файлы…');
-        elUploadStartBtn.disabled = true;
-
-        let files = [];
-        let meta = {};
-        const zipFile = elUploadZip?.files?.[0] || null;
-        const listFiles = Array.from(elUploadFiles?.files || []);
-
-        if (zipFile) {
-          const z = await unzipToFiles(zipFile);
-          files = z.files.map(x => x.file);
-          meta = z.meta || {};
-        }
-        if (listFiles.length) {
-          files.push(...listFiles);
-        }
-        if (!files.length) {
-          setStatus(elUploadStatus, 'warn', 'Выберите файлы или ZIP для загрузки.');
-          return;
-        }
-
-        // If ZIP contains a different textureId, warn but continue with user-provided textureId.
-        if (meta?.textureId && meta.textureId !== textureId) {
-          setStatus(elUploadStatus, 'warn', `ZIP содержит textureId="${meta.textureId}", но будет использовано значение из формы: "${textureId}".`);
-          await sleep(300);
-        }
-
-        const tasks = buildTasksFromFiles(shapeId, textureId, quality, files);
-        state.uploadTasks = tasks;
-        renderUploadQueue();
-
-        const conc = Number(elUploadConcurrency?.value || 3);
-        setStatus(elUploadStatus, '', 'Загрузка началась…');
-        const res = await runUploadQueue(conc);
-        if (!res.ok) {
-          setStatus(elUploadStatus, 'err', `Загрузка завершена с ошибками: ${res.failed}. Проверьте CORS бакета и имена файлов.`);
-          return;
-        }
-        setStatus(elUploadStatus, 'ok', 'Файлы загружены.');
-
-        if (elUploadAutoAdd?.checked) {
-          setStatus(elUploadStatus, '', 'Обновляем палитру…');
-
-          // tileSizeM: explicit (uploadTileW/H) wins, else from palette-settings defaults if exists, else omit.
-          let tileSizeM = null;
-          const wMm = num(elUploadTileW?.value, null);
-          const hMm = num(elUploadTileH?.value, null);
-          if (wMm && hMm) {
-            tileSizeM = { w: Math.max(1, wMm) / 1000, h: Math.max(1, hMm) / 1000 };
-          } else {
-            try {
-              const ps = await ensurePaletteSettingsLoaded(shapeId);
-              const d = ps?.defaults;
-              if (d?.tileSizeM && typeof d.tileSizeM.w === 'number' && typeof d.tileSizeM.h === 'number') {
-                tileSizeM = { w: d.tileSizeM.w, h: d.tileSizeM.h };
-              }
-            } catch {
-              // ignore
-            }
+          if (!shapeId) {
+            setStatus(elUploadStatus, 'err', 'Неизвестна форма (shapeId).');
+            return;
           }
 
-          const item = buildPaletteItemFromUpload(shapeId, textureId, displayName, quality, tasks, tileSizeM);
-          await upsertItemAndSavePalette(shapeId, item);
-          setStatus(elUploadStatus, 'ok', 'Готово: файлы загружены, палитра обновлена и сохранена.');
-        }
-      } catch (e) {
-        console.warn(e);
-        const hint = e?.data?.hint ? `\n${e.data.hint}` : '';
-        setStatus(elUploadStatus, 'err', `Ошибка: ${e.message}${hint}`);
-      } finally {
-        elUploadStartBtn.disabled = false;
-      }
-    });
+          try {
+            setStatus(elUploadStatus, '', 'Подготавливаем файлы…');
+            elUploadStartBtn.disabled = true;
+
+            const zipFile = elUploadZip?.files?.[0] || null;
+            const listFiles = Array.from(elUploadFiles?.files || []);
+
+            let zip = null;
+            if (zipFile) zip = await unzipToFiles(zipFile);
+
+            const isStructuredZip = Boolean(zip?.meta?.structured) && (Array.isArray(zip?.meta?.textureIds) && zip.meta.textureIds.length > 0);
+
+            // --- MODE 1: "умная сборка" (ZIP уже содержит структуру surfaces/<shapeId>/<textureId>/<quality>/...)
+            if (isStructuredZip) {
+              if (listFiles.length) {
+                // In structured ZIP mode we ignore additional loose files to avoid ambiguity.
+                setStatus(elUploadStatus, 'warn', 'ZIP содержит структуру surfaces/... — выбранные отдельные файлы будут проигнорированы.');
+                await sleep(250);
+              }
+
+              const foundShapeIds = zip?.meta?.shapeIds || [];
+              if (foundShapeIds.length === 0) {
+                throw new Error('ZIP отмечен как структурированный, но не удалось определить shapeId.');
+              }
+              if (foundShapeIds.length > 1) {
+                throw new Error(`ZIP содержит несколько shapeId: ${foundShapeIds.join(', ')}. Используйте ZIP только для одной формы.`);
+              }
+              if (foundShapeIds[0] !== shapeId) {
+                throw new Error(`ZIP содержит shapeId="${foundShapeIds[0]}", но вы открыли форму "${shapeId}". Выберите правильную форму или используйте другой ZIP.`);
+              }
+
+              if (manualTextureId) {
+                setStatus(elUploadStatus, 'warn', `В ZIP уже есть структура по textureId. Поле textureId ("${manualTextureId}") будет проигнорировано.`);
+                await sleep(250);
+              }
+
+              // Build tasks from structured ZIP. If filenames are non-standard, we may request manual mapping.
+              const overrides = new Map(); // groupKey -> Map(mapType -> originalPath)
+              let parsed = buildTasksFromZipStructured(shapeId, zip.files || [], overrides);
+
+              // If any 1k groups miss required maps, open a modal to map files.
+              // We do this sequentially to keep UX simple.
+              while (parsed.mappingNeeded && parsed.mappingNeeded.length) {
+                const t = parsed.mappingNeeded[0];
+                setStatus(elUploadStatus, 'warn', `Нужно сопоставить карты для текстуры "${t.textureId}" (1k). Откроется окно сопоставления.`);
+                await sleep(200);
+                const mapping = await openZipMappingModal(t);
+                overrides.set(t.groupKey, mapping);
+                parsed = buildTasksFromZipStructured(shapeId, zip.files || [], overrides);
+              }
+
+              if (parsed.errors && parsed.errors.length) {
+                throw new Error('Ошибка структуры ZIP: ' + parsed.errors.join('; '));
+              }
+              if (!parsed.tasks.length) {
+                throw new Error('Не найдено подходящих файлов в ZIP. Ожидается структура surfaces/<shapeId>/<textureId>/<quality>/... (или выберите сопоставление карт в окне).');
+              }
+
+              state.uploadTasks = parsed.tasks;
+              renderUploadQueue();
+
+              const conc = Number(elUploadConcurrency?.value || 3);
+              setStatus(elUploadStatus, '', `Загрузка началась… (текстур: ${parsed.textures.size}, файлов: ${parsed.tasks.length})`);
+              const res = await runUploadQueue(conc);
+              if (!res.ok) {
+                setStatus(elUploadStatus, 'err', `Загрузка завершена с ошибками: ${res.failed}. Проверьте CORS бакета и имена файлов.`);
+                return;
+              }
+              setStatus(elUploadStatus, 'ok', 'Файлы загружены.');
+
+              if (elUploadAutoAdd?.checked) {
+                setStatus(elUploadStatus, '', 'Обновляем палитру…');
+
+                // tileSizeM: explicit (uploadTileW/H) wins, else from palette-settings defaults if exists, else omit.
+                let tileSizeM = null;
+                const wMm = num(elUploadTileW?.value, null);
+                const hMm = num(elUploadTileH?.value, null);
+                if (wMm && hMm) {
+                  tileSizeM = { w: Math.max(1, wMm) / 1000, h: Math.max(1, hMm) / 1000 };
+                } else {
+                  try {
+                    const ps = await ensurePaletteSettingsLoaded(shapeId);
+                    const d = ps?.defaults;
+                    if (d?.tileSizeM && typeof d.tileSizeM.w === 'number' && typeof d.tileSizeM.h === 'number') {
+                      tileSizeM = { w: d.tileSizeM.w, h: d.tileSizeM.h };
+                    }
+                  } catch {
+                    // ignore
+                  }
+                }
+
+                const palette = await ensurePaletteLoaded(shapeId);
+                const items = Array.isArray(palette?.items) ? [...palette.items] : [];
+
+                const tasksByTexture1k = groupTasksByTexture(parsed.tasks, '1k');
+                for (const [texId, texTasks] of tasksByTexture1k.entries()) {
+                  const item = buildPaletteItemFromUpload(shapeId, texId, texId, '1k', texTasks, tileSizeM);
+                  const idx = items.findIndex(x => x && x.id === item.id);
+                  if (idx >= 0) items[idx] = item;
+                  else items.push(item);
+                }
+
+                const next = { shapeId, items };
+                await savePalette(shapeId, next);
+
+                // refresh local cache + UI
+                state.paletteByShapeId.delete(shapeId);
+                const fresh = await ensurePaletteLoaded(shapeId);
+                renderTextures(Array.isArray(fresh?.items) ? fresh.items : []);
+
+                setStatus(elUploadStatus, 'ok', 'Готово: файлы загружены, палитра обновлена и сохранена.');
+              }
+
+              return;
+            }
+
+            // --- MODE 2: "ручной" (файлы/ZIP без структуры) — как раньше: один textureId
+            const textureId = manualTextureId;
+            if (!textureId) {
+              setStatus(elUploadStatus, 'err', 'Укажите textureId (или используйте ZIP со структурой surfaces/... для умной сборки).');
+              return;
+            }
+
+            let files = [];
+            let meta = {};
+            if (zipFile) {
+              const z = zip || await unzipToFiles(zipFile);
+              files = z.files.map(x => x.file);
+              meta = z.meta || {};
+            }
+            if (listFiles.length) {
+              files.push(...listFiles);
+            }
+            if (!files.length) {
+              setStatus(elUploadStatus, 'warn', 'Выберите файлы или ZIP для загрузки.');
+              return;
+            }
+
+            // If ZIP contains a different textureId, warn but continue with user-provided textureId.
+            if (meta?.textureIds?.length === 1 && meta.textureIds[0] && meta.textureIds[0] !== textureId) {
+              setStatus(elUploadStatus, 'warn', `ZIP содержит textureId="${meta.textureIds[0]}", но будет использовано значение из формы: "${textureId}".`);
+              await sleep(300);
+            }
+
+            const tasks = buildTasksFromFiles(shapeId, textureId, quality, files);
+            state.uploadTasks = tasks;
+            renderUploadQueue();
+
+            const conc = Number(elUploadConcurrency?.value || 3);
+            setStatus(elUploadStatus, '', 'Загрузка началась…');
+            const res = await runUploadQueue(conc);
+            if (!res.ok) {
+              setStatus(elUploadStatus, 'err', `Загрузка завершена с ошибками: ${res.failed}. Проверьте CORS бакета и имена файлов.`);
+              return;
+            }
+            setStatus(elUploadStatus, 'ok', 'Файлы загружены.');
+
+            if (elUploadAutoAdd?.checked) {
+              setStatus(elUploadStatus, '', 'Обновляем палитру…');
+
+              let tileSizeM = null;
+              const wMm = num(elUploadTileW?.value, null);
+              const hMm = num(elUploadTileH?.value, null);
+              if (wMm && hMm) {
+                tileSizeM = { w: Math.max(1, wMm) / 1000, h: Math.max(1, hMm) / 1000 };
+              } else {
+                try {
+                  const ps = await ensurePaletteSettingsLoaded(shapeId);
+                  const d = ps?.defaults;
+                  if (d?.tileSizeM && typeof d.tileSizeM.w === 'number' && typeof d.tileSizeM.h === 'number') {
+                    tileSizeM = { w: d.tileSizeM.w, h: d.tileSizeM.h };
+                  }
+                } catch {
+                  // ignore
+                }
+              }
+
+              const item = buildPaletteItemFromUpload(shapeId, textureId, displayName, quality, tasks, tileSizeM);
+              await upsertItemAndSavePalette(shapeId, item);
+              setStatus(elUploadStatus, 'ok', 'Готово: файлы загружены, палитра обновлена и сохранена.');
+            }
+          } catch (e) {
+            console.warn(e);
+            const hint = e?.data?.hint ? `\n${e.data.hint}` : '';
+            setStatus(elUploadStatus, 'err', `Ошибка: ${e.message}${hint}`);
+          } finally {
+            elUploadStartBtn.disabled = false;
+          }
+        });
 
     // Palette settings actions
     elBtnSettingsReload.addEventListener('click', async () => {
@@ -950,6 +1823,21 @@
         console.warn(e);
         setStatus(elSettingsStatus, 'err', `Ошибка загрузки настроек: ${e.message}`);
       }
+    });
+
+    elBtnSettingsReset?.addEventListener('click', () => {
+      // Reset form fields to recommended neutral defaults (does not save).
+      elSettingsTileW.value = String(RECOMMENDED_DEFAULTS.tileSizeMm.w);
+      elSettingsTileH.value = String(RECOMMENDED_DEFAULTS.tileSizeMm.h);
+      elSettingsUvScale.value = String(RECOMMENDED_DEFAULTS.uvScale);
+      elSettingsExposure.value = String(RECOMMENDED_DEFAULTS.exposureMult);
+      elSettingsContrast.value = String(RECOMMENDED_DEFAULTS.contrast);
+      elSettingsSaturation.value = String(RECOMMENDED_DEFAULTS.saturation);
+      elSettingsRoughness.value = String(RECOMMENDED_DEFAULTS.roughnessMult);
+      elSettingsSpec.value = String(RECOMMENDED_DEFAULTS.specStrength);
+      elSettingsNormalScale.value = String(RECOMMENDED_DEFAULTS.normalScale);
+      elSettingsBumpScale.value = String(RECOMMENDED_DEFAULTS.bumpScale);
+      setStatus(elSettingsStatus, 'warn', 'Поля сброшены к рекомендуемым значениям. Нажмите «Сохранить», чтобы применить.');
     });
 
     elBtnSettingsSave.addEventListener('click', async () => {
