@@ -712,20 +712,41 @@ async function selectTile(tileOrId) {
   };
 
   // Auto 1k/2k: on capable devices prefer 2k, otherwise 1k. If 2k asset is missing, fall back to original URL.
-  const loadTexSmart = async (url, label) => {
-    if (!url) return null;
-    if (isStale()) return null;
-    if (preferredQuality === '2k') {
-      const cand = make2kCandidateUrl(url);
-      if (cand && cand !== url) {
-        const tex2 = await tryLoad(cand);
+const loadTexSmart = async (url, label) => {
+  if (!url) return null;
+  if (isStale()) return null;
+
+  // Prefer 2k on capable devices, but be robust to different extensions (webp/png/jpg) across qualities.
+  if (preferredQuality === '2k') {
+    const cand = make2kCandidateUrl(url);
+    if (cand && cand !== url) {
+      const candidates = [cand, ...makeAltExtCandidates(cand)];
+      for (const u of candidates) {
+        const tex2 = await tryLoad(u);
         if (isStale()) return null;
         if (tex2) return tex2;
       }
     }
-        if (isStale()) return null;
-    return await loadRequired(url, label);
-  };
+  }
+
+  if (isStale()) return null;
+
+  // Load original. If it fails, try alternative extensions silently.
+  const base = await loadRequired(url, label);
+  if (isStale()) return null;
+  if (base) return base;
+
+  const alts = makeAltExtCandidates(url);
+  for (const u of alts) {
+    const t = await tryLoad(u);
+    if (isStale()) return null;
+    if (t) {
+      console.warn(`[surfaces] used alternate extension for ${label}: ${u}`);
+      return t;
+    }
+  }
+  return null;
+};
 
   let albedoTex = await loadTexSmart(albedoUrl, 'albedo');
   if (isStale()) return;
@@ -1311,19 +1332,23 @@ function getPreferredSurfaceQuality() {
   }
 }
 
-function make2kCandidateUrl(url) {
-  if (!url || typeof url !== 'string') return null;
-  let u = url;
-  let changed = false;
-
-  // Folder convention
-  if (u.includes('/1k/')) { u = u.replace('/1k/', '/2k/'); changed = true; }
-
-  // Filename convention
-  if (u.includes('_1k_')) { u = u.replace('_1k_', '_2k_'); changed = true; }
-  if (!changed) return null;
-  return u;
+\1
+function makeAltExtCandidates(url) {
+  if (!url || typeof url !== 'string') return [];
+  const m = url.match(/^(.*)\.([a-zA-Z0-9]+)(\?.*)?$/);
+  if (!m) return [];
+  const base = m[1];
+  const ext = (m[2] || '').toLowerCase();
+  const qs = m[3] || '';
+  const alts = [];
+  const push = (e) => alts.push(`${base}.${e}${qs}`);
+  if (ext === 'webp') { push('png'); push('jpg'); push('jpeg'); }
+  else if (ext === 'png') { push('webp'); push('jpg'); push('jpeg'); }
+  else if (ext === 'jpg' || ext === 'jpeg') { push('webp'); push('png'); }
+  else { push('webp'); push('png'); }
+  return Array.from(new Set(alts)).filter(u => u !== url);
 }
+
 
 const ARCORE_PLAY_URL = 'https://play.google.com/store/apps/details?id=com.google.ar.core';
 const ARCORE_ALT_URL = 'https://apkpure.com/ru/google-play-services-for-ar-2025/com.google.ar.core';
