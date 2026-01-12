@@ -32,6 +32,21 @@
   const elPaneSettings = $('paneSettings');
   const elBtnUploadGo = $('btnUploadGo');
 
+  // Palette settings UI
+  const elSettingsStatus = $('settingsStatus');
+  const elBtnSettingsReload = $('btnSettingsReload');
+  const elBtnSettingsSave = $('btnSettingsSave');
+  const elSettingsTileW = $('settingsTileW');
+  const elSettingsTileH = $('settingsTileH');
+  const elSettingsUvScale = $('settingsUvScale');
+  const elSettingsExposure = $('settingsExposure');
+  const elSettingsContrast = $('settingsContrast');
+  const elSettingsSaturation = $('settingsSaturation');
+  const elSettingsRoughness = $('settingsRoughness');
+  const elSettingsSpec = $('settingsSpec');
+  const elSettingsNormalScale = $('settingsNormalScale');
+  const elSettingsBumpScale = $('settingsBumpScale');
+
   const elTexturesGrid = $('texturesGrid');
   const elEmptyTextures = $('emptyState');
 
@@ -39,6 +54,7 @@
   const state = {
     shapes: [],
     paletteByShapeId: new Map(),
+    paletteSettingsByShapeId: new Map(),
   };
 
   function setStatus(el, type, msg) {
@@ -264,6 +280,73 @@
     return palette;
   }
 
+  async function ensurePaletteSettingsLoaded(shapeId, { forceReload = false } = {}) {
+    if (!shapeId) return null;
+    if (!forceReload && state.paletteSettingsByShapeId.has(shapeId)) return state.paletteSettingsByShapeId.get(shapeId);
+    setStatus(elSettingsStatus, '', `Загружаем настройки палитры: ${shapeId} …`);
+    const settings = await apiFetch('/api/palette-settings/' + encodeURIComponent(shapeId));
+    state.paletteSettingsByShapeId.set(shapeId, settings);
+    if (settings?._meta?.missing) {
+      setStatus(elSettingsStatus, 'warn', 'Файл настроек не найден — показаны значения по умолчанию. Нажмите «Сохранить», чтобы создать файл.');
+    } else {
+      setStatus(elSettingsStatus, 'ok', 'Настройки загружены.');
+    }
+    return settings;
+  }
+
+  function num(v, fallback = null) {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : fallback;
+  }
+
+  function fillPaletteSettingsForm(settings, shapeId) {
+    const d = (settings && settings.defaults && typeof settings.defaults === 'object') ? settings.defaults : {};
+
+    const tile = d.tileSizeM || {};
+    const wMm = (typeof tile.w === 'number') ? Math.round(tile.w * 1000) : 115;
+    const hMm = (typeof tile.h === 'number') ? Math.round(tile.h * 1000) : 115;
+
+    elSettingsTileW.value = String(wMm);
+    elSettingsTileH.value = String(hMm);
+    elSettingsUvScale.value = String(typeof d.uvScale === 'number' ? d.uvScale : 1.0);
+    elSettingsExposure.value = String(typeof d.exposureMult === 'number' ? d.exposureMult : 1.0);
+    elSettingsContrast.value = String(typeof d.contrast === 'number' ? d.contrast : 1.0);
+    elSettingsSaturation.value = String(typeof d.saturation === 'number' ? d.saturation : 1.0);
+    elSettingsRoughness.value = String(typeof d.roughnessMult === 'number' ? d.roughnessMult : 1.0);
+    elSettingsSpec.value = String(typeof d.specStrength === 'number' ? d.specStrength : 1.0);
+    elSettingsNormalScale.value = String(typeof d.normalScale === 'number' ? d.normalScale : 1.0);
+    elSettingsBumpScale.value = String(typeof d.bumpScale === 'number' ? d.bumpScale : 1.0);
+
+    // Helpful context in title area
+    if (shapeId) {
+      elSettingsTileW.placeholder = '115';
+      elSettingsTileH.placeholder = '115';
+      elSettingsUvScale.placeholder = '1.00';
+    }
+  }
+
+  function collectPaletteSettingsFromForm(shapeId) {
+    const wMm = num(elSettingsTileW.value, 115);
+    const hMm = num(elSettingsTileH.value, 115);
+    const w = Math.max(1, wMm) / 1000;
+    const h = Math.max(1, hMm) / 1000;
+
+    return {
+      shapeId,
+      defaults: {
+        tileSizeM: { w, h },
+        uvScale: num(elSettingsUvScale.value, 1.0),
+        exposureMult: num(elSettingsExposure.value, 1.0),
+        contrast: num(elSettingsContrast.value, 1.0),
+        saturation: num(elSettingsSaturation.value, 1.0),
+        roughnessMult: num(elSettingsRoughness.value, 1.0),
+        specStrength: num(elSettingsSpec.value, 1.0),
+        normalScale: num(elSettingsNormalScale.value, 1.0),
+        bumpScale: num(elSettingsBumpScale.value, 1.0),
+      },
+    };
+  }
+
   function findShapeById(shapeId) {
     return (state.shapes || []).find(s => String(s?.id) === String(shapeId)) || null;
   }
@@ -297,6 +380,10 @@
         const palette = await ensurePaletteLoaded(shapeId);
         renderTextures(Array.isArray(palette?.items) ? palette.items : []);
       }
+      if (r.tab === 'settings') {
+        const settings = await ensurePaletteSettingsLoaded(shapeId);
+        fillPaletteSettingsForm(settings, shapeId);
+      }
       return;
     }
   }
@@ -304,6 +391,7 @@
   async function initAfterLogin() {
     await ensureShapesLoaded();
     state.paletteByShapeId.clear();
+    state.paletteSettingsByShapeId.clear();
     renderShapesList(elShapeSearch.value);
 
     // Default route
@@ -347,6 +435,7 @@
       setStatus(elLoginStatus, '', '');
       state.shapes = [];
       state.paletteByShapeId.clear();
+      state.paletteSettingsByShapeId.clear();
     });
 
     elReload.addEventListener('click', async () => {
@@ -385,6 +474,47 @@
       const r = parseRoute();
       if (r.name !== 'shape') return;
       location.hash = `#/shape/${r.id || ''}/upload`;
+    });
+
+    // Palette settings actions
+    elBtnSettingsReload.addEventListener('click', async () => {
+      const r = parseRoute();
+      if (r.name !== 'shape') return;
+      const shapeId = decodeURIComponent(r.id || '');
+      try {
+        state.paletteSettingsByShapeId.delete(shapeId);
+        const settings = await ensurePaletteSettingsLoaded(shapeId, { forceReload: true });
+        fillPaletteSettingsForm(settings, shapeId);
+      } catch (e) {
+        console.warn(e);
+        setStatus(elSettingsStatus, 'err', `Ошибка загрузки настроек: ${e.message}`);
+      }
+    });
+
+    elBtnSettingsSave.addEventListener('click', async () => {
+      const r = parseRoute();
+      if (r.name !== 'shape') return;
+      const shapeId = decodeURIComponent(r.id || '');
+      const payload = collectPaletteSettingsFromForm(shapeId);
+      elBtnSettingsSave.disabled = true;
+      try {
+        setStatus(elSettingsStatus, '', 'Сохраняем…');
+        const res = await apiFetch('/api/palette-settings/' + encodeURIComponent(shapeId), {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+        // invalidate cache and re-load
+        state.paletteSettingsByShapeId.delete(shapeId);
+        const settings = await ensurePaletteSettingsLoaded(shapeId, { forceReload: true });
+        fillPaletteSettingsForm(settings, shapeId);
+        setStatus(elSettingsStatus, 'ok', `Сохранено: ${res?.key || `palette_settings/${shapeId}.json`}`);
+      } catch (e) {
+        console.warn(e);
+        const hint = e?.data?.hint ? `\n${e.data.hint}` : '';
+        setStatus(elSettingsStatus, 'err', `Ошибка сохранения: ${e.message}${hint}`);
+      } finally {
+        elBtnSettingsSave.disabled = false;
+      }
     });
 
     window.addEventListener('hashchange', () => {

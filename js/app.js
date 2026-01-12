@@ -8,6 +8,12 @@ const SURFACE_PALETTE_BASE_URL = (typeof window !== 'undefined' && window.__SURF
   ? String(window.__SURFACE_PALETTE_BASE_URL__).replace(/\/+$/, '') + '/'
   : 'https://storage.yandexcloud.net/webar3dtexture/palettes/';
 
+// Remote per-shape palette defaults (safe-fallback).
+// Override by setting window.__PALETTE_SETTINGS_BASE_URL__ before loading app.js
+const PALETTE_SETTINGS_BASE_URL = (typeof window !== 'undefined' && window.__PALETTE_SETTINGS_BASE_URL__)
+  ? String(window.__PALETTE_SETTINGS_BASE_URL__).replace(/\/+$/, '') + '/'
+  : 'https://storage.yandexcloud.net/webar3dtexture/palette_settings/';
+
 // ------------------------
 // UI
 // ------------------------
@@ -951,15 +957,60 @@ async function loadSurfacePalette(url) {
   }
 }
 
-function paletteItemsToTiles(items) {
+async function loadPaletteDefaultsForShape(shapeId) {
+  if (!shapeId || !PALETTE_SETTINGS_BASE_URL) return null;
+  state._paletteDefaultsCache = state._paletteDefaultsCache || new Map();
+  const url = `${PALETTE_SETTINGS_BASE_URL}${encodeURIComponent(shapeId)}.json`;
+  if (state._paletteDefaultsCache.has(url)) return state._paletteDefaultsCache.get(url);
+  try {
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) {
+      // 404 is normal — safe-fallback.
+      state._paletteDefaultsCache.set(url, null);
+      return null;
+    }
+    const data = await res.json();
+    const d = (data && typeof data === 'object') ? data.defaults : null;
+    if (!d || typeof d !== 'object') {
+      state._paletteDefaultsCache.set(url, null);
+      return null;
+    }
+    // Minimal sanitization
+    if (d.tileSizeM && (typeof d.tileSizeM.w !== 'number' || typeof d.tileSizeM.h !== 'number')) {
+      delete d.tileSizeM;
+    }
+    state._paletteDefaultsCache.set(url, d);
+    return d;
+  } catch (err) {
+    console.warn('Не удалось загрузить palette_settings:', shapeId, err);
+    state._paletteDefaultsCache.set(url, null);
+    return null;
+  }
+}
+
+function paletteItemsToTiles(items, defaults = null) {
+  const d = (defaults && typeof defaults === 'object') ? defaults : null;
+  const dTile = (d && d.tileSizeM && typeof d.tileSizeM.w === 'number' && typeof d.tileSizeM.h === 'number')
+    ? d.tileSizeM
+    : null;
+  const defaultParamKeys = ['uvScale','exposureMult','contrast','saturation','roughnessMult','specStrength','normalScale','bumpScale'];
+
   return (items || []).map((it) => {
-    const tileSizeM = it.tileSizeM || { w: 0.2, h: 0.2 };
+    const tileSizeM = it.tileSizeM || dTile || { w: 0.2, h: 0.2 };
+    const paramsIn = (it.params && typeof it.params === 'object') ? it.params : null;
+    const params = paramsIn ? { ...paramsIn } : {};
+    if (d) {
+      for (const k of defaultParamKeys) {
+        if (params[k] == null && typeof d[k] === 'number') params[k] = d[k];
+      }
+    }
+    const paramsOut = Object.keys(params).length ? params : null;
     return {
       id: it.id,
       name: it.name || it.id,
       tileSizeM,
       maps: it.maps || null,
-      params: it.params || null,
+      params: paramsOut,
       preview: it.preview || (it.maps && it.maps.albedo) || null,
       // keep compatibility with existing UI expectations
       texture: (it.maps && it.maps.albedo) ? it.maps.albedo : it.texture,
@@ -1053,9 +1104,11 @@ async function openDetail(shapeId) {
   }
 
   if (paletteUrl) {
+    // Optional defaults file: palette_settings/<shapeId>.json
+    const paletteDefaults = await loadPaletteDefaultsForShape(s.id);
     const items = await loadSurfacePalette(paletteUrl);
     if (Array.isArray(items) && items.length) {
-      allowed = paletteItemsToTiles(items);
+      allowed = paletteItemsToTiles(items, paletteDefaults);
       paletteActive = true;
     }
   }
