@@ -259,8 +259,29 @@
   async function ensureShapesLoaded() {
     if (!API_BASE_URL) throw new Error('API_BASE_URL не задан. Проверьте admin/config.js');
     setStatus(elStatus, '', 'Загружаем формы…');
-    const data = await apiFetch('/api/shapes');
-    const shapes = Array.isArray(data?.shapes) ? data.shapes : [];
+    const payload = await apiFetch('/api/shapes');
+
+    // Backwards/forwards compatible parsing:
+    // - Newer backend may respond: { ok:true, shapes:[...] }
+    // - Current deployed backend responds: { ok:true, data:{ shapes:[...] } }
+    // - Older backend may respond: { ok:true, shapes:["klassika", ...] } or { shapeIds:[...] }
+    const rawShapes =
+      (Array.isArray(payload?.shapes) ? payload.shapes : null) ||
+      (Array.isArray(payload?.data?.shapes) ? payload.data.shapes : null) ||
+      (Array.isArray(payload?.data?.data?.shapes) ? payload.data.data.shapes : null) ||
+      (Array.isArray(payload?.shapeIds) ? payload.shapeIds : null) ||
+      (Array.isArray(payload?.data?.shapeIds) ? payload.data.shapeIds : null) ||
+      [];
+
+    // Normalize to objects with at least {id}
+    const shapes = rawShapes
+      .map((s) => {
+        if (typeof s === 'string') return { id: s };
+        if (s && typeof s === 'object') return s;
+        return null;
+      })
+      .filter(Boolean);
+
     state.shapes = shapes;
     setStatus(elStatus, 'ok', `Загружено форм: ${shapes.length}`);
   }
