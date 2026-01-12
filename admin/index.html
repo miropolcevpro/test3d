@@ -98,6 +98,20 @@
             Нажмите <b>«Настроить»</b> на карточке текстуры, чтобы изменить её параметры цветопередачи, матовости и масштаба.
             Если параметр не задан у текстуры, сайт использует <b>дефолты</b> из вкладки «Настройки палитры».
           </div>
+
+          <div class="bulkBar" id="bulkBar">
+            <label class="checkbox">
+              <input id="bulkSelectAll" type="checkbox" />
+              <span>Выбрать все</span>
+            </label>
+            <div class="muted" id="bulkSelectedCount">Выбрано: 0</div>
+            <div class="row" style="gap:8px; margin:0;">
+              <button class="btn btn--ghost btn--sm" id="bulkClearBtn" title="Снять выбор">Снять выбор</button>
+              <button class="btn btn--ghost btn--sm" id="bulkResetBtn" title="Удалить переопределения (tileSizeM и params) у выбранных текстур">Сбросить у выбранных</button>
+              <button class="btn btn--sm" id="bulkEditBtn" title="Открыть массовое редактирование параметров">Массово настроить</button>
+            </div>
+          </div>
+
           <div class="grid" id="texturesGrid"></div>
           <div class="empty" id="emptyState">В палитре пока нет текстур.</div>
         </div>
@@ -332,8 +346,18 @@
       <div class="modal__body">
         <div class="texModalGrid">
           <div class="texModalLeft">
-            <img class="texPreview" id="texPreview" alt="" loading="lazy" referrerpolicy="no-referrer" />
-            <div class="muted mtSm" id="texPreviewHint">Превью: albedo (если задано в палитре)</div>
+            <div class="previewSplit">
+              <div class="previewPane">
+                <canvas class="texCanvas" id="texCanvasBefore" width="320" height="240"></canvas>
+                <div class="muted mtSm">До</div>
+              </div>
+              <div class="previewPane">
+                <canvas class="texCanvas" id="texCanvasAfter" width="320" height="240"></canvas>
+                <div class="muted mtSm">После</div>
+              </div>
+            </div>
+            <img class="texPreview" id="texPreview" alt="" loading="lazy" referrerpolicy="no-referrer" hidden />
+            <div class="muted mtSm" id="texPreviewHint">Превью: albedo (из палитры). «После» учитывает дефолты палитры + переопределения текстуры.</div>
           </div>
           <div class="texModalRight">
             <div class="hint">
@@ -351,6 +375,75 @@
         <button class="btn btn--ghost" id="texResetBtn" title="Удалить переопределения и использовать дефолты палитры">Сбросить к дефолтам палитры</button>
         <button class="btn btn--ghost" id="texRevertBtn" title="Отменить изменения в этом окне">Отменить изменения</button>
         <button class="btn" id="texSaveBtn">Сохранить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: bulk edit texture params -->
+  <div class="modal" id="bulkModal" hidden>
+    <div class="modal__backdrop" data-action="close"></div>
+    <div class="modal__card">
+      <div class="modal__head">
+        <div>
+          <div class="modal__title" id="bulkModalTitle">Массовая настройка текстур</div>
+          <div class="modal__subtitle" id="bulkModalSubtitle"></div>
+        </div>
+        <button class="btn btn--ghost" id="bulkModalCloseBtn" title="Закрыть">✕</button>
+      </div>
+
+      <div class="modal__body">
+        <div class="hint">
+          <b>Применение:</b> вы можете настроить параметры сразу для нескольких текстур.
+          Поля с выключенным переключателем <b>«Применять»</b> не изменятся.
+          <br/>
+          <b>Рекомендация:</b> начните с «Вставить дефолты палитры», затем аккуратно корректируйте.
+        </div>
+
+        <div class="bulkTop mtSm">
+          <label class="field">
+            <span>Применить к</span>
+            <select id="bulkApplyTarget">
+              <option value="selected">Выбранным текстурам</option>
+              <option value="all">Всем текстурам формы</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Источник (скопировать параметры)</span>
+            <select id="bulkSourceTexture"></select>
+          </label>
+          <div class="row" style="gap:8px; margin:0; align-items:flex-end;">
+            <button class="btn btn--ghost btn--sm" id="bulkFillDefaultsBtn" title="Заполнить поля значениями из Настроек палитры">Вставить дефолты палитры</button>
+            <button class="btn btn--ghost btn--sm" id="bulkCopyFromTextureBtn" title="Скопировать параметры из выбранной текстуры">Копировать из текстуры</button>
+          </div>
+        </div>
+
+        <div class="bulkParams mt">
+          <div class="bulkParamRow">
+            <label class="checkbox">
+              <input id="bulkApplyTileSize" type="checkbox" />
+              <span>Применять tileSize (мм)</span>
+            </label>
+            <div class="grid2">
+              <label class="field">
+                <span>Ширина (мм)</span>
+                <input id="bulkTileW" type="number" min="1" step="1" placeholder="115" />
+              </label>
+              <label class="field">
+                <span>Высота (мм)</span>
+                <input id="bulkTileH" type="number" min="1" step="1" placeholder="115" />
+              </label>
+            </div>
+            <div class="hint mtSm">Если выключено — tileSizeM у текстур не трогаем.</div>
+          </div>
+
+          <div class="texParams" id="bulkParams"></div>
+          <div class="status mtSm" id="bulkModalStatus"></div>
+        </div>
+      </div>
+
+      <div class="modal__foot">
+        <button class="btn btn--ghost" id="bulkResetOverridesBtn" title="Удалить переопределения (tileSizeM и params) у целевых текстур">Сбросить переопределения</button>
+        <button class="btn" id="bulkApplyBtn">Применить и сохранить палитру</button>
       </div>
     </div>
   </div>

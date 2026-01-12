@@ -233,7 +233,42 @@ input:focus,select:focus{border-color:rgba(78,118,137,.65)}
   border-radius:14px;
   overflow:hidden;
   background:rgba(0,0,0,.22);
+  position:relative;
 }
+
+.tileSelect{
+  position:absolute;
+  left:10px;
+  top:10px;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  font-size:11px;
+  color:var(--text);
+  background:rgba(0,0,0,.45);
+  border:1px solid rgba(255,255,255,.14);
+  border-radius:12px;
+  padding:6px 8px;
+  cursor:pointer;
+  user-select:none;
+}
+.tileSelect input{ margin:0; }
+.tileSelect span{ display:none; }
+
+.bulkBar{
+  margin-top:10px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  flex-wrap:wrap;
+  padding:10px 12px;
+  border-radius:12px;
+  border:1px dashed var(--line);
+  background:rgba(0,0,0,.18);
+}
+
+.bulkBar .muted{ margin:0; }
 .thumb{
   width:100%;
   aspect-ratio: 1 / 1;
@@ -352,6 +387,26 @@ input:focus,select:focus{border-color:rgba(78,118,137,.65)}
   border:1px solid rgba(255,255,255,.10);
   border-radius:16px;
   background:rgba(255,255,255,.04);
+}
+
+.previewGrid{ display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+@media (max-width: 860px){ .previewGrid{ grid-template-columns:1fr; } }
+.previewLabel{ font-size:11px; color:var(--muted); margin-bottom:6px; }
+.texCanvas{
+  width:100%;
+  height:auto;
+  border:1px solid rgba(255,255,255,.10);
+  border-radius:16px;
+  background:rgba(255,255,255,.04);
+  display:block;
+}
+.texPreviewHint{ margin-top:10px; }
+
+.bulkParam{
+  border:1px solid rgba(255,255,255,.10);
+  border-radius:16px;
+  background:rgba(0,0,0,.14);
+  padding:10px 12px;
 }
 .texParams{ margin-top:12px; display:flex; flex-direction:column; gap:12px; }
 .paramRow{

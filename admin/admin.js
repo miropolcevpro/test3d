@@ -19,6 +19,20 @@
     }
   }
 
+  // Bucket base for palette assets (maps, previews). Can be overridden in admin/config.js:
+  //   window.BUCKET_BASE_URL = "https://storage.yandexcloud.net/webar3dtexture/";
+  const BUCKET_BASE_URL = (window.BUCKET_BASE_URL || 'https://storage.yandexcloud.net/webar3dtexture/').replace(/\/+$/, '/') ;
+
+  function resolveMediaUrl(u) {
+    if (!u) return '';
+    const s = String(u);
+    if (/^https?:\/\//i.test(s)) return s;
+    // Site assets
+    if (s.startsWith('assets/')) return resolveSiteUrl(s);
+    // Bucket-relative paths (surfaces/..., palettes/..., shape_settings/...)
+    return new URL(s.replace(/^\/+/, ''), BUCKET_BASE_URL).toString();
+  }
+
   const $ = (id) => document.getElementById(id);
 
   // Auth / common
@@ -84,6 +98,31 @@
   const elTexturesGrid = $('texturesGrid');
   const elEmptyTextures = $('emptyState');
 
+  // Bulk edit UI (textures)
+  const elBulkBar = $('bulkBar');
+  const elBulkSelectAll = $('bulkSelectAll');
+  const elBulkSelectedCount = $('bulkSelectedCount');
+  const elBulkClearBtn = $('bulkClearBtn');
+  const elBulkResetBtn = $('bulkResetBtn');
+  const elBulkEditBtn = $('bulkEditBtn');
+
+  // Bulk modal
+  const elBulkModal = $('bulkModal');
+  const elBulkModalTitle = $('bulkModalTitle');
+  const elBulkModalSubtitle = $('bulkModalSubtitle');
+  const elBulkModalStatus = $('bulkModalStatus');
+  const elBulkModalCloseBtn = $('bulkModalCloseBtn');
+  const elBulkApplyTarget = $('bulkApplyTarget');
+  const elBulkSourceTexture = $('bulkSourceTexture');
+  const elBulkFillDefaultsBtn = $('bulkFillDefaultsBtn');
+  const elBulkCopyFromTextureBtn = $('bulkCopyFromTextureBtn');
+  const elBulkApplyTileSize = $('bulkApplyTileSize');
+  const elBulkTileW = $('bulkTileW');
+  const elBulkTileH = $('bulkTileH');
+  const elBulkParams = $('bulkParams');
+  const elBulkResetOverridesBtn = $('bulkResetOverridesBtn');
+  const elBulkApplyBtn = $('bulkApplyBtn');
+
   // Modal: ZIP mapping
   const elMapModal = $('mapModal');
   const elMapModalTitle = $('mapModalTitle');
@@ -104,6 +143,8 @@
   const elTexParams = $('texParams');
   const elTexPreview = $('texPreview');
   const elTexPreviewHint = $('texPreviewHint');
+  const elTexCanvasBefore = $('texCanvasBefore');
+  const elTexCanvasAfter = $('texCanvasAfter');
   const elTexResetBtn = $('texResetBtn');
   const elTexRevertBtn = $('texRevertBtn');
   const elTexSaveBtn = $('texSaveBtn');
@@ -114,6 +155,7 @@
     paletteByShapeId: new Map(),
     paletteSettingsByShapeId: new Map(),
     uploadTasks: [],
+    selectedTextureIdsByShapeId: new Map(),
   };
 
   // Recommended defaults (used for Reset buttons in UI). These are safe neutral values.
@@ -198,6 +240,15 @@
 
   // ZIP mapping modal runtime
   let mapModalResolve = null;
+
+  // Texture preview runtime (canvas before/after)
+  let texPreviewImageEl = null;
+  let texPreviewLoaded = false;
+  let texPreviewOriginal = null; // ImageData
+  let texPreviewDrawTimer = null;
+
+  // Bulk modal runtime
+  let bulkSnapshot = null;
   let mapModalReject = null;
   let currentMapTask = null;
 
@@ -274,6 +325,76 @@
     if (mb < 1024) return mb.toFixed(2) + ' MB';
     const gb = mb / 1024;
     return gb.toFixed(2) + ' GB';
+  }
+
+  async function loadImageForCanvas(url) {
+    if (!url) throw new Error('preview_url_empty');
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('preview_image_load_failed'));
+      img.src = url;
+    });
+  }
+
+  function drawCoverToCanvas(img, canvas) {
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const cw = canvas.width;
+    const ch = canvas.height;
+    ctx.clearRect(0, 0, cw, ch);
+    const iw = img.naturalWidth || img.width;
+    const ih = img.naturalHeight || img.height;
+    if (!iw || !ih) return;
+    const scale = Math.max(cw / iw, ch / ih);
+    const dw = iw * scale;
+    const dh = ih * scale;
+    const dx = (cw - dw) / 2;
+    const dy = (ch - dh) / 2;
+    ctx.drawImage(img, dx, dy, dw, dh);
+    return ctx;
+  }
+
+  function clamp01(x) {
+    return x < 0 ? 0 : (x > 1 ? 1 : x);
+  }
+
+  function applyBasicColorAdjustments(srcImageData, params) {
+    const exposure = Number(params?.exposureMult ?? 1.0);
+    const contrast = Number(params?.contrast ?? 1.0);
+    const saturation = Number(params?.saturation ?? 1.0);
+
+    const out = new ImageData(srcImageData.width, srcImageData.height);
+    const d = srcImageData.data;
+    const o = out.data;
+
+    for (let i = 0; i < d.length; i += 4) {
+      let r = d[i] / 255;
+      let g = d[i + 1] / 255;
+      let b = d[i + 2] / 255;
+      const a = d[i + 3];
+
+      // Exposure
+      r *= exposure; g *= exposure; b *= exposure;
+
+      // Contrast around mid-gray
+      r = (r - 0.5) * contrast + 0.5;
+      g = (g - 0.5) * contrast + 0.5;
+      b = (b - 0.5) * contrast + 0.5;
+
+      // Saturation (luma blend)
+      const l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      r = l + (r - l) * saturation;
+      g = l + (g - l) * saturation;
+      b = l + (b - l) * saturation;
+
+      r = clamp01(r); g = clamp01(g); b = clamp01(b);
+      o[i] = Math.round(r * 255);
+      o[i + 1] = Math.round(g * 255);
+      o[i + 2] = Math.round(b * 255);
+      o[i + 3] = a;
+    }
+    return out;
   }
 
   function openZipMappingModal(task) {
@@ -673,17 +794,39 @@ function getToken() {
     `;
   }
 
-  function renderTextures(items) {
+  function getSelectedSet(shapeId) {
+    if (!shapeId) return new Set();
+    if (!state.selectedTextureIdsByShapeId.has(shapeId)) {
+      state.selectedTextureIdsByShapeId.set(shapeId, new Set());
+    }
+    return state.selectedTextureIdsByShapeId.get(shapeId);
+  }
+
+  function updateBulkBar(shapeId, totalCount) {
+    if (!elBulkBar) return;
+    const sel = getSelectedSet(shapeId);
+    const n = sel.size;
+    if (elBulkSelectedCount) elBulkSelectedCount.textContent = `Выбрано: ${n}`;
+    if (elBulkSelectAll) {
+      elBulkSelectAll.checked = totalCount > 0 && n === totalCount;
+      elBulkSelectAll.indeterminate = n > 0 && n < totalCount;
+    }
+    elBulkResetBtn && (elBulkResetBtn.disabled = n === 0);
+    elBulkEditBtn && (elBulkEditBtn.disabled = (n === 0 && totalCount === 0));
+  }
+
+  function renderTextures(shapeId, items) {
     elTexturesGrid.innerHTML = '';
     const list = Array.isArray(items) ? items : [];
     elEmptyTextures.style.display = list.length ? 'none' : 'block';
+    updateBulkBar(shapeId, list.length);
     if (!list.length) return;
 
     const frag = document.createDocumentFragment();
     for (const it of list) {
       const id = it?.id || it?.textureId || '';
       const name = it?.name || id || '(без названия)';
-      const previewUrl = it?.previewUrl || it?.preview || it?.maps?.albedoUrl || it?.maps?.albedo || '';
+      const previewUrl = resolveMediaUrl(it?.previewUrl || it?.preview || it?.maps?.albedoUrl || it?.maps?.albedo || '');
 
       const hasTileOverride = !!it?.tileSizeM;
       const hasParams = it?.params && typeof it.params === 'object' && Object.keys(it.params).length > 0;
@@ -692,9 +835,14 @@ function getToken() {
         hasParams ? '<span class="pill pill--set">params</span>' : '<span class="pill">params: default</span>',
       ].join(' ');
 
+      const selected = getSelectedSet(shapeId).has(id);
       const card = document.createElement('div');
       card.className = 'tile';
       card.innerHTML = `
+        <label class="tileSelect" title="Выбрать текстуру для массового редактирования">
+          <input type="checkbox" data-action="select" data-id="${escapeHtml(id)}" ${selected ? 'checked' : ''} />
+          <span></span>
+        </label>
         <img class="thumb" alt="" loading="lazy" referrerpolicy="no-referrer" src="${escapeHtml(previewUrl)}">
         <div class="meta">
           <div class="name">${escapeHtml(name)}</div>
@@ -705,6 +853,14 @@ function getToken() {
           </div>
         </div>
       `;
+
+      const selCb = card.querySelector('input[data-action="select"]');
+      selCb.addEventListener('change', () => {
+        const set = getSelectedSet(shapeId);
+        if (selCb.checked) set.add(id);
+        else set.delete(id);
+        updateBulkBar(shapeId, list.length);
+      });
       card.querySelector('[data-action="edit"]').addEventListener('click', (e) => {
         e.stopPropagation();
         const r = parseRoute();
@@ -1140,7 +1296,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
     // refresh
     state.paletteByShapeId.delete(shapeId);
     const fresh = await ensurePaletteLoaded(shapeId);
-    renderTextures(Array.isArray(fresh?.items) ? fresh.items : []);
+    renderTextures(shapeId, Array.isArray(fresh?.items) ? fresh.items : []);
   }
 
   function num(v, fallback = null) {
@@ -1235,6 +1391,20 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
     currentTexSnapshot = null;
     if (elTexParams) elTexParams.innerHTML = '';
     if (elTexPreview) elTexPreview.removeAttribute('src');
+    texPreviewLoaded = false;
+    texPreviewOriginal = null;
+    if (texPreviewDrawTimer) {
+      clearTimeout(texPreviewDrawTimer);
+      texPreviewDrawTimer = null;
+    }
+    if (elTexCanvasBefore) {
+      const ctx = elTexCanvasBefore.getContext('2d');
+      ctx && ctx.clearRect(0, 0, elTexCanvasBefore.width, elTexCanvasBefore.height);
+    }
+    if (elTexCanvasAfter) {
+      const ctx = elTexCanvasAfter.getContext('2d');
+      ctx && ctx.clearRect(0, 0, elTexCanvasAfter.width, elTexCanvasAfter.height);
+    }
     setStatus(elTexModalStatus, '', '');
     showTexModal(false);
   }
@@ -1268,6 +1438,37 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
     return row;
   }
 
+  function collectTextureDraftParams(shapeId) {
+    const defs = getDefaultsForShape(shapeId);
+    const out = { ...defs };
+    // Read live values from UI dataset (if present)
+    for (const schema of TEXTURE_PARAM_SCHEMA) {
+      const row = elTexParams?.querySelector(`.paramRow[data-key="${schema.key}"]`);
+      if (!row) continue;
+      const v = Number(row.dataset.value);
+      if (Number.isFinite(v)) out[schema.key] = v;
+    }
+    return out;
+  }
+
+  function redrawTexturePreview(shapeId) {
+    if (!texPreviewLoaded || !texPreviewOriginal || !elTexCanvasAfter || !elTexCanvasBefore) return;
+    const ctxAfter = elTexCanvasAfter.getContext('2d', { willReadFrequently: true });
+    if (!ctxAfter) return;
+    const draft = collectTextureDraftParams(shapeId);
+    const adjusted = applyBasicColorAdjustments(texPreviewOriginal, draft);
+    ctxAfter.putImageData(adjusted, 0, 0);
+  }
+
+  function scheduleTexturePreviewRedraw(shapeId) {
+    if (!elTexCanvasAfter) return;
+    if (texPreviewDrawTimer) clearTimeout(texPreviewDrawTimer);
+    texPreviewDrawTimer = setTimeout(() => {
+      texPreviewDrawTimer = null;
+      redrawTexturePreview(shapeId);
+    }, 60);
+  }
+
   async function openTextureParamsModal(shapeId, itemId) {
     if (!shapeId || !itemId) return;
     await ensurePaletteLoaded(shapeId);
@@ -1283,7 +1484,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
     elTexModalTitle.textContent = 'Настройка текстуры';
     elTexModalSubtitle.textContent = `Форма: ${shapeId} • Текстура: ${itemId}`;
 
-    const previewUrl = item?.previewUrl || item?.preview || item?.maps?.albedoUrl || item?.maps?.albedo || '';
+    const previewUrl = resolveMediaUrl(item?.previewUrl || item?.preview || item?.maps?.albedoUrl || item?.maps?.albedo || '');
     if (elTexPreview && previewUrl) {
       elTexPreview.src = previewUrl;
       elTexPreviewHint.textContent = 'Превью: albedo (из палитры)';
@@ -1335,6 +1536,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
       row.addEventListener('param-change', (e) => {
         // store temp on DOM dataset
         row.dataset.value = String(e.detail.value);
+        scheduleTexturePreviewRedraw(shapeId);
       });
       row.dataset.key = schema.key;
       row.dataset.value = String(raw);
@@ -1361,18 +1563,21 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
         if (inputNum) inputNum.value = String(v);
         row.dataset.value = String(v);
       }
+      scheduleTexturePreviewRedraw(shapeId);
     };
 
     elTexRevertBtn.onclick = () => {
       if (!currentTexSnapshot) return;
       applyDraftToUI(currentTexSnapshot);
       setStatus(elTexModalStatus, 'ok', 'Изменения в окне отменены.');
+      scheduleTexturePreviewRedraw(shapeId);
     };
 
     elTexResetBtn.onclick = () => {
       const blank = { tileSizeM: null, params: {} };
       applyDraftToUI(blank);
       setStatus(elTexModalStatus, 'warn', 'Переопределения очищены. Нажмите «Сохранить», чтобы применить.');
+      scheduleTexturePreviewRedraw(shapeId);
     };
 
     elTexSaveBtn.onclick = async () => {
@@ -1421,7 +1626,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
         await savePalette(shapeId, nextPalette);
         state.paletteByShapeId.delete(shapeId);
         const fresh = await ensurePaletteLoaded(shapeId);
-        renderTextures(Array.isArray(fresh?.items) ? fresh.items : []);
+        renderTextures(shapeId, Array.isArray(fresh?.items) ? fresh.items : []);
         setStatus(elPaletteStatus, 'ok', 'Палитра сохранена.');
         setStatus(elTexModalStatus, 'ok', 'Сохранено.');
         currentTexSnapshot = deepClone({ tileSizeM: nextItem.tileSizeM || null, params: nextItem.params || {} });
@@ -1445,6 +1650,331 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
 
     showTexModal(true);
     setStatus(elTexModalStatus, '', '');
+
+    // Load and draw preview (non-blocking)
+    texPreviewLoaded = false;
+    texPreviewOriginal = null;
+    if (previewUrl && elTexCanvasBefore && elTexCanvasAfter) {
+      (async () => {
+        try {
+          const img = await loadImageForCanvas(previewUrl);
+          texPreviewImageEl = img;
+          const ctxB = drawCoverToCanvas(img, elTexCanvasBefore);
+          drawCoverToCanvas(img, elTexCanvasAfter);
+          if (ctxB) {
+            texPreviewOriginal = ctxB.getImageData(0, 0, elTexCanvasBefore.width, elTexCanvasBefore.height);
+            texPreviewLoaded = true;
+            redrawTexturePreview(shapeId);
+          }
+        } catch (e) {
+          console.warn(e);
+          elTexPreviewHint.textContent = 'Превью недоступно (не удалось загрузить albedo).';
+        }
+      })();
+    }
+  }
+
+  function showBulkModal(open) {
+    if (!elBulkModal) return;
+    elBulkModal.hidden = !open;
+  }
+
+  function closeBulkModal() {
+    bulkSnapshot = null;
+    if (elBulkParams) elBulkParams.innerHTML = '';
+    setStatus(elBulkModalStatus, '', '');
+    showBulkModal(false);
+  }
+
+  function buildBulkParamRow(schema, value, defaultValue) {
+    const row = document.createElement('div');
+    row.className = 'bulkParam';
+    row.dataset.key = schema.key;
+    row.dataset.value = String(value);
+    row.dataset.apply = '0';
+
+    row.innerHTML = `
+      <div class="paramTop">
+        <div class="paramLabel">
+          <label class="checkbox" title="Применить этот параметр к целевым текстурам">
+            <input type="checkbox" data-action="apply" />
+            <span>Применять</span>
+          </label>
+          <span style="margin-left:10px;">${escapeHtml(schema.label)} <span class="paramHelp" title="${escapeHtml(schema.help)}">i</span></span>
+        </div>
+        <div class="paramMeta">default: ${escapeHtml(defaultValue)}</div>
+      </div>
+      <div class="paramControls">
+        <input type="range" min="${escapeHtml(schema.min)}" max="${escapeHtml(schema.max)}" step="${escapeHtml(schema.step)}" value="${escapeHtml(value)}" />
+        <input type="number" step="${escapeHtml(schema.step)}" min="${escapeHtml(schema.min)}" max="${escapeHtml(schema.max)}" value="${escapeHtml(value)}" />
+      </div>
+      <div class="paramNote">Подсказка: наведите на <b>i</b>. Отметьте «Применять», чтобы параметр применился массово.</div>
+    `;
+
+    const cb = row.querySelector('input[data-action="apply"]');
+    const range = row.querySelector('input[type="range"]');
+    const numInput = row.querySelector('input[type="number"]');
+
+    const onSync = (v) => {
+      const n = Number(v);
+      if (!Number.isFinite(n)) return;
+      range.value = String(n);
+      numInput.value = String(n);
+      row.dataset.value = String(n);
+    };
+    range.addEventListener('input', () => onSync(range.value));
+    numInput.addEventListener('input', () => onSync(numInput.value));
+    cb.addEventListener('change', () => {
+      row.dataset.apply = cb.checked ? '1' : '0';
+    });
+
+    return row;
+  }
+
+  function bulkCollectDraft() {
+    const out = {
+      applyTileSize: Boolean(elBulkApplyTileSize?.checked),
+      tileW: num(elBulkTileW?.value, null),
+      tileH: num(elBulkTileH?.value, null),
+      params: {},
+      applyKeys: new Set(),
+    };
+    for (const row of elBulkParams?.querySelectorAll('.bulkParam') || []) {
+      const k = row.dataset.key;
+      if (!k) continue;
+      const apply = row.dataset.apply === '1';
+      if (!apply) continue;
+      const v = Number(row.dataset.value);
+      if (!Number.isFinite(v)) continue;
+      out.applyKeys.add(k);
+      out.params[k] = v;
+    }
+    return out;
+  }
+
+  async function bulkResetOverridesAndSave(shapeId, ids) {
+    const palette = state.paletteByShapeId.get(shapeId) || (await ensurePaletteLoaded(shapeId));
+    const items = Array.isArray(palette?.items) ? [...palette.items] : [];
+    const idSet = new Set(ids || []);
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      const id = it?.id || it?.textureId;
+      if (!idSet.has(id)) continue;
+      const next = deepClone(it);
+      delete next.tileSizeM;
+      delete next.params;
+      items[i] = next;
+    }
+    await savePalette(shapeId, { shapeId, items });
+  }
+
+  async function applyBulkAndSave(shapeId) {
+    const palette = state.paletteByShapeId.get(shapeId) || (await ensurePaletteLoaded(shapeId));
+    const items = Array.isArray(palette?.items) ? [...palette.items] : [];
+    const defs = getDefaultsForShape(shapeId);
+
+    // Determine target ids
+    const target = String(elBulkApplyTarget?.value || 'selected');
+    let ids = [];
+    if (target === 'all') {
+      ids = items.map(it => it?.id || it?.textureId).filter(Boolean);
+    } else {
+      ids = Array.from(getSelectedSet(shapeId));
+    }
+    if (!ids.length) throw new Error('no_target_textures');
+    const idSet = new Set(ids);
+
+    const draft = bulkCollectDraft();
+    const applyTile = draft.applyTileSize && Number.isFinite(draft.tileW) && Number.isFinite(draft.tileH);
+
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      const id = it?.id || it?.textureId;
+      if (!idSet.has(id)) continue;
+      const next = deepClone(it);
+
+      // Tile size override
+      if (applyTile) {
+        if (Math.round(draft.tileW) === Math.round(defs.tileSizeMm.w) && Math.round(draft.tileH) === Math.round(defs.tileSizeMm.h)) {
+          delete next.tileSizeM;
+        } else {
+          next.tileSizeM = { w: Math.max(1, draft.tileW) / 1000, h: Math.max(1, draft.tileH) / 1000 };
+        }
+      }
+
+      // Params override
+      if (draft.applyKeys.size) {
+        const p = (next.params && typeof next.params === 'object') ? { ...next.params } : {};
+        for (const k of draft.applyKeys) {
+          const v = draft.params[k];
+          const defVal = defs[k];
+          if (Number.isFinite(defVal) && Math.abs(v - defVal) < 1e-9) {
+            delete p[k];
+          } else {
+            p[k] = v;
+          }
+        }
+        if (Object.keys(p).length) next.params = p;
+        else delete next.params;
+      }
+
+      items[i] = next;
+    }
+
+    await savePalette(shapeId, { shapeId, items });
+  }
+
+  async function openBulkParamsModal(shapeId) {
+    if (!shapeId) return;
+    await ensurePaletteLoaded(shapeId);
+    await ensurePaletteSettingsLoaded(shapeId);
+    const palette = state.paletteByShapeId.get(shapeId);
+    const items = Array.isArray(palette?.items) ? palette.items : [];
+    const defs = getDefaultsForShape(shapeId);
+
+    bulkSnapshot = deepClone({ shapeId, items });
+    elBulkModalTitle.textContent = 'Массовая настройка текстур';
+
+    const selectedCount = getSelectedSet(shapeId).size;
+    const totalCount = items.length;
+    elBulkModalSubtitle.textContent = `Форма: ${shapeId} • Всего текстур: ${totalCount} • Выбрано: ${selectedCount}`;
+
+    // Default target: selected if any, else all
+    if (elBulkApplyTarget) elBulkApplyTarget.value = selectedCount ? 'selected' : 'all';
+
+    // Source dropdown
+    if (elBulkSourceTexture) {
+      elBulkSourceTexture.innerHTML = '';
+      const frag = document.createDocumentFragment();
+      for (const it of items) {
+        const id = it?.id || it?.textureId;
+        if (!id) continue;
+        const name = it?.name || id;
+        const opt = document.createElement('option');
+        opt.value = id;
+        opt.textContent = `${id} — ${name}`;
+        frag.appendChild(opt);
+      }
+      elBulkSourceTexture.appendChild(frag);
+    }
+
+    // Tile defaults
+    if (elBulkApplyTileSize) elBulkApplyTileSize.checked = false;
+    if (elBulkTileW) elBulkTileW.value = String(defs.tileSizeMm.w);
+    if (elBulkTileH) elBulkTileH.value = String(defs.tileSizeMm.h);
+
+    // Param rows
+    elBulkParams.innerHTML = '';
+    for (const schema of TEXTURE_PARAM_SCHEMA) {
+      const defVal = defs[schema.key];
+      const row = buildBulkParamRow(schema, defVal, defVal);
+      elBulkParams.appendChild(row);
+    }
+
+    setStatus(elBulkModalStatus, '', '');
+
+    // Close interactions
+    // Close interactions (replace handlers to avoid stacking)
+    if (elBulkModal) {
+      elBulkModal.querySelectorAll('[data-action="close"]').forEach(el => {
+        el.onclick = () => closeBulkModal();
+      });
+    }
+    if (elBulkModalCloseBtn) elBulkModalCloseBtn.onclick = () => closeBulkModal();
+
+    // Fill defaults
+    if (elBulkFillDefaultsBtn) elBulkFillDefaultsBtn.onclick = () => {
+      if (elBulkTileW) elBulkTileW.value = String(defs.tileSizeMm.w);
+      if (elBulkTileH) elBulkTileH.value = String(defs.tileSizeMm.h);
+      if (elBulkApplyTileSize) elBulkApplyTileSize.checked = true;
+      for (const row of elBulkParams.querySelectorAll('.bulkParam')) {
+        const k = row.dataset.key;
+        const v = defs[k];
+        row.dataset.value = String(v);
+        row.querySelector('input[type="range"]').value = String(v);
+        row.querySelector('input[type="number"]').value = String(v);
+        const cb = row.querySelector('input[data-action="apply"]');
+        cb.checked = true;
+        row.dataset.apply = '1';
+      }
+      setStatus(elBulkModalStatus, 'ok', 'Заполнено дефолтами палитры. Проверьте и нажмите «Применить».' );
+    };
+
+    // Copy from texture
+    if (elBulkCopyFromTextureBtn) elBulkCopyFromTextureBtn.onclick = () => {
+      const srcId = String(elBulkSourceTexture?.value || '');
+      const src = findPaletteItem(palette, srcId);
+      if (!src) {
+        setStatus(elBulkModalStatus, 'err', 'Не удалось найти текстуру-источник.');
+        return;
+      }
+      // tile
+      if (src.tileSizeM && typeof src.tileSizeM === 'object') {
+        if (elBulkTileW) elBulkTileW.value = String(Math.round(src.tileSizeM.w * 1000));
+        if (elBulkTileH) elBulkTileH.value = String(Math.round(src.tileSizeM.h * 1000));
+        if (elBulkApplyTileSize) elBulkApplyTileSize.checked = true;
+      } else {
+        if (elBulkTileW) elBulkTileW.value = String(defs.tileSizeMm.w);
+        if (elBulkTileH) elBulkTileH.value = String(defs.tileSizeMm.h);
+        if (elBulkApplyTileSize) elBulkApplyTileSize.checked = false;
+      }
+      const p = (src.params && typeof src.params === 'object') ? src.params : {};
+      for (const row of elBulkParams.querySelectorAll('.bulkParam')) {
+        const k = row.dataset.key;
+        const v = (typeof p[k] === 'number') ? p[k] : defs[k];
+        row.dataset.value = String(v);
+        row.querySelector('input[type="range"]').value = String(v);
+        row.querySelector('input[type="number"]').value = String(v);
+        const cb = row.querySelector('input[data-action="apply"]');
+        cb.checked = typeof p[k] === 'number';
+        row.dataset.apply = cb.checked ? '1' : '0';
+      }
+      setStatus(elBulkModalStatus, 'ok', 'Скопировано из текстуры. Отмечены только параметры, которые были переопределены.' );
+    };
+
+    // Reset overrides
+    if (elBulkResetOverridesBtn) elBulkResetOverridesBtn.onclick = async () => {
+      try {
+        elBulkResetOverridesBtn.disabled = true;
+        setStatus(elBulkModalStatus, '', 'Сбрасываем…');
+        const target = String(elBulkApplyTarget?.value || 'selected');
+        const ids = (target === 'all')
+          ? items.map(it => it?.id || it?.textureId).filter(Boolean)
+          : Array.from(getSelectedSet(shapeId));
+        if (!ids.length) throw new Error('no_target_textures');
+        await bulkResetOverridesAndSave(shapeId, ids);
+        state.paletteByShapeId.delete(shapeId);
+        const fresh = await ensurePaletteLoaded(shapeId);
+        renderTextures(shapeId, Array.isArray(fresh?.items) ? fresh.items : []);
+        setStatus(elBulkModalStatus, 'ok', 'Переопределения сброшены и сохранены.');
+      } catch (e) {
+        console.warn(e);
+        setStatus(elBulkModalStatus, 'err', `Ошибка: ${e.message}`);
+      } finally {
+        elBulkResetOverridesBtn.disabled = false;
+      }
+    };
+
+    // Apply
+    if (elBulkApplyBtn) elBulkApplyBtn.onclick = async () => {
+      try {
+        elBulkApplyBtn.disabled = true;
+        setStatus(elBulkModalStatus, '', 'Применяем и сохраняем…');
+        await applyBulkAndSave(shapeId);
+        state.paletteByShapeId.delete(shapeId);
+        const fresh = await ensurePaletteLoaded(shapeId);
+        renderTextures(shapeId, Array.isArray(fresh?.items) ? fresh.items : []);
+        setStatus(elPaletteStatus, 'ok', 'Палитра сохранена (массовое изменение).');
+        closeBulkModal();
+      } catch (e) {
+        console.warn(e);
+        setStatus(elBulkModalStatus, 'err', `Ошибка: ${e.message}`);
+      } finally {
+        elBulkApplyBtn.disabled = false;
+      }
+    };
+
+    showBulkModal(true);
   }
 
   function findShapeById(shapeId) {
@@ -1480,7 +2010,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
 
       if (r.tab === 'textures') {
         const palette = await ensurePaletteLoaded(shapeId);
-        renderTextures(Array.isArray(palette?.items) ? palette.items : []);
+        renderTextures(shapeId, Array.isArray(palette?.items) ? palette.items : []);
       }
 
       if (r.tab === 'upload') {
@@ -1599,6 +2129,69 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
       } catch (e) {
         console.warn(e);
         setStatus(elPaletteStatus, 'err', `Ошибка сохранения палитры: ${e.message}`);
+      }
+    });
+
+    // Bulk selection / mass edit (textures tab)
+    elBulkSelectAll?.addEventListener('change', async () => {
+      const r = parseRoute();
+      if (r.name !== 'shape') return;
+      const shapeId = decodeURIComponent(r.id || '');
+      if (!shapeId) return;
+      const palette = state.paletteByShapeId.get(shapeId) || (await ensurePaletteLoaded(shapeId));
+      const items = Array.isArray(palette?.items) ? palette.items : [];
+      const ids = items.map(it => it?.id || it?.textureId).filter(Boolean);
+      const set = getSelectedSet(shapeId);
+      set.clear();
+      if (elBulkSelectAll.checked) {
+        ids.forEach(id => set.add(id));
+      }
+      renderTextures(shapeId, items);
+    });
+
+    elBulkClearBtn?.addEventListener('click', async () => {
+      const r = parseRoute();
+      if (r.name !== 'shape') return;
+      const shapeId = decodeURIComponent(r.id || '');
+      if (!shapeId) return;
+      const set = getSelectedSet(shapeId);
+      set.clear();
+      const palette = state.paletteByShapeId.get(shapeId) || (await ensurePaletteLoaded(shapeId));
+      renderTextures(shapeId, Array.isArray(palette?.items) ? palette.items : []);
+    });
+
+    elBulkResetBtn?.addEventListener('click', async () => {
+      const r = parseRoute();
+      if (r.name !== 'shape') return;
+      const shapeId = decodeURIComponent(r.id || '');
+      if (!shapeId) return;
+      const set = getSelectedSet(shapeId);
+      const ids = Array.from(set);
+      if (!ids.length) return;
+      try {
+        setStatus(elPaletteStatus, '', `Сброс переопределений: ${ids.length}...`);
+        await bulkResetOverridesAndSave(shapeId, ids);
+        // Keep selection
+        state.paletteByShapeId.delete(shapeId);
+        const fresh = await ensurePaletteLoaded(shapeId);
+        renderTextures(shapeId, Array.isArray(fresh?.items) ? fresh.items : []);
+        setStatus(elPaletteStatus, 'ok', 'Сброшено и сохранено.');
+      } catch (e) {
+        console.warn(e);
+        setStatus(elPaletteStatus, 'err', `Ошибка: ${e.message}`);
+      }
+    });
+
+    elBulkEditBtn?.addEventListener('click', async () => {
+      const r = parseRoute();
+      if (r.name !== 'shape') return;
+      const shapeId = decodeURIComponent(r.id || '');
+      if (!shapeId) return;
+      try {
+        await openBulkParamsModal(shapeId);
+      } catch (e) {
+        console.warn(e);
+        setStatus(elPaletteStatus, 'err', `Не удалось открыть массовое редактирование: ${e.message}`);
       }
     });
 
@@ -1728,7 +2321,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
                 // refresh local cache + UI
                 state.paletteByShapeId.delete(shapeId);
                 const fresh = await ensurePaletteLoaded(shapeId);
-                renderTextures(Array.isArray(fresh?.items) ? fresh.items : []);
+                renderTextures(shapeId, Array.isArray(fresh?.items) ? fresh.items : []);
 
                 setStatus(elUploadStatus, 'ok', 'Готово: файлы загружены, палитра обновлена и сохранена.');
               }
