@@ -48,6 +48,21 @@
   const elPaneSettings = $('paneSettings');
   const elBtnUploadGo = $('btnUploadGo');
 
+  // Upload UI
+  const elUploadTextureId = $('uploadTextureId');
+  const elUploadTextureName = $('uploadTextureName');
+  const elUploadQuality = $('uploadQuality');
+  const elUploadConcurrency = $('uploadConcurrency');
+  const elUploadTileW = $('uploadTileW');
+  const elUploadTileH = $('uploadTileH');
+  const elUploadAutoAdd = $('uploadAutoAdd');
+  const elUploadFiles = $('uploadFiles');
+  const elUploadZip = $('uploadZip');
+  const elUploadStartBtn = $('uploadStartBtn');
+  const elUploadClearBtn = $('uploadClearBtn');
+  const elUploadStatus = $('uploadStatus');
+  const elUploadTbody = $('uploadTbody');
+
   // Palette settings UI
   const elSettingsStatus = $('settingsStatus');
   const elBtnSettingsReload = $('btnSettingsReload');
@@ -71,6 +86,7 @@
     shapes: [],
     paletteByShapeId: new Map(),
     paletteSettingsByShapeId: new Map(),
+    uploadTasks: [],
   };
 
   function setStatus(el, type, msg) {
@@ -87,6 +103,129 @@
       .replaceAll('>', '&gt;')
       .replaceAll('"', '&quot;')
       .replaceAll("'", '&#39;');
+  }
+
+  function guessMimeByExt(name) {
+    const ext = String(name || '').split('.').pop().toLowerCase();
+    if (ext === 'webp') return 'image/webp';
+    if (ext === 'png') return 'image/png';
+    if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
+    if (ext === 'json') return 'application/json';
+    return 'application/octet-stream';
+  }
+
+  function detectMapType(filename) {
+    const n = String(filename || '').toLowerCase();
+    const checks = [
+      ['albedo', ['_albedo', 'albedo', 'basecolor', 'diffuse']],
+      ['normal', ['_normal', 'normal']],
+      ['roughness', ['_roughness', 'roughness', 'rgh']],
+      ['height', ['_height', 'height', 'displacement', 'bump']],
+      ['ao', ['_ao', 'ambientocclusion', 'occlusion']],
+    ];
+    for (const [type, keys] of checks) {
+      for (const k of keys) {
+        if (n.includes(k)) return type;
+      }
+    }
+    return '';
+  }
+
+  function normalizeTextureId(v) {
+    return String(v || '').trim();
+  }
+
+  function standardMapFilename(textureId, mapType, originalName) {
+    const ext = String(originalName || '').split('.').pop() || 'bin';
+    const safeExt = ext.toLowerCase().replace(/[^a-z0-9]/g, '') || 'bin';
+    return `${textureId}_${mapType}.${safeExt}`;
+  }
+
+  function sleep(ms) {
+    return new Promise(r => setTimeout(r, ms));
+  }
+
+  async function unzipToFiles(zipFile) {
+    if (!zipFile) return { files: [], meta: {} };
+    if (typeof DecompressionStream !== 'function') {
+      throw new Error('ZIP распаковка не поддерживается: требуется современный Chrome (DecompressionStream)');
+    }
+    const buf = await zipFile.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+
+    // Find EOCD (end of central directory)
+    const sig = 0x06054b50;
+    const maxBack = Math.min(bytes.length, 22 + 65535);
+    let eocd = -1;
+    for (let i = bytes.length - 22; i >= bytes.length - maxBack; i--) {
+      if (i < 0) break;
+      if ((bytes[i] | (bytes[i+1]<<8) | (bytes[i+2]<<16) | (bytes[i+3]<<24)) >>> 0 === sig) {
+        eocd = i;
+        break;
+      }
+    }
+    if (eocd < 0) throw new Error('Не удалось прочитать ZIP (EOCD не найден)');
+
+    const dv = new DataView(buf);
+    const cdSize = dv.getUint32(eocd + 12, true);
+    const cdOffset = dv.getUint32(eocd + 16, true);
+    let ptr = cdOffset;
+    const files = [];
+    const meta = {};
+
+    const CDFH = 0x02014b50;
+    const LFH = 0x04034b50;
+    while (ptr < cdOffset + cdSize) {
+      if ((dv.getUint32(ptr, true) >>> 0) !== CDFH) break;
+      const compMethod = dv.getUint16(ptr + 10, true);
+      const compSize = dv.getUint32(ptr + 20, true);
+      const uncompSize = dv.getUint32(ptr + 24, true);
+      const nameLen = dv.getUint16(ptr + 28, true);
+      const extraLen = dv.getUint16(ptr + 30, true);
+      const commentLen = dv.getUint16(ptr + 32, true);
+      const localOff = dv.getUint32(ptr + 42, true);
+      const nameBytes = bytes.slice(ptr + 46, ptr + 46 + nameLen);
+      const name = new TextDecoder().decode(nameBytes);
+      ptr = ptr + 46 + nameLen + extraLen + commentLen;
+
+      if (name.endsWith('/')) continue;
+
+      // Parse some meta if zip has full paths
+      const m = name.match(/surfaces\/([^/]+)\/([^/]+)\/(1k|2k)\//);
+      if (m) {
+        meta.shapeId = meta.shapeId || m[1];
+        meta.textureId = meta.textureId || m[2];
+        meta.quality = meta.quality || m[3];
+      }
+
+      // Local header
+      if ((dv.getUint32(localOff, true) >>> 0) !== LFH) continue;
+      const lfNameLen = dv.getUint16(localOff + 26, true);
+      const lfExtraLen = dv.getUint16(localOff + 28, true);
+      const dataStart = localOff + 30 + lfNameLen + lfExtraLen;
+      const compData = bytes.slice(dataStart, dataStart + compSize);
+
+      let out;
+      if (compMethod === 0) {
+        out = compData;
+      } else if (compMethod === 8) {
+        const ds = new DecompressionStream('deflate-raw');
+        const stream = new Blob([compData]).stream().pipeThrough(ds);
+        const ab = await new Response(stream).arrayBuffer();
+        out = new Uint8Array(ab);
+      } else {
+        // unsupported
+        continue;
+      }
+      if (uncompSize && out.byteLength !== uncompSize) {
+        // best-effort; continue
+      }
+      const base = name.split('/').pop();
+      const file = new File([out], base, { type: guessMimeByExt(base) });
+      files.push({ file, originalPath: name });
+    }
+
+    return { files, meta };
   }
 
   function getToken() {
@@ -331,6 +470,188 @@
     return settings;
   }
 
+  function clearUploadUI() {
+    state.uploadTasks = [];
+    if (elUploadFiles) elUploadFiles.value = '';
+    if (elUploadZip) elUploadZip.value = '';
+    renderUploadQueue();
+    setStatus(elUploadStatus, '', '');
+  }
+
+  function renderUploadQueue() {
+    if (!elUploadTbody) return;
+    const tasks = state.uploadTasks || [];
+    elUploadTbody.innerHTML = '';
+    const frag = document.createDocumentFragment();
+    for (const t of tasks) {
+      const tr = document.createElement('tr');
+      const pct = (t.totalBytes > 0) ? Math.round((t.sentBytes / t.totalBytes) * 100) : (t.status === 'done' ? 100 : 0);
+      const st = t.status || 'pending';
+      const stClass = st === 'done' ? 'uploadOk' : (st === 'error' ? 'uploadErr' : (st === 'uploading' ? 'uploadWarn' : ''));
+      tr.innerHTML = `
+        <td><span class="uploadPill">${escapeHtml(t.mapType || '?')}</span></td>
+        <td>${escapeHtml(t.fileName || '')}<div class="muted mono">${escapeHtml((t.sizeMB || 0).toFixed ? t.sizeMB.toFixed(2) : '')} MB</div></td>
+        <td class="mono">${escapeHtml(t.key || '')}</td>
+        <td>${escapeHtml(String(pct))}%</td>
+        <td><span class="${stClass}">${escapeHtml(st)}</span>${t.error ? `<div class="muted">${escapeHtml(t.error)}</div>` : ''}</td>
+      `;
+      frag.appendChild(tr);
+    }
+    elUploadTbody.appendChild(frag);
+  }
+
+  async function presignPut(key, contentType) {
+    const res = await apiFetch('/api/uploads/presign', {
+      method: 'POST',
+      body: JSON.stringify({ key, contentType, expiresInSec: 900 }),
+    });
+    if (!res?.url) throw new Error('presign: не получили url');
+    return res;
+  }
+
+  function xhrPutWithProgress(url, file, contentType, onProgress) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', url, true);
+      if (contentType) xhr.setRequestHeader('Content-Type', contentType);
+      xhr.upload.onprogress = (evt) => {
+        if (!evt.lengthComputable) return;
+        onProgress?.(evt.loaded, evt.total);
+      };
+      xhr.onreadystatechange = () => {
+        if (xhr.readyState !== 4) return;
+        if (xhr.status >= 200 && xhr.status < 300) resolve();
+        else reject(new Error(`PUT failed: ${xhr.status}`));
+      };
+      xhr.onerror = () => reject(new Error('PUT failed: network_error'));
+      xhr.send(file);
+    });
+  }
+
+  async function runUploadQueue(concurrency) {
+    const limit = Math.max(1, Math.min(8, Number(concurrency) || 3));
+    const tasks = state.uploadTasks || [];
+    let idx = 0;
+    let active = 0;
+    let failed = 0;
+
+    return new Promise((resolve) => {
+      const next = async () => {
+        while (active < limit && idx < tasks.length) {
+          const t = tasks[idx++];
+          active++;
+          (async () => {
+            try {
+              t.status = 'presign';
+              renderUploadQueue();
+              const ct = t.contentType || guessMimeByExt(t.fileName);
+              const ps = await presignPut(t.key, ct);
+              t.status = 'uploading';
+              renderUploadQueue();
+              await xhrPutWithProgress(ps.url, t.file, ct, (sent, total) => {
+                t.sentBytes = sent;
+                t.totalBytes = total;
+                renderUploadQueue();
+              });
+              t.status = 'done';
+              t.sentBytes = t.totalBytes || t.file.size || 0;
+            } catch (e) {
+              t.status = 'error';
+              t.error = e.message;
+              failed++;
+            } finally {
+              active--;
+              renderUploadQueue();
+              if (idx >= tasks.length && active === 0) {
+                resolve({ ok: failed === 0, failed });
+              } else {
+                next();
+              }
+            }
+          })();
+        }
+      };
+      next();
+    });
+  }
+
+  function buildTasksFromFiles(shapeId, textureId, quality, files) {
+    const out = [];
+    const byType = new Map();
+    for (const f of files) {
+      const t = detectMapType(f.name);
+      if (!t) continue;
+      if (!byType.has(t)) byType.set(t, f);
+    }
+    const required = ['albedo', 'normal', 'roughness', 'height'];
+    for (const t of required) {
+      if (!byType.has(t)) {
+        throw new Error(`Не найден обязательный файл: ${t}. Имя файла должно содержать _${t}`);
+      }
+    }
+
+    for (const [mapType, file] of byType.entries()) {
+      const fileName = standardMapFilename(textureId, mapType, file.name);
+      const key = `surfaces/${shapeId}/${textureId}/${quality}/${fileName}`;
+      out.push({
+        mapType,
+        file,
+        fileName,
+        key,
+        contentType: file.type || guessMimeByExt(fileName),
+        status: 'pending',
+        sentBytes: 0,
+        totalBytes: file.size || 0,
+        sizeMB: (file.size || 0) / (1024 * 1024),
+      });
+    }
+    // prefer deterministic order
+    out.sort((a, b) => String(a.mapType).localeCompare(String(b.mapType)));
+    return out;
+  }
+
+  function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, tileSizeMOrNull) {
+    const maps = {};
+    for (const t of tasks) {
+      const rel = `surfaces/${shapeId}/${textureId}/${quality}/${t.fileName}`;
+      maps[t.mapType] = rel;
+    }
+    const item = {
+      id: textureId,
+      name: name || textureId,
+      preview: maps.albedo || '',
+      maps,
+      params: {},
+    };
+    if (tileSizeMOrNull) item.tileSizeM = tileSizeMOrNull;
+    return item;
+  }
+
+  async function savePalette(shapeId, palette) {
+    const res = await apiFetch('/api/palettes/' + encodeURIComponent(shapeId), {
+      method: 'POST',
+      body: JSON.stringify(palette),
+    });
+    return res;
+  }
+
+  async function upsertItemAndSavePalette(shapeId, item) {
+    const palette = await ensurePaletteLoaded(shapeId);
+    const items = Array.isArray(palette?.items) ? [...palette.items] : [];
+    const idx = items.findIndex(x => x && x.id === item.id);
+    if (idx >= 0) items[idx] = item;
+    else items.push(item);
+    const next = {
+      shapeId,
+      items,
+    };
+    await savePalette(shapeId, next);
+    // refresh
+    state.paletteByShapeId.delete(shapeId);
+    const fresh = await ensurePaletteLoaded(shapeId);
+    renderTextures(Array.isArray(fresh?.items) ? fresh.items : []);
+  }
+
   function num(v, fallback = null) {
     const n = Number(v);
     return Number.isFinite(n) ? n : fallback;
@@ -416,6 +737,12 @@
       if (r.tab === 'textures') {
         const palette = await ensurePaletteLoaded(shapeId);
         renderTextures(Array.isArray(palette?.items) ? palette.items : []);
+      }
+
+      if (r.tab === 'upload') {
+        // keep existing queue; just re-render
+        renderUploadQueue();
+        setStatus(elUploadStatus, '', '');
       }
       if (r.tab === 'settings') {
         const settings = await ensurePaletteSettingsLoaded(shapeId);
@@ -511,6 +838,103 @@
       const r = parseRoute();
       if (r.name !== 'shape') return;
       location.hash = `#/shape/${r.id || ''}/upload`;
+    });
+
+    // Upload actions
+    elUploadClearBtn?.addEventListener('click', () => {
+      clearUploadUI();
+    });
+
+    elUploadStartBtn?.addEventListener('click', async () => {
+      const r = parseRoute();
+      if (r.name !== 'shape') return;
+      const shapeId = decodeURIComponent(r.id || '');
+      const textureId = normalizeTextureId(elUploadTextureId?.value);
+      const quality = String(elUploadQuality?.value || '1k');
+      const displayName = String(elUploadTextureName?.value || '').trim();
+
+      if (!shapeId) {
+        setStatus(elUploadStatus, 'err', 'Неизвестна форма (shapeId).');
+        return;
+      }
+      if (!textureId) {
+        setStatus(elUploadStatus, 'err', 'Укажите textureId.');
+        return;
+      }
+
+      try {
+        setStatus(elUploadStatus, '', 'Подготавливаем файлы…');
+        elUploadStartBtn.disabled = true;
+
+        let files = [];
+        let meta = {};
+        const zipFile = elUploadZip?.files?.[0] || null;
+        const listFiles = Array.from(elUploadFiles?.files || []);
+
+        if (zipFile) {
+          const z = await unzipToFiles(zipFile);
+          files = z.files.map(x => x.file);
+          meta = z.meta || {};
+        }
+        if (listFiles.length) {
+          files.push(...listFiles);
+        }
+        if (!files.length) {
+          setStatus(elUploadStatus, 'warn', 'Выберите файлы или ZIP для загрузки.');
+          return;
+        }
+
+        // If ZIP contains a different textureId, warn but continue with user-provided textureId.
+        if (meta?.textureId && meta.textureId !== textureId) {
+          setStatus(elUploadStatus, 'warn', `ZIP содержит textureId="${meta.textureId}", но будет использовано значение из формы: "${textureId}".`);
+          await sleep(300);
+        }
+
+        const tasks = buildTasksFromFiles(shapeId, textureId, quality, files);
+        state.uploadTasks = tasks;
+        renderUploadQueue();
+
+        const conc = Number(elUploadConcurrency?.value || 3);
+        setStatus(elUploadStatus, '', 'Загрузка началась…');
+        const res = await runUploadQueue(conc);
+        if (!res.ok) {
+          setStatus(elUploadStatus, 'err', `Загрузка завершена с ошибками: ${res.failed}. Проверьте CORS бакета и имена файлов.`);
+          return;
+        }
+        setStatus(elUploadStatus, 'ok', 'Файлы загружены.');
+
+        if (elUploadAutoAdd?.checked) {
+          setStatus(elUploadStatus, '', 'Обновляем палитру…');
+
+          // tileSizeM: explicit (uploadTileW/H) wins, else from palette-settings defaults if exists, else omit.
+          let tileSizeM = null;
+          const wMm = num(elUploadTileW?.value, null);
+          const hMm = num(elUploadTileH?.value, null);
+          if (wMm && hMm) {
+            tileSizeM = { w: Math.max(1, wMm) / 1000, h: Math.max(1, hMm) / 1000 };
+          } else {
+            try {
+              const ps = await ensurePaletteSettingsLoaded(shapeId);
+              const d = ps?.defaults;
+              if (d?.tileSizeM && typeof d.tileSizeM.w === 'number' && typeof d.tileSizeM.h === 'number') {
+                tileSizeM = { w: d.tileSizeM.w, h: d.tileSizeM.h };
+              }
+            } catch {
+              // ignore
+            }
+          }
+
+          const item = buildPaletteItemFromUpload(shapeId, textureId, displayName, quality, tasks, tileSizeM);
+          await upsertItemAndSavePalette(shapeId, item);
+          setStatus(elUploadStatus, 'ok', 'Готово: файлы загружены, палитра обновлена и сохранена.');
+        }
+      } catch (e) {
+        console.warn(e);
+        const hint = e?.data?.hint ? `\n${e.data.hint}` : '';
+        setStatus(elUploadStatus, 'err', `Ошибка: ${e.message}${hint}`);
+      } finally {
+        elUploadStartBtn.disabled = false;
+      }
     });
 
     // Palette settings actions

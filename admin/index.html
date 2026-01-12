@@ -97,13 +97,97 @@
         <div class="tabPane" id="paneUpload" hidden>
           <h3>Загрузка</h3>
           <p class="muted">
-            Здесь будет загрузка ZIP и отдельных файлов с подсказками, прогрессом и отчётом.
-            В текущей итерации мы подготовили экран формы и навигацию.
+            Загрузка выполняется напрямую в Object Storage по <b>presigned URL</b> (без проксирования через backend).
+            Для этого в бакете должен быть разрешён <b>PUT</b> в CORS для домена <code>https://miropolcevpro.github.io</code>.
           </p>
+
           <div class="hint">
-            Рекомендации по структуре:
-            <code>surfaces/&lt;shapeId&gt;/&lt;textureId&gt;/1k/...</code> и (опционально) <code>2k/...</code>.
-            Обязательные карты: <code>albedo</code>, <code>normal</code>, <code>roughness</code>, <code>height</code>.
+            <b>Правильная структура:</b>
+            <code>surfaces/&lt;shapeId&gt;/&lt;textureId&gt;/1k/&lt;textureId&gt;_albedo.webp</code> (и аналогично для normal/roughness/height/ao).
+            <br/>
+            <b>Минимум:</b> albedo + normal + roughness + height. AO опциональна.
+            <br/>
+            <b>Подсказка по именам:</b> файлы должны содержать суффиксы <code>_albedo</code>, <code>_normal</code>, <code>_roughness</code>, <code>_height</code>, <code>_ao</code>.
+          </div>
+
+          <div class="formGrid">
+            <div class="block">
+              <div class="blockTitle">Параметры загрузки</div>
+              <div class="grid2">
+                <label class="field">
+                  <span>textureId (обязательно)</span>
+                  <input id="uploadTextureId" placeholder="paver_115x115_multitone_01" />
+                </label>
+                <label class="field">
+                  <span>Название (в UI)</span>
+                  <input id="uploadTextureName" placeholder="Мультиколор 01" />
+                </label>
+              </div>
+              <div class="grid2">
+                <label class="field">
+                  <span>Качество</span>
+                  <select id="uploadQuality">
+                    <option value="1k">1k (обязательно)</option>
+                    <option value="2k">2k (опционально)</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Лимит параллельной загрузки</span>
+                  <input id="uploadConcurrency" type="number" min="1" max="8" step="1" value="3" />
+                </label>
+              </div>
+              <div class="grid2">
+                <label class="field">
+                  <span>Размер модуля (мм), ширина (опционально)</span>
+                  <input id="uploadTileW" type="number" min="1" step="1" placeholder="115" />
+                </label>
+                <label class="field">
+                  <span>Размер модуля (мм), высота (опционально)</span>
+                  <input id="uploadTileH" type="number" min="1" step="1" placeholder="115" />
+                </label>
+              </div>
+              <label class="checkbox">
+                <input id="uploadAutoAdd" type="checkbox" checked />
+                <span>После загрузки автоматически создать/обновить item в палитре и сохранить</span>
+              </label>
+            </div>
+
+            <div class="block">
+              <div class="blockTitle">Файлы</div>
+              <label class="field">
+                <span>Загрузка отдельных файлов (можно выбрать несколько)</span>
+                <input id="uploadFiles" type="file" multiple />
+              </label>
+              <label class="field">
+                <span>Загрузка ZIP (распаковка в браузере)</span>
+                <input id="uploadZip" type="file" accept=".zip" />
+              </label>
+              <div class="row">
+                <button class="btn" id="uploadStartBtn">Загрузить</button>
+                <button class="btn btn--ghost" id="uploadClearBtn" title="Очистить выбранные файлы">Очистить</button>
+              </div>
+              <div class="status" id="uploadStatus"></div>
+              <div class="hint mtSm">
+                Если ZIP не распаковывается — откройте админку в актуальном Chrome.
+                ZIP-режим использует <code>DecompressionStream('deflate-raw')</code>.
+              </div>
+            </div>
+          </div>
+
+          <h4 class="mt">Очередь загрузки</h4>
+          <div class="uploadTableWrap">
+            <table class="uploadTable" id="uploadTable">
+              <thead>
+                <tr>
+                  <th>Тип</th>
+                  <th>Файл</th>
+                  <th>Ключ (bucket)</th>
+                  <th>Прогресс</th>
+                  <th>Статус</th>
+                </tr>
+              </thead>
+              <tbody id="uploadTbody"></tbody>
+            </table>
           </div>
         </div>
 

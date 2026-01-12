@@ -245,3 +245,40 @@ input:focus,select:focus{border-color:rgba(78,118,137,.65)}
 .meta .name{font-weight:700; font-size:13px; margin-bottom:4px}
 .meta .id{font-size:11px; color:var(--muted); word-break:break-all}
 .empty{font-size:12px; color:var(--muted); padding:10px 0}
+
+.checkbox{
+  display:flex;
+  gap:10px;
+  align-items:flex-start;
+  font-size:12px;
+  color:var(--text);
+  margin-top:8px;
+}
+.checkbox input{ margin-top:3px }
+
+.uploadTableWrap{
+  border:1px solid var(--line);
+  border-radius:14px;
+  overflow:auto;
+  background:rgba(0,0,0,.22);
+}
+
+.uploadTable{
+  width:100%;
+  border-collapse:collapse;
+  min-width:720px;
+}
+.uploadTable th,
+.uploadTable td{
+  padding:10px 12px;
+  border-bottom:1px solid rgba(255,255,255,.08);
+  font-size:12px;
+  vertical-align:top;
+}
+.uploadTable th{ text-align:left; font-size:11px; color:var(--muted); letter-spacing:.02em; }
+.uploadTable td{ color:var(--text); }
+.uploadPill{ display:inline-block; padding:2px 8px; border-radius:999px; border:1px solid rgba(255,255,255,.12); font-size:11px; color:var(--muted); }
+.uploadOk{ color: var(--ok); }
+.uploadErr{ color: var(--err); }
+.uploadWarn{ color: var(--warn); }
+.mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
