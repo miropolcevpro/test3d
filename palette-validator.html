@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Валидатор палитр</title>
+  <link rel="stylesheet" href="css/admin.css" />
+  <link rel="stylesheet" href="css/palette-validator.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="title">Валидатор палитр</div>
+    <div class="actions">
+      <a class="link" href="admin/">← В админку</a>
+      <a class="link" href="index.html">← В приложение</a>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="card pv-card">
+      <div class="card__title">Параметры проверки</div>
+
+      <div class="pv-controls">
+        <div class="row pv-row2">
+          <label>Форма (shapeId)
+            <select id="shape"></select>
+          </label>
+          <label>Базовый URL палитр (опционально)
+            <input id="baseUrl" placeholder="https://storage.yandexcloud.net/webar3dtexture/palettes/" />
+          </label>
+        </div>
+
+        <div class="row pv-row1">
+          <label>URL палитры
+            <input id="paletteUrl" placeholder="https://storage.yandexcloud.net/webar3dtexture/palettes/klassika.json" />
+          </label>
+        </div>
+
+        <div class="pv-options">
+          <label class="pv-check"><input type="checkbox" id="optImages" checked />Проверять размеры изображений (width/height)</label>
+          <label class="pv-check"><input type="checkbox" id="optOnlyIssues" />Показывать только проблемы (ошибки/предупреждения)</label>
+        </div>
+
+        <div class="form__actions">
+          <button class="btn btn-primary" id="btnRun" type="button">Проверить</button>
+          <button class="btn" id="btnCopy" type="button">Скопировать отчёт</button>
+        </div>
+
+        <div class="hint" id="hint">Подсказка: выберите форму — URL палитры подставится автоматически. Можно вставить URL вручную.</div>
+      </div>
+    </section>
+
+    <section class="card pv-card">
+      <div class="card__title">Результаты</div>
+      <div id="summary" class="pv-summary"></div>
+      <div id="results" class="pv-results"></div>
+    </section>
+  </main>
+
+  <script type="module" src="js/palette-validator.js"></script>
+</body>
+</html>
