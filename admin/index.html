@@ -114,6 +114,28 @@
 
           <div class="grid" id="texturesGrid"></div>
           <div class="empty" id="emptyState">В палитре пока нет текстур.</div>
+
+          <div class="divider"></div>
+
+          <div class="paneHead">
+            <h3 style="margin:0;">Все загруженные текстуры (бакет)</h3>
+            <div class="row" style="gap:10px; margin:0;">
+              <select id="bucketFilter" class="select" title="Фильтр списка">
+                <option value="all">Показать все</option>
+                <option value="missingInPalette">Только не добавленные в палитру</option>
+                <option value="inPalette">Только уже в палитре</option>
+                <option value="broken">Только проблемные (неполные 1k)</option>
+              </select>
+              <button class="btn btn--ghost" id="bucketReloadBtn" title="Сканировать бакет surfaces/<shapeId>/ и обновить список">Обновить список</button>
+            </div>
+          </div>
+          <div class="status" id="bucketStatus"></div>
+          <div class="hint mtSm">
+            Этот список показывает <b>все</b> textureId, которые есть в бакете по пути <code>surfaces/&lt;shapeId&gt;/...</code>, включая загруженные ранее.
+            Если текстура есть в бакете, но не добавлена в палитру, нажмите <b>«Добавить в палитру»</b> — после этого появится в пользовательском каталоге.
+          </div>
+          <div class="grid" id="bucketTexturesGrid"></div>
+          <div class="empty" id="bucketEmpty">В бакете пока не найдено текстур для этой формы.</div>
         </div>
 
         <div class="tabPane" id="paneUpload" hidden>
@@ -365,6 +387,18 @@
               Для “чистого” сброса используйте кнопку <b>«Сбросить к дефолтам палитры»</b> — она удалит переопределения.
             </div>
 
+            <details class="details mtSm">
+              <summary>Подсказки по настройкам (что на что влияет)</summary>
+              <ul class="muted">
+                <li><b>Плитка выглядит слишком блестящей/"пластиковой"</b> → увеличьте <code>roughnessMult</code> и/или уменьшите <code>specStrength</code>.</li>
+                <li><b>Тёмная плитка выбеливается (пересвет)</b> → уменьшите <code>exposureMult</code> и слегка снизьте <code>contrast</code>.</li>
+                <li><b>Рельеф слишком "шумный"</b> → уменьшите <code>normalScale</code> (часто 0.6–1.0 достаточно).</li>
+                <li><b>Появляются неестественные тени</b> → уменьшите <code>bumpScale</code> (обычно 0.2–0.8).</li>
+                <li><b>Узор выглядит мелко/крупно</b> → <code>uvScale</code> (меньше 1 — крупнее, больше 1 — мельче).</li>
+                <li><b>Насыщенность</b> держите умеренной: в AR завышенная <code>saturation</code> чаще выглядит нереалистично.</li>
+              </ul>
+            </details>
+
             <div class="texParams" id="texParams"></div>
             <div class="status mtSm" id="texModalStatus"></div>
           </div>
@@ -398,6 +432,15 @@
           <br/>
           <b>Рекомендация:</b> начните с «Вставить дефолты палитры», затем аккуратно корректируйте.
         </div>
+
+        <details class="details mtSm">
+          <summary>Подсказки по массовым правкам</summary>
+          <ul class="muted">
+            <li>Если хотите <b>унифицировать</b> вид всей формы, выберите цель «Всем текстурам формы» и выставьте базовые значения (обычно <code>roughnessMult</code>, <code>specStrength</code>, <code>normalScale</code>).</li>
+            <li>Для аккуратной коррекции цветов начните с небольших шагов по <code>exposureMult</code> (±0.05) и <code>contrast</code> (±0.03).</li>
+            <li>Если сомневаетесь — используйте «Сбросить переопределения» и вернитесь к дефолтам палитры.</li>
+          </ul>
+        </details>
 
         <div class="bulkTop mtSm">
           <label class="field">

@@ -98,6 +98,13 @@
   const elTexturesGrid = $('texturesGrid');
   const elEmptyTextures = $('emptyState');
 
+  // Bucket textures library
+  const elBucketFilter = $('bucketFilter');
+  const elBucketReload = $('bucketReloadBtn');
+  const elBucketStatus = $('bucketStatus');
+  const elBucketGrid = $('bucketTexturesGrid');
+  const elBucketEmpty = $('bucketEmpty');
+
   // Bulk edit UI (textures)
   const elBulkBar = $('bulkBar');
   const elBulkSelectAll = $('bulkSelectAll');
@@ -154,6 +161,7 @@
     shapes: [],
     paletteByShapeId: new Map(),
     paletteSettingsByShapeId: new Map(),
+    bucketIndexByShapeId: new Map(),
     uploadTasks: [],
     selectedTextureIdsByShapeId: new Map(),
   };
@@ -178,7 +186,7 @@
       min: 0.5,
       max: 2.0,
       step: 0.01,
-      help: 'Влияет на размер узора на поверхности. Меньше 1 — узор крупнее. Больше 1 — узор мельче.',
+      help: 'Размер узора на поверхности. < 1 делает узор крупнее, > 1 делает узор мельче. Используйте, если масштаб визуально не совпадает с реальным.',
     },
     {
       key: 'exposureMult',
@@ -186,7 +194,7 @@
       min: 0.6,
       max: 1.6,
       step: 0.01,
-      help: 'Локальная яркость/экспозиция конкретной текстуры. Уменьшайте при пересвете тёмных плиток.',
+      help: 'Локальная яркость/экспозиция. Уменьшайте при пересвете темных плиток; увеличивайте, если текстура выглядит слишком темной в AR.',
     },
     {
       key: 'contrast',
@@ -194,7 +202,7 @@
       min: 0.7,
       max: 1.3,
       step: 0.01,
-      help: 'Контраст текстуры. Слишком высокий контраст может делать плитку “грязной” или неестественной в AR.',
+      help: 'Контраст. Повышение делает швы/зерно заметнее; слишком высокий контраст часто дает "грязный" вид. Обычно меняют небольшими шагами.',
     },
     {
       key: 'saturation',
@@ -202,7 +210,7 @@
       min: 0.0,
       max: 1.5,
       step: 0.01,
-      help: 'Насыщенность цвета. Используйте аккуратно: большие значения часто выглядят нереалистично в AR.',
+      help: 'Насыщенность цвета. Если оттенок бледный - слегка увеличьте; если "кислотный" - уменьшите. Обычно диапазон 0.9-1.1.',
     },
     {
       key: 'roughnessMult',
@@ -210,7 +218,7 @@
       min: 0.5,
       max: 1.6,
       step: 0.01,
-      help: 'Матовость. Больше — меньше бликов (более матовая поверхность). Меньше — больше бликов.',
+      help: 'Матовость. Больше - меньше бликов (более матовая поверхность). Меньше - больше бликов. Главный параметр, если плитка выглядит пластиковой.',
     },
     {
       key: 'specStrength',
@@ -218,7 +226,7 @@
       min: 0.0,
       max: 1.2,
       step: 0.01,
-      help: 'Сила бликов/“пластика”. Если плитка выглядит пластиковой — уменьшайте.',
+      help: 'Сила бликов. Если поверхность кажется пластиковой или слишком "глянцевой" - уменьшайте. Часто используется вместе с roughnessMult.',
     },
     {
       key: 'normalScale',
@@ -226,7 +234,7 @@
       min: 0.0,
       max: 2.0,
       step: 0.01,
-      help: 'Сила normalMap. Слишком большое значение даёт шум/пластик. Часто достаточно 0.6–1.2.',
+      help: 'Сила normalMap (микрорельеф). Слишком большое значение дает шум/"пластик". Часто достаточно 0.6-1.2.',
     },
     {
       key: 'bumpScale',
@@ -234,7 +242,7 @@
       min: 0.0,
       max: 2.0,
       step: 0.01,
-      help: 'Сила heightMap как bump. Слишком большое значение даёт неестественные тени. Начните с 0.2–1.0.',
+      help: 'Сила heightMap как bump (псевдорельеф). Слишком большое значение дает неестественные тени. Обычно 0.2-0.8.',
     },
   ];
 
@@ -876,6 +884,120 @@ function getToken() {
     elTexturesGrid.appendChild(frag);
   }
 
+  function isBucketTextureBroken(t) {
+    const q1 = t?.qualities?.['1k'];
+    if (!q1 || !q1.maps) return true;
+    const need = ['albedo','normal','roughness','height'];
+    return need.some(k => !q1.maps[k]?.key);
+  }
+
+  function buildPaletteItemFromBucket(shapeId, textureId, bucketTex) {
+    const q1 = bucketTex?.qualities?.['1k'];
+    const maps = {};
+    const mapTypes = ['albedo','normal','roughness','height','ao'];
+    for (const mt of mapTypes) {
+      const key = q1?.maps?.[mt]?.key;
+      if (key) maps[mt] = key; // keep as bucket-relative path
+    }
+    return {
+      id: textureId,
+      name: textureId,
+      preview: maps.albedo || '',
+      maps,
+      params: {},
+    };
+  }
+
+  function renderBucketTextures(shapeId) {
+    if (!elBucketGrid) return;
+    elBucketGrid.innerHTML = '';
+    const idx = state.bucketIndexByShapeId.get(shapeId) || { textures: [] };
+    const textures = Array.isArray(idx.textures) ? idx.textures : [];
+    const palette = state.paletteByShapeId.get(shapeId);
+    const paletteIds = new Set((Array.isArray(palette?.items) ? palette.items : []).map(x => x?.id).filter(Boolean));
+
+    const filter = (elBucketFilter && elBucketFilter.value) || 'all';
+    const list = textures.filter(t => {
+      const inPalette = paletteIds.has(t.textureId);
+      const broken = isBucketTextureBroken(t);
+      if (filter === 'missingInPalette') return !inPalette;
+      if (filter === 'inPalette') return inPalette;
+      if (filter === 'broken') return broken;
+      return true;
+    });
+
+    elBucketEmpty.style.display = list.length ? 'none' : 'block';
+    if (!list.length) return;
+
+    const frag = document.createDocumentFragment();
+    for (const t of list) {
+      const textureId = t?.textureId || '';
+      const inPalette = paletteIds.has(textureId);
+      const broken = isBucketTextureBroken(t);
+      const has2k = !!t?.qualities?.['2k'];
+      const previewKey = t?.previewKey || t?.qualities?.['1k']?.maps?.albedo?.key || '';
+      const previewUrl = resolveMediaUrl(previewKey);
+
+      const pills = [
+        inPalette ? '<span class="pill pill--set">в палитре</span>' : '<span class="pill">не в палитре</span>',
+        '<span class="pill">1k</span>',
+        has2k ? '<span class="pill">2k</span>' : '<span class="pill">2k: нет</span>',
+        broken ? '<span class="pill pill--warn">неполная 1k</span>' : '<span class="pill">ok</span>',
+      ].join(' ');
+
+      const card = document.createElement('div');
+      card.className = 'tile';
+      card.innerHTML = `
+        <img class="thumb" alt="" loading="lazy" referrerpolicy="no-referrer" src="${escapeHtml(previewUrl)}">
+        <div class="meta">
+          <div class="name">${escapeHtml(textureId)}</div>
+          <div class="muted mtSm">${pills}</div>
+          <div class="row" style="justify-content:flex-end; gap:8px; margin-top:10px;">
+            ${inPalette ? `<button class="btn btn--ghost btn--sm" data-action="edit" data-id="${escapeHtml(textureId)}">Настроить</button>` : `<button class="btn btn--sm" data-action="add" data-id="${escapeHtml(textureId)}" ${broken ? 'disabled' : ''}>Добавить в палитру</button>`}
+          </div>
+        </div>
+      `;
+
+      const btnAdd = card.querySelector('[data-action="add"]');
+      if (btnAdd) {
+        btnAdd.addEventListener('click', async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (broken) {
+            setStatus(elBucketStatus, 'warn', 'Эта текстура неполная в 1k: нужны albedo + normal + roughness + height. Дозагрузите карты и обновите список.');
+            return;
+          }
+          try {
+            setStatus(elBucketStatus, '', `Добавляем ${textureId} в палитру…`);
+            const item = buildPaletteItemFromBucket(shapeId, textureId, t);
+            await upsertItemAndSavePalette(shapeId, item);
+            setStatus(elBucketStatus, 'ok', `Добавлено в палитру: ${textureId}`);
+            // refresh bucket view pills
+            renderBucketTextures(shapeId);
+          } catch (err) {
+            console.warn(err);
+            setStatus(elBucketStatus, 'err', `Не удалось добавить в палитру: ${String(err.message || err)}`);
+          }
+        });
+      }
+
+      const btnEdit = card.querySelector('[data-action="edit"]');
+      if (btnEdit) {
+        btnEdit.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          openTextureParamsModal(shapeId, textureId).catch(err => {
+            console.warn(err);
+            setStatus(elBucketStatus, 'err', `Не удалось открыть редактор: ${String(err.message || err)}`);
+          });
+        });
+      }
+
+      frag.appendChild(card);
+    }
+    elBucketGrid.appendChild(frag);
+  }
+
   async function ensureShapesLoaded() {
     if (!API_BASE_URL) throw new Error('API_BASE_URL не задан. Проверьте admin/config.js');
     setStatus(elStatus, '', 'Загружаем формы…');
@@ -919,6 +1041,23 @@ function getToken() {
       setStatus(elStatus, 'ok', `Палитра загружена: ${items.length} текстур`);
     }
     return palette;
+  }
+
+  async function ensureBucketIndexLoaded(shapeId, { forceReload = false } = {}) {
+    if (!shapeId) return null;
+    if (!forceReload && state.bucketIndexByShapeId.has(shapeId)) return state.bucketIndexByShapeId.get(shapeId);
+    setStatus(elBucketStatus, '', 'Сканируем бакет surfaces/<shapeId>/ …');
+    try {
+      const res = await apiFetch('/api/surfaces/' + encodeURIComponent(shapeId));
+      const textures = Array.isArray(res?.textures) ? res.textures : (Array.isArray(res?.data?.textures) ? res.data.textures : (Array.isArray(res?.textures) ? res.textures : []));
+      const idx = { shapeId, textures: Array.isArray(textures) ? textures : [] };
+      state.bucketIndexByShapeId.set(shapeId, idx);
+      setStatus(elBucketStatus, 'ok', `Найдено в бакете: ${idx.textures.length} textureId`);
+      return idx;
+    } catch (e) {
+      setStatus(elBucketStatus, 'err', `Не удалось просканировать бакет. Проверьте S3_* в Cloud Function и путь /api/surfaces/{shapeId} в Gateway. Детали: ${String(e.message || e)}`);
+      throw e;
+    }
   }
 
   async function ensurePaletteSettingsLoaded(shapeId, { forceReload = false } = {}) {
@@ -2011,6 +2150,15 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
       if (r.tab === 'textures') {
         const palette = await ensurePaletteLoaded(shapeId);
         renderTextures(shapeId, Array.isArray(palette?.items) ? palette.items : []);
+
+        // Bucket library (all uploaded textures)
+        try {
+          await ensureBucketIndexLoaded(shapeId);
+          renderBucketTextures(shapeId);
+        } catch {
+          // errors are shown in bucket status; do not break the page
+          elBucketEmpty && (elBucketEmpty.style.display = 'block');
+        }
       }
 
       if (r.tab === 'upload') {
@@ -2130,6 +2278,27 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
         console.warn(e);
         setStatus(elPaletteStatus, 'err', `Ошибка сохранения палитры: ${e.message}`);
       }
+    });
+
+    // Bucket library controls (textures tab)
+    elBucketReload?.addEventListener('click', async () => {
+      const r = parseRoute();
+      if (r.name !== 'shape') return;
+      const shapeId = decodeURIComponent(r.id || '');
+      if (!shapeId) return;
+      try {
+        await ensureBucketIndexLoaded(shapeId, { forceReload: true });
+        renderBucketTextures(shapeId);
+      } catch (e) {
+        console.warn(e);
+      }
+    });
+    elBucketFilter?.addEventListener('change', async () => {
+      const r = parseRoute();
+      if (r.name !== 'shape') return;
+      const shapeId = decodeURIComponent(r.id || '');
+      if (!shapeId) return;
+      renderBucketTextures(shapeId);
     });
 
     // Bulk selection / mass edit (textures tab)
@@ -2324,6 +2493,9 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
                 renderTextures(shapeId, Array.isArray(fresh?.items) ? fresh.items : []);
 
                 setStatus(elUploadStatus, 'ok', 'Готово: файлы загружены, палитра обновлена и сохранена.');
+                try {
+                  await ensureBucketIndexLoaded(shapeId, { forceReload: true });
+                } catch {}
               }
 
               return;
@@ -2393,6 +2565,9 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
               const item = buildPaletteItemFromUpload(shapeId, textureId, displayName, quality, tasks, tileSizeM);
               await upsertItemAndSavePalette(shapeId, item);
               setStatus(elUploadStatus, 'ok', 'Готово: файлы загружены, палитра обновлена и сохранена.');
+              try {
+                await ensureBucketIndexLoaded(shapeId, { forceReload: true });
+              } catch {}
             }
           } catch (e) {
             console.warn(e);
