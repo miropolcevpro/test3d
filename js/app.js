@@ -1128,12 +1128,15 @@ function scheduleDeferredHeavyMaps(mat, urls, preferredQuality, isStaleFn, opts 
       if (mySeq !== _heavyMapsSeq) return;
       if (isStaleFn && isStaleFn()) return;
 
-      // Connectivity-aware: on slow networks keep XR light and skip heavy maps.
+      // Connectivity-aware: on slow networks keep XR light, but do not permanently skip AO (it affects perceived brightness).
+      // We only deprioritize heavy work: delay longer and avoid height on very slow links.
+      let slowNet = false;
       try {
-        const { eff, downlink, saveData } = _getConnInfo();
+        const { eff, downlink, rtt, saveData } = _getConnInfo();
         if (saveData) return;
-        if (/slow-2g|2g|3g/i.test(eff)) return;
-        if (downlink && downlink < 2) return;
+        if (/slow-2g|2g|3g/i.test(eff)) slowNet = true;
+        if (downlink && downlink < 2) slowNet = true;
+        if (rtt && rtt > 800) slowNet = true;
       } catch (_) {}
 
       // Extra guard: do not start heavy loads immediately after a switch.
@@ -1143,7 +1146,7 @@ function scheduleDeferredHeavyMaps(mat, urls, preferredQuality, isStaleFn, opts 
       const { aoUrl, heightUrl } = urls || {};
       const tasks = [];
       if (aoUrl) tasks.push(['ao', aoUrl]);
-      if (heightUrl) tasks.push(['height', heightUrl]);
+      if (!slowNet && heightUrl) tasks.push(['height', heightUrl]);
       if (!tasks.length) return;
 
       const ps = tasks.map(([kind, u]) => loadTexSmartCached(u, kind, preferredQuality, isStaleFn, { priority: 'normal' }));
@@ -1194,8 +1197,10 @@ async function selectTile(tileOrId) {
   const preferredQuality = getPreferredSurfaceQuality({ inAR: state.phase === 'ar_final' });
 
   // Start core map loads immediately (in parallel).
-  const albedoP = loadTexSmartCached(albedoUrl, 'albedo', '1k', isStale, { priority: 'high' });
+  // Premium stability rule: keep map quality consistent across core maps.
+  const albedoP = loadTexSmartCached(albedoUrl, 'albedo', preferredQuality, isStale, { priority: 'high' });
   const roughP  = loadTexSmartCached(roughUrl,  'roughness', preferredQuality, isStale, { priority: 'high' });
+  const aoP     = aoUrl ? loadTexSmartCached(aoUrl, 'ao', preferredQuality, isStale, { priority: 'high' }) : Promise.resolve(null);
   const normalP = loadTexSmartCached(normalUrl, 'normal',    preferredQuality, isStale, { priority: 'normal' });
 
   let albedoTex = await albedoP;
@@ -1236,15 +1241,20 @@ async function selectTile(tileOrId) {
     pm.needsUpdate = true;
   }
 
-  // Core shading maps (roughness is the key one to avoid "bright" look).
-// Premium rule: in AR final mode we DO NOT swap the floor material until roughness is resolved (or confirmed missing).
-// This prevents the momentary over-bright / wrong shading users reported on some textures.
+  // Core shading maps.
+// Premium rule: in AR final mode we DO NOT swap the floor material until roughness (and AO when present) are resolved.
+// This prevents over-bright / inconsistent shading on some textures.
 let roughTex = null;
+let aoTexCore = null;
 let normalTex = null;
 
 if (state && state.phase === 'ar_final') {
   // Wait for roughness fully (no short timeout). If the file truly doesn't exist, the loader resolves null quickly.
   roughTex = await roughP;
+  if (isStale()) return;
+
+  // AO strongly affects perceived brightness. If AO is present in the palette, wait for it too.
+  aoTexCore = await aoP;
   if (isStale()) return;
 
   // Normal can lag behind; we keep it opportunistic to preserve snappy switching.
@@ -1255,10 +1265,12 @@ if (state && state.phase === 'ar_final') {
   // Non-AR (detail / desktop) stays responsive: short waits.
   const _coreWaitMs = 260;
   const roughR  = await _withTimeout(roughP, _coreWaitMs);
+  const aoR     = await _withTimeout(aoP, _coreWaitMs);
   const normalR = await _withTimeout(normalP, _coreWaitMs);
   if (isStale()) return;
 
   roughTex  = roughR.ok ? roughR.v : null;
+  aoTexCore = aoR.ok ? aoR.v : null;
   normalTex = normalR.ok ? normalR.v : null;
 }
   // Update / create tile material in-place (premium switching without using maps from other textures).
@@ -1267,7 +1279,7 @@ if (state && state.phase === 'ar_final') {
       albedoTex,
       normalTex,
       roughnessTex: roughTex,
-      aoTex: null,
+      aoTex: aoTexCore,
       heightTex: null,
       normalScale: ns || 0.0,
       bumpScale: bs || 0.0,
@@ -1286,8 +1298,9 @@ if (state && state.phase === 'ar_final') {
   if (mat.uniforms.uSpecStrength) mat.uniforms.uSpecStrength.value = ss;
   if (mat.uniforms.uExposureMult) mat.uniforms.uExposureMult.value = em;
 
-  // Update secondary maps immediately (no cross-texture borrowing).
+  // Update core maps immediately (no cross-texture borrowing).
   applyMapToTileMaterial(mat, 'roughness', roughTex);
+  applyMapToTileMaterial(mat, 'ao', aoTexCore);
   applyMapToTileMaterial(mat, 'normal', normalTex);
   applyMapToTileMaterial(mat, 'ao', null);
   applyMapToTileMaterial(mat, 'height', null);
@@ -1386,11 +1399,11 @@ if (state && state.phase === 'ar_final') {
     // Heavy maps: load only when AR is stable (or when user has stopped switching).
     if (state.phase === 'ar_final') {
       // In XR we intentionally keep heavy maps at 1k to reduce memory spikes and decoder pressure.
-      scheduleDeferredHeavyMaps(matRef, { aoUrl, heightUrl }, '1k', isStale, { delayMs: 1200, debounceMs: 350 });
+      scheduleDeferredHeavyMaps(matRef, { aoUrl: (aoTexCore ? null : aoUrl), heightUrl }, '1k', isStale, { delayMs: 1200, debounceMs: 350 });
     } else {
       // Non-AR: safe to load AO/Height in the background.
       const heavyJobs = [
-        ['ao', aoUrl],
+        ['ao', (aoTexCore ? null : aoUrl)],
         ['height', heightUrl],
       ].filter(([_, u]) => !!u);
       if (heavyJobs.length) {
