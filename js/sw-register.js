@@ -1,72 +1,63 @@
-// Service Worker control & recovery (stable)
-// Build: 20260113203000
-(function () {
+// Service Worker register (robust update) - v20260113191733
+//
+// This SW is intentionally "stable mode" (no caching) to avoid opaque/CORS issues.
+// We also force-update and activate immediately so old buggy SW versions are replaced.
+
+(function() {
   if (!('serviceWorker' in navigator)) return;
 
-  const BUILD = '20260113203000';
+  var SW_URL = (function() {
+    // Respect GitHub Pages base path (usually /test3d/)
+    var base = (location.pathname.startsWith('/test3d/') ? '/test3d' : '');
+    return base + '/sw.js?v=20260113191733';
+  })();
 
-  // GitHub Pages repo base: "/<repo>/"
-  const parts = location.pathname.split('/').filter(Boolean);
-  const base = parts.length ? `/${parts[0]}/` : '/';
-  const swUrl = base + 'sw.js?v=' + BUILD;
-
-  // Hard recovery: unregister any existing SW + clear CacheStorage.
-  // Triggered when:
-  //  - URL has ?swreset=1
-  //  - controlling SW scriptURL is not current build
-  //  - we detect a previous recovery did not complete
-  async function hardReset(reason) {
+  function forceReloadOnce() {
     try {
-      const regs = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(regs.map(r => r.unregister().catch(() => {})));
-    } catch (e) {}
-    try {
-      const keys = await caches.keys();
-      await Promise.all(keys.map(k => caches.delete(k).catch(() => {})));
-    } catch (e) {}
-
-    // Avoid infinite reload loops
-    try {
-      sessionStorage.setItem('sw_reset_done_' + BUILD, '1');
-    } catch (e) {}
-
-    // Reload with cache-buster so old SW cache can't serve stale HTML/JS.
-    const u = new URL(location.href);
-    u.searchParams.delete('swreset');
-    u.searchParams.set('cb', String(Date.now()));
-    location.replace(u.toString());
+      var key = 'sw_reload_done_20260113191733';
+      if (sessionStorage.getItem(key)) return;
+      sessionStorage.setItem(key, '1');
+      location.reload();
+    } catch (e) {
+      location.reload();
+    }
   }
 
-  async function main() {
-    const u = new URL(location.href);
-    const forceReset = u.searchParams.get('swreset') === '1';
-    const resetDone = (function () {
-      try { return sessionStorage.getItem('sw_reset_done_' + BUILD) === '1'; } catch (e) { return false; }
-    })();
-
-    // If we are controlled by an older SW build, reset.
-    const ctrl = navigator.serviceWorker.controller;
-    const ctrlUrl = ctrl && ctrl.scriptURL ? String(ctrl.scriptURL) : '';
-    const ctrlIsOld = ctrlUrl && !ctrlUrl.includes('v=' + BUILD);
-
-    if ((forceReset || ctrlIsOld) && !resetDone) {
-      await hardReset(forceReset ? 'query' : 'old-controller');
-      return;
-    }
-
-    // Register SW.
-    // SW is kept minimal and NEVER caches Object Storage (bucket) to avoid opaque/CORS issues.
-    navigator.serviceWorker.register(swUrl).catch((err) => {
-      console.warn('[SW] register failed', err);
-    });
-
-    // Ask for persistent storage to reduce eviction on Android.
+  function requestSkipWaiting(reg) {
     try {
-      if (navigator.storage && navigator.storage.persist) {
-        navigator.storage.persist().catch(() => {});
+      if (reg && reg.waiting) {
+        reg.waiting.postMessage({ type: 'SKIP_WAITING' });
       }
     } catch (e) {}
   }
 
-  main().catch(() => {});
+  navigator.serviceWorker.register(SW_URL, { scope: (location.pathname.startsWith('/test3d/') ? '/test3d/' : '/') })
+    .then(function(reg) {
+      // Trigger update check ASAP
+      try { reg.update(); } catch (e) {}
+
+      // If there's a waiting worker, activate it immediately
+      requestSkipWaiting(reg);
+
+      // When a new worker is found, ask it to skip waiting
+      reg.addEventListener('updatefound', function() {
+        var w = reg.installing;
+        if (!w) return;
+        w.addEventListener('statechange', function() {
+          if (w.state === 'installed') {
+            // If there's an existing controller, we need to claim and reload once
+            requestSkipWaiting(reg);
+          }
+        });
+      });
+    })
+    .catch(function(err) {
+      // Don't block app on SW errors
+      console.warn('[SW] register failed', err);
+    });
+
+  // When controller changes, reload once to ensure the page is controlled by the newest SW
+  navigator.serviceWorker.addEventListener('controllerchange', function() {
+    forceReloadOnce();
+  });
 })();
