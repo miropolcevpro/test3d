@@ -782,18 +782,29 @@ function crossfadeFillMeshToMaterial(newMat, durationMs = 140) {
     if (!oldMat || !scene) {
       fillMesh.material = newMat;
       fillMesh.material.needsUpdate = true;
+      // Ensure final material stays opaque (premium look).
+      try { newMat.transparent = false; newMat.depthWrite = true; newMat.depthTest = true; } catch (_) {}
+      if (newMat.uniforms && newMat.uniforms.uAlpha) newMat.uniforms.uAlpha.value = 1.0;
       return;
     }
+
+    // Preserve original flags so we don't accidentally keep the floor semi-transparent.
+    const oldFlags = { transparent: !!oldMat.transparent, depthWrite: oldMat.depthWrite !== false, depthTest: oldMat.depthTest !== false };
+    const newFlags = { transparent: !!newMat.transparent, depthWrite: newMat.depthWrite !== false, depthTest: newMat.depthTest !== false };
 
     // Prepare alpha uniforms (supported by our tile shader material).
     if (oldMat.uniforms && oldMat.uniforms.uAlpha) oldMat.uniforms.uAlpha.value = 1.0;
     if (newMat.uniforms && newMat.uniforms.uAlpha) newMat.uniforms.uAlpha.value = 0.0;
 
-    // Ensure predictable blending order.
-    oldMat.transparent = true;
-    newMat.transparent = true;
-    oldMat.depthWrite = false;
-    newMat.depthWrite = false;
+    // During the fade we need transparency, but we MUST restore opacity afterwards.
+    try {
+      oldMat.transparent = true;
+      newMat.transparent = true;
+      oldMat.depthWrite = false;
+      newMat.depthWrite = false;
+      oldMat.depthTest = true;
+      newMat.depthTest = true;
+    } catch (_) {}
 
     const overlay = new THREE.Mesh(fillMesh.geometry, newMat);
     overlay.position.copy(fillMesh.position);
@@ -820,12 +831,25 @@ function crossfadeFillMeshToMaterial(newMat, durationMs = 140) {
       }
 
       // Finalize: swap real material, remove overlay.
-      scene.remove(overlay);
+      try { scene.remove(overlay); } catch (_) {}
       fillMesh.material = newMat;
       fillMesh.material.needsUpdate = true;
+
+      // IMPORTANT: restore opaque floor rendering (no blending / no depth artifacts).
+      try {
+        newMat.transparent = false;
+        newMat.depthWrite = true;
+        newMat.depthTest = true;
+      } catch (_) {}
       if (newMat.uniforms && newMat.uniforms.uAlpha) newMat.uniforms.uAlpha.value = 1.0;
 
-      // Dispose old material only if it was our previous tile shader.
+      // Restore old material flags (in case it's reused elsewhere) and then dispose safely.
+      try {
+        oldMat.transparent = oldFlags.transparent;
+        oldMat.depthWrite = oldFlags.depthWrite;
+        oldMat.depthTest = oldFlags.depthTest;
+      } catch (_) {}
+
       try {
         if (oldMat && oldMat !== newMat && oldMat.dispose && oldMat.uniforms && oldMat.uniforms.uTex) {
           oldMat.dispose();
@@ -839,6 +863,8 @@ function crossfadeFillMeshToMaterial(newMat, durationMs = 140) {
     try {
       fillMesh.material = newMat;
       fillMesh.material.needsUpdate = true;
+      try { newMat.transparent = false; newMat.depthWrite = true; newMat.depthTest = true; } catch (_) {}
+      if (newMat.uniforms && newMat.uniforms.uAlpha) newMat.uniforms.uAlpha.value = 1.0;
     } catch (_) {}
   }
 }
@@ -918,10 +944,11 @@ async function selectTile(tileOrId) {
     pm.needsUpdate = true;
   }
 
-  // Wait briefly for core shading maps (normal/roughness). This avoids the brightness "flash" and
-  // avoids temporarily mixing maps between textures.
-  const roughR  = await _withTimeout(roughP, 260);
-  const normalR = await _withTimeout(normalP, 260);
+  // Wait briefly for core shading maps (normal/roughness).
+  // In AR we wait a bit longer to avoid visible "pop" from missing maps on slower networks/devices.
+  const _coreWaitMs = (state && state.phase === 'ar_final') ? 450 : 260;
+  const roughR  = await _withTimeout(roughP, _coreWaitMs);
+  const normalR = await _withTimeout(normalP, _coreWaitMs);
   if (isStale()) return;
 
   const roughTex  = roughR.ok ? roughR.v : null;
