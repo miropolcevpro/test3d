@@ -315,7 +315,20 @@
   }
 
   function normalizeTextureId(v) {
-    return String(v || '').trim();
+    const raw = String(v || '').trim();
+    if (!raw) return '';
+    // Bucket-safe textureId:
+    // - disallow ':' and whitespace
+    // - keep only [a-z0-9_-] (convert other chars to '_')
+    // - collapse multiple '_' and trim
+    let s = raw
+      .replace(/[:\s]+/g, '_')
+      .replace(/[^a-zA-Z0-9_-]+/g, '_')
+      .replace(/_+/g, '_')
+      .replace(/^_+|_+$/g, '');
+    // We recommend lowercase for consistency across tools/OS.
+    s = s.toLowerCase();
+    return s;
   }
 
   function standardMapFilename(textureId, mapType, originalName) {
