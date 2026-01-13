@@ -1332,6 +1332,16 @@ function getPreferredSurfaceQuality() {
   }
 }
 
+// Build a "2k" URL candidate from a given map URL.
+// - If the path contains '/1k/' it will be replaced with '/2k/'.
+// - Otherwise returns the original URL.
+// Extension changes are handled separately by makeAltExtCandidates().
+function make2kCandidateUrl(url) {
+  if (!url || typeof url !== 'string') return url;
+  // Replace only the first occurrence to avoid unexpected rewrites.
+  return url.replace(/\/1k\//, '/2k/');
+}
+
 function makeAltExtCandidates(url) {
   if (!url || typeof url !== 'string') return [];
   const m = url.match(/^(.*)\.([a-zA-Z0-9]+)(\?.*)?$/);
