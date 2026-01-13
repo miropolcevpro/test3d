@@ -1302,7 +1302,6 @@ if (state && state.phase === 'ar_final') {
   applyMapToTileMaterial(mat, 'roughness', roughTex);
   applyMapToTileMaterial(mat, 'ao', aoTexCore);
   applyMapToTileMaterial(mat, 'normal', normalTex);
-  applyMapToTileMaterial(mat, 'ao', null);
   applyMapToTileMaterial(mat, 'height', null);
 
   // Ensure current layout mode is reflected.
@@ -1585,7 +1584,13 @@ function paletteItemsToTiles(items, defaults = null) {
     const params = paramsIn ? { ...paramsIn } : {};
     if (d) {
       for (const k of defaultParamKeys) {
-        if (params[k] == null && typeof d[k] === 'number') params[k] = d[k];
+        if (params[k] != null) continue;
+        if (typeof d[k] !== 'number') continue;
+        // Keep renderer's auto-exposure behavior unless the user explicitly overrides it.
+        // Many palettes were authored assuming auto exposure when per-texture value is missing.
+        // If palette default is left at neutral 1.0, treat it as "auto" (do not force 1.0).
+        if (k === 'exposureMult' && d[k] === 1.0) continue;
+        params[k] = d[k];
       }
     }
     const paramsOut = Object.keys(params).length ? params : null;
