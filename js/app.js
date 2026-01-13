@@ -449,6 +449,7 @@ function makeTileMaterial(arg = {}) {
       uSpecStrength: { value: 1.0 },
       uColorBalance: { value: new THREE.Vector3(0.96, 1.0, 1.02) },
       uExposureMult: { value: 1.0 },
+      uAlpha: { value: 1.0 },
       // tiling + layout
       uTileSize: { value: new THREE.Vector2(0.2, 0.2) },
       uUvScale: { value: new THREE.Vector2(1, 1) }, // per-texture scaling: 0.5 => texture looks 2x bigger
@@ -542,6 +543,7 @@ function makeTileMaterial(arg = {}) {
       uniform float uFillStrength;
       uniform float uAmbient;
       uniform float uExposureMult;
+      uniform float uAlpha;
 
       // simple analytic environment lighting (sky/ground) for added realism
       uniform vec3 uEnvSkyColor;
@@ -652,7 +654,7 @@ function makeTileMaterial(arg = {}) {
         light = clamp(light, 0.0, 1.35);
         vec3 color = (albedo * light * ao) + vec3(spec) + (albedo * envDiff * ao) + envSpec;
 
-        gl_FragColor = vec4(color * uExposureMult, 0.98);
+        gl_FragColor = vec4(color * uExposureMult, 0.98 * uAlpha);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
       }
@@ -756,6 +758,91 @@ function setLayout(layout) {
   });
 }
 
+function _withTimeout(promise, ms) {
+  let tId = null;
+  const to = new Promise(resolve => {
+    tId = setTimeout(() => resolve({ ok: false, timeout: true, v: null }), ms);
+  });
+  return Promise.race([
+    Promise.resolve(promise)
+      .then(v => ({ ok: true, v }))
+      .catch(e => ({ ok: false, error: e, v: null })),
+    to,
+  ]).finally(() => {
+    if (tId) clearTimeout(tId);
+  });
+}
+
+function crossfadeFillMeshToMaterial(newMat, durationMs = 140) {
+  try {
+    if (!fillMesh) return;
+    const oldMat = fillMesh.material;
+
+    // If there is no previous material or no scene, fall back to direct swap.
+    if (!oldMat || !scene) {
+      fillMesh.material = newMat;
+      fillMesh.material.needsUpdate = true;
+      return;
+    }
+
+    // Prepare alpha uniforms (supported by our tile shader material).
+    if (oldMat.uniforms && oldMat.uniforms.uAlpha) oldMat.uniforms.uAlpha.value = 1.0;
+    if (newMat.uniforms && newMat.uniforms.uAlpha) newMat.uniforms.uAlpha.value = 0.0;
+
+    // Ensure predictable blending order.
+    oldMat.transparent = true;
+    newMat.transparent = true;
+    oldMat.depthWrite = false;
+    newMat.depthWrite = false;
+
+    const overlay = new THREE.Mesh(fillMesh.geometry, newMat);
+    overlay.position.copy(fillMesh.position);
+    overlay.quaternion.copy(fillMesh.quaternion);
+    overlay.scale.copy(fillMesh.scale);
+    overlay.frustumCulled = false;
+    overlay.renderOrder = (fillMesh.renderOrder || 0) + 1;
+    overlay.updateMatrix();
+    overlay.matrixAutoUpdate = false;
+    scene.add(overlay);
+
+    const t0 = performance.now();
+    const ease = (k) => k * k * (3.0 - 2.0 * k); // smoothstep
+
+    const step = (now) => {
+      const k = clamp((now - t0) / Math.max(1, durationMs), 0, 1);
+      const a = ease(k);
+      if (oldMat.uniforms && oldMat.uniforms.uAlpha) oldMat.uniforms.uAlpha.value = 1.0 - a;
+      if (newMat.uniforms && newMat.uniforms.uAlpha) newMat.uniforms.uAlpha.value = a;
+
+      if (k < 1) {
+        requestAnimationFrame(step);
+        return;
+      }
+
+      // Finalize: swap real material, remove overlay.
+      scene.remove(overlay);
+      fillMesh.material = newMat;
+      fillMesh.material.needsUpdate = true;
+      if (newMat.uniforms && newMat.uniforms.uAlpha) newMat.uniforms.uAlpha.value = 1.0;
+
+      // Dispose old material only if it was our previous tile shader.
+      try {
+        if (oldMat && oldMat !== newMat && oldMat.dispose && oldMat.uniforms && oldMat.uniforms.uTex) {
+          oldMat.dispose();
+        }
+      } catch (_) {}
+    };
+
+    requestAnimationFrame(step);
+  } catch (_) {
+    // Fallback to direct swap on any unexpected runtime issue.
+    try {
+      fillMesh.material = newMat;
+      fillMesh.material.needsUpdate = true;
+    } catch (_) {}
+  }
+}
+
 async function selectTile(tileOrId) {
   // Accept either an ID (number/string) or an in-memory tile object (for per-shape palettes)
   let t = null;
@@ -786,153 +873,94 @@ async function selectTile(tileOrId) {
   const ns = typeof params.normalScale === 'number' ? params.normalScale : (typeof t.normalScale === 'number' ? t.normalScale : 0.0);
   const bs = typeof params.bumpScale === 'number' ? params.bumpScale : (typeof t.bumpScale === 'number' ? t.bumpScale : 0.0);
 
-// Preferred surface quality (1k/2k). We keep UI responsive by applying albedo ASAP,
-// then loading secondary maps (normal/rough/ao/height) in the background.
-const preferredQuality = getPreferredSurfaceQuality();
+  const preferredQuality = getPreferredSurfaceQuality();
 
-// Fast path: load base albedo (typically 1k) first, apply immediately.
-let albedoTex = await loadTexSmartCached(albedoUrl, 'albedo', '1k', isStale, { priority: 'high' });
-if (isStale()) return;
-if (!albedoTex) albedoTex = getFallbackWhiteTex();
+  // Start core map loads immediately (in parallel).
+  const albedoP = loadTexSmartCached(albedoUrl, 'albedo', '1k', isStale, { priority: 'high' });
+  const roughP  = loadTexSmartCached(roughUrl,  'roughness', preferredQuality, isStale, { priority: 'high' });
+  const normalP = loadTexSmartCached(normalUrl, 'normal',    preferredQuality, isStale, { priority: 'normal' });
 
-// Reuse the shader material between selections for speed.
-if (!tileMaterial) {
-  tileMaterial = makeTileMaterial({ albedoTex });
-} else {
-	  // Apply albedo immediately, but keep previous secondary maps until new ones are ready.
-	  // This avoids a brief "flash" (over-bright look) caused by temporarily losing roughness/normal.
-	  applyMapToTileMaterial(tileMaterial, 'albedo', albedoTex);
-}
+  let albedoTex = await albedoP;
+  if (isStale()) return;
+  if (!albedoTex) albedoTex = getFallbackWhiteTex();
 
-// Apply per-tile scalar uniforms immediately (cheap).
-if (tileMaterial.uniforms.uNormalScale) tileMaterial.uniforms.uNormalScale.value = ns || 0.0;
-if (tileMaterial.uniforms.uBumpScale) tileMaterial.uniforms.uBumpScale.value = bs || 0.0;
+  // Compute per-tile settings (cheap).
+  const size = t.tileSizeM || { w: 0.2, h: 0.2 };
 
-const size = t.tileSizeM || { w: 0.2, h: 0.2 };
-tileMaterial.uniforms.uTileSize.value.set(size.w, size.h);
+  let uvScaleX = 1.0, uvScaleY = 1.0;
+  const uvp = (params && (params.uvScale ?? params.repeatScale)) ?? null;
+  if (typeof uvp === 'number') { uvScaleX = uvScaleY = uvp; }
+  else if (uvp && typeof uvp === 'object') {
+    if (typeof uvp.x === 'number') uvScaleX = uvp.x;
+    if (typeof uvp.y === 'number') uvScaleY = uvp.y;
+  }
 
-// Per-texture UV scale (repeat multiplier). 0.5 => looks 2x bigger (repeat /2)
-let uvScaleX = 1.0, uvScaleY = 1.0;
-const uvp = (params && (params.uvScale ?? params.repeatScale)) ?? null;
-if (typeof uvp === 'number') { uvScaleX = uvScaleY = uvp; }
-else if (uvp && typeof uvp === 'object') {
-  if (typeof uvp.x === 'number') uvScaleX = uvp.x;
-  if (typeof uvp.y === 'number') uvScaleY = uvp.y;
-}
-if (tileMaterial.uniforms.uUvScale) tileMaterial.uniforms.uUvScale.value.set(uvScaleX, uvScaleY);
+  const ag = (params && typeof params.albedoGain === 'number') ? params.albedoGain : 1.0;
+  const rm = (params && typeof params.roughnessMult === 'number') ? params.roughnessMult : 1.0;
+  const ss = (params && typeof params.specStrength === 'number') ? params.specStrength : 1.0;
 
-// Per-texture material tuning (content-controlled)
-const ag = (params && typeof params.albedoGain === 'number') ? params.albedoGain : 1.0;
-const rm = (params && typeof params.roughnessMult === 'number') ? params.roughnessMult : 1.0;
-const ss = (params && typeof params.specStrength === 'number') ? params.specStrength : 1.0;
-if (tileMaterial.uniforms.uAlbedoGain) tileMaterial.uniforms.uAlbedoGain.value = ag;
-if (tileMaterial.uniforms.uRoughnessMult) tileMaterial.uniforms.uRoughnessMult.value = rm;
-if (tileMaterial.uniforms.uSpecStrength) tileMaterial.uniforms.uSpecStrength.value = ss;
+  const em = (params && typeof params.exposureMult === 'number')
+    ? params.exposureMult
+    : computeAutoExposureMultFromTexture(albedoTex);
 
-// Exposure: allow content override, otherwise auto-derive from albedo image.
-const em = (params && typeof params.exposureMult === 'number')
-  ? params.exposureMult
-  : computeAutoExposureMultFromTexture(albedoTex);
-if (tileMaterial.uniforms.uExposureMult) tileMaterial.uniforms.uExposureMult.value = em;
+  // Desktop preview (non-XR): update albedo immediately for responsiveness.
+  if (previewPlane && previewPlane.material) {
+    const pm = previewPlane.material;
+    try {
+      const g = previewPlane.geometry;
+      if (g && g.attributes && g.attributes.uv && !g.attributes.uv2) {
+        g.setAttribute('uv2', new THREE.BufferAttribute(g.attributes.uv.array, 2));
+      }
+    } catch (_) {}
 
-setLayout(state.layout);
-
-// desktop preview (used on non-XR): update albedo immediately
-if (previewPlane && previewPlane.material) {
-  const pm = previewPlane.material;
-  try {
-    const g = previewPlane.geometry;
-    if (g && g.attributes && g.attributes.uv && !g.attributes.uv2) {
-      g.setAttribute('uv2', new THREE.BufferAttribute(g.attributes.uv.array, 2));
-    }
-  } catch (_) {}
-
-  pm.map = albedoTex;
-  if (pm.map && pm.map.repeat) pm.map.repeat.set((3 / size.w) * uvScaleX, (3 / size.h) * uvScaleY);
-
-  if (pm.isMeshStandardMaterial) {
-	    // Keep previous optional maps until replacements are ready.
-	    // Clearing them immediately causes a noticeable brightness "flash" during switches.
-	    pm.needsUpdate = true;
-  } else {
+    pm.map = albedoTex;
+    if (pm.map && pm.map.repeat) pm.map.repeat.set((3 / size.w) * uvScaleX, (3 / size.h) * uvScaleY);
     pm.needsUpdate = true;
   }
-}
 
-// If we are already in final AR visualization — apply new material to the filled mesh immediately.
-if (fillMesh && state.phase === 'ar_final') {
-  fillMesh.material = tileMaterial;
-  fillMesh.material.needsUpdate = true;
-}
-
-// Kick secondary maps (and optional 2k upgrade) in the background.
-const deferMs = 120; // small delay helps when user rapidly swipes textures
-setTimeout(async () => {
+  // Wait briefly for core shading maps (normal/roughness). This avoids the brightness "flash" and
+  // avoids temporarily mixing maps between textures.
+  const roughR  = await _withTimeout(roughP, 260);
+  const normalR = await _withTimeout(normalP, 260);
   if (isStale()) return;
 
-  // Optional 2k upgrade for albedo (perceptually biggest win).
-  if (preferredQuality === '2k') {
-    const albedo2k = await loadTexSmartCached(albedoUrl, 'albedo', preferredQuality, isStale, { priority: 'normal' });
-    if (!isStale() && albedo2k && albedo2k !== albedoTex) {
-      applyMapToTileMaterial(tileMaterial, 'albedo', albedo2k);
-      if (previewPlane && previewPlane.material) {
-        previewPlane.material.map = albedo2k;
-        previewPlane.material.needsUpdate = true;
-      }
-    }
-  }
+  const roughTex  = roughR.ok ? roughR.v : null;
+  const normalTex = normalR.ok ? normalR.v : null;
 
-  // Load secondary maps in parallel (bounded by TEX_LOAD_MAX_PARALLEL).
-  const jobs = [
-    ['normal', normalUrl],
-    ['roughness', roughUrl],
-    ['ao', aoUrl],
-    ['height', heightUrl],
-  ];
+  // Build a fresh material for this tile. We do NOT reuse previous secondary maps.
+  const newMat = makeTileMaterial({
+    albedoTex,
+    normalTex,
+    roughnessTex: roughTex,
+    aoTex: null,
+    heightTex: null,
+    normalScale: ns || 0.0,
+    bumpScale: bs || 0.0,
+  });
 
-  const promises = jobs.map(([kind, u]) => loadTexSmartCached(u, kind, preferredQuality, isStale, { priority: 'normal' }));
-  const results = await Promise.all(promises);
+  // Apply per-tile uniforms.
+  if (newMat.uniforms.uNormalScale) newMat.uniforms.uNormalScale.value = ns || 0.0;
+  if (newMat.uniforms.uBumpScale) newMat.uniforms.uBumpScale.value = bs || 0.0;
+  if (newMat.uniforms.uTileSize) newMat.uniforms.uTileSize.value.set(size.w, size.h);
+  if (newMat.uniforms.uUvScale) newMat.uniforms.uUvScale.value.set(uvScaleX, uvScaleY);
+  if (newMat.uniforms.uAlbedoGain) newMat.uniforms.uAlbedoGain.value = ag;
+  if (newMat.uniforms.uRoughnessMult) newMat.uniforms.uRoughnessMult.value = rm;
+  if (newMat.uniforms.uSpecStrength) newMat.uniforms.uSpecStrength.value = ss;
+  if (newMat.uniforms.uExposureMult) newMat.uniforms.uExposureMult.value = em;
 
-  if (isStale()) return;
+  // Ensure current layout mode is reflected.
+  setLayout(state.layout);
 
-	  for (let i = 0; i < jobs.length; i++) {
-	    const kind = jobs[i][0];
-	    const srcUrl = jobs[i][1];
-	    const tex = results[i] || null;
-	
-	    // If the new tile doesn't have this map (or it failed to load), explicitly clear it.
-	    // We clear *after* the load attempt to prevent a temporary over-bright flash.
-	    applyMapToTileMaterial(tileMaterial, kind, tex);
-	
-	    // Mirror into desktop preview material if present
-	    if (previewPlane && previewPlane.material && previewPlane.material.isMeshStandardMaterial) {
-	      const pm = previewPlane.material;
-	      if (kind === 'normal') {
-	        pm.normalMap = tex;
-	        pm.normalScale?.set?.(ns || 0.0, ns || 0.0);
-	      } else if (kind === 'roughness') {
-	        pm.roughnessMap = tex;
-	      } else if (kind === 'ao') {
-	        pm.aoMap = tex;
-	      } else if (kind === 'height') {
-	        pm.bumpMap = tex;
-	        pm.bumpScale = bs || 0.0;
-	      }
-	      pm.needsUpdate = true;
-	    }
-	  }
-
-  // If in AR final, ensure material is applied (should already be).
+  // Swap material with a short crossfade in AR final mode (premium UX).
+  tileMaterial = newMat;
   if (fillMesh && state.phase === 'ar_final') {
-    fillMesh.material = tileMaterial;
+    crossfadeFillMeshToMaterial(newMat, 140);
+  } else if (fillMesh) {
+    fillMesh.material = newMat;
     fillMesh.material.needsUpdate = true;
   }
-}, deferMs);
 
-
-  if (isStale()) return;
-
-    // update detail hero (fallback only when a shape gallery is not set)
+  // Update UI hero/title selections.
   if (UI.detailHero) {
     if (!(state.selectedShape && Array.isArray(state.selectedShape.gallery) && state.selectedShape.gallery.length)) {
       const hero = t.preview || (t.maps && t.maps.albedo) || t.texture || '';
@@ -940,7 +968,6 @@ setTimeout(async () => {
     }
   }
 
-  // update selected in color rows
   const tileKey = String(t.id);
   const updateSwatches = (wrap) => {
     wrap?.querySelectorAll('[data-tile-id]').forEach(el => {
@@ -950,8 +977,67 @@ setTimeout(async () => {
   updateSwatches(UI.colorRow);
   updateSwatches(UI.finalColors);
 
-  // update AR title
   if (UI.arProductTitle) UI.arProductTitle.textContent = t.name || '—';
+
+  // Background upgrades: 2k albedo + remaining maps.
+  const matRef = newMat;
+  const deferMs = 80;
+  setTimeout(async () => {
+    if (isStale()) return;
+    if (tileMaterial !== matRef) return;
+
+    // Optional 2k albedo upgrade.
+    if (preferredQuality === '2k') {
+      const albedo2k = await loadTexSmartCached(albedoUrl, 'albedo', preferredQuality, isStale, { priority: 'normal' });
+      if (!isStale() && tileMaterial === matRef && albedo2k && albedo2k !== albedoTex) {
+        applyMapToTileMaterial(matRef, 'albedo', albedo2k);
+        if (previewPlane && previewPlane.material) {
+          previewPlane.material.map = albedo2k;
+          previewPlane.material.needsUpdate = true;
+        }
+      }
+    }
+
+    const jobs = [
+      ['normal', normalUrl],
+      ['roughness', roughUrl],
+      ['ao', aoUrl],
+      ['height', heightUrl],
+    ];
+
+    const promises = jobs.map(([kind, u]) => loadTexSmartCached(u, kind, preferredQuality, isStale, { priority: 'normal' }));
+    const results = await Promise.all(promises);
+    if (isStale()) return;
+    if (tileMaterial !== matRef) return;
+
+    for (let i = 0; i < jobs.length; i++) {
+      const kind = jobs[i][0];
+      const tex = results[i] || null;
+      applyMapToTileMaterial(matRef, kind, tex);
+
+      if (previewPlane && previewPlane.material && previewPlane.material.isMeshStandardMaterial) {
+        const pm = previewPlane.material;
+        if (kind === 'normal') {
+          pm.normalMap = tex;
+          pm.normalScale?.set?.(ns || 0.0, ns || 0.0);
+        } else if (kind === 'roughness') {
+          pm.roughnessMap = tex;
+        } else if (kind === 'ao') {
+          pm.aoMap = tex;
+        } else if (kind === 'height') {
+          pm.bumpMap = tex;
+          pm.bumpScale = bs || 0.0;
+        }
+        pm.needsUpdate = true;
+      }
+    }
+
+    if (fillMesh && state.phase === 'ar_final') {
+      // Ensure the active material stays applied.
+      fillMesh.material = matRef;
+      fillMesh.material.needsUpdate = true;
+    }
+  }, deferMs);
 }
 
 // ------------------------
