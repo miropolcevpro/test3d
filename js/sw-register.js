@@ -1,48 +1,72 @@
-// Service Worker registration (generated 20260113203500)
+// Service Worker control & recovery (stable)
+// Build: 20260113203000
 (function () {
   if (!('serviceWorker' in navigator)) return;
 
-  // Project Pages base path: "/<repo>/"
+  const BUILD = '20260113203000';
+
+  // GitHub Pages repo base: "/<repo>/"
   const parts = location.pathname.split('/').filter(Boolean);
   const base = parts.length ? `/${parts[0]}/` : '/';
+  const swUrl = base + 'sw.js?v=' + BUILD;
 
-  const SW_BUILD = "20260113203500";
-  const swUrl = base + 'sw.js?v=' + SW_BUILD;
-
-  // Self-heal: if an old/broken SW is controlling this page, unregister it and re-register.
-  // This prevents "white textures" failures caused by outdated fetch handlers.
-  const flagKey = '__sw_selfheal_done__' + SW_BUILD;
-
-  const register = async () => {
+  // Hard recovery: unregister any existing SW + clear CacheStorage.
+  // Triggered when:
+  //  - URL has ?swreset=1
+  //  - controlling SW scriptURL is not current build
+  //  - we detect a previous recovery did not complete
+  async function hardReset(reason) {
     try {
       const regs = await navigator.serviceWorker.getRegistrations();
-      // If we are controlled by an old SW (different scriptURL), uninstall it once.
-      const ctl = navigator.serviceWorker.controller;
-      if (ctl && ctl.scriptURL && !ctl.scriptURL.includes('sw.js?v=' + SW_BUILD) && !sessionStorage.getItem(flagKey)) {
-        sessionStorage.setItem(flagKey, '1');
-        await Promise.all(regs.map(r => r.unregister().catch(() => {})));
-        if (window.caches && caches.keys) {
-          const names = await caches.keys();
-          await Promise.all(names.map(n => caches.delete(n).catch(() => {})));
-        }
-        location.reload();
-        return;
-      }
+      await Promise.all(regs.map(r => r.unregister().catch(() => {})));
+    } catch (e) {}
+    try {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k).catch(() => {})));
+    } catch (e) {}
 
-      const reg = await navigator.serviceWorker.register(swUrl, { scope: base });
-      // Force an update check (helps GH Pages caching edge cases)
-      try { await reg.update(); } catch (e) {}
-    } catch (err) {
+    // Avoid infinite reload loops
+    try {
+      sessionStorage.setItem('sw_reset_done_' + BUILD, '1');
+    } catch (e) {}
+
+    // Reload with cache-buster so old SW cache can't serve stale HTML/JS.
+    const u = new URL(location.href);
+    u.searchParams.delete('swreset');
+    u.searchParams.set('cb', String(Date.now()));
+    location.replace(u.toString());
+  }
+
+  async function main() {
+    const u = new URL(location.href);
+    const forceReset = u.searchParams.get('swreset') === '1';
+    const resetDone = (function () {
+      try { return sessionStorage.getItem('sw_reset_done_' + BUILD) === '1'; } catch (e) { return false; }
+    })();
+
+    // If we are controlled by an older SW build, reset.
+    const ctrl = navigator.serviceWorker.controller;
+    const ctrlUrl = ctrl && ctrl.scriptURL ? String(ctrl.scriptURL) : '';
+    const ctrlIsOld = ctrlUrl && !ctrlUrl.includes('v=' + BUILD);
+
+    if ((forceReset || ctrlIsOld) && !resetDone) {
+      await hardReset(forceReset ? 'query' : 'old-controller');
+      return;
+    }
+
+    // Register SW.
+    // SW is kept minimal and NEVER caches Object Storage (bucket) to avoid opaque/CORS issues.
+    navigator.serviceWorker.register(swUrl).catch((err) => {
       console.warn('[SW] register failed', err);
-    }
-  };
+    });
 
-  register();
+    // Ask for persistent storage to reduce eviction on Android.
+    try {
+      if (navigator.storage && navigator.storage.persist) {
+        navigator.storage.persist().catch(() => {});
+      }
+    } catch (e) {}
+  }
 
-  // Ask for persistent storage to reduce cache eviction on Android
-  try {
-    if (navigator.storage && navigator.storage.persist) {
-      navigator.storage.persist().catch(() => {});
-    }
-  } catch (e) {}
+  main().catch(() => {});
 })();
