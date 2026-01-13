@@ -710,6 +710,16 @@ function getToken() {
     });
   }
 
+
+async function apiDeleteTexture(shapeId, textureId, opts = {}) {
+  const palette = opts.palette !== false;
+  const files = opts.files !== false;
+  const qs = `?palette=${palette ? 1 : 0}&files=${files ? 1 : 0}`;
+  return apiFetch(`/api/textures/${encodeURIComponent(shapeId)}/${encodeURIComponent(textureId)}${qs}`, {
+    method: 'DELETE',
+  });
+}
+
   async function apiSyncTexture(shapeId, textureId) {
     return apiFetch(`/api/textures/${encodeURIComponent(shapeId)}/${encodeURIComponent(textureId)}/sync`, {
       method: 'POST',
@@ -944,18 +954,30 @@ function getToken() {
     // renderRoute will run on hashchange, but also run immediately for better UX.
     renderRoute().catch(() => {});
   }
-
   async function deleteTextureFlow(shapeId, textureId) {
     const okPalette = confirm(`Удалить текстуру "${textureId}" из палитры формы "${shapeId}"?`);
     if (!okPalette) return;
     const alsoBucket = confirm('Также удалить файлы из бакета (surfaces/<shapeId>/<textureId>/...) ?\n\nРекомендуется, если текстура больше не нужна вовсе.');
-
+  
     setStatus(elPaletteStatus, '', 'Удаляем...');
-    if (okPalette) {
-      await apiDeletePaletteItem(shapeId, textureId);
-    }
+    const res = await apiDeleteTexture(shapeId, textureId, { palette: true, files: alsoBucket });
+  
+    // Refresh caches/UI
+    state.paletteByShapeId.delete(shapeId);
+    try {
+      await ensureBucketIndexLoaded(shapeId, { forceReload: true });
+    } catch {}
+    const fresh = await ensurePaletteLoaded(shapeId, { forceReload: true });
+    renderTextures(shapeId, Array.isArray(fresh?.items) ? fresh.items : []);
+    renderBucketTextures(shapeId);
+  
+    const delMsg = alsoBucket ? 'Удалено из палитры и из бакета.' : 'Удалено из палитры.';
+    const warn = (res?.filesResult?.remainingKeysCount > 0) ? ` В бакете ещё осталось ${res.filesResult.remainingKeysCount} файлов (возможна задержка).` : '';
+    setStatus(elPaletteStatus, 'ok', delMsg + warn);
+  }
+  
     if (alsoBucket) {
-      await apiDeleteSurfacePrefix(shapeId, textureId);
+      await apiDeleteTexture(shapeId, textureId, { palette: false, files: true });
     }
 
     // Refresh caches/UI
@@ -1105,7 +1127,7 @@ function getToken() {
             const ok = confirm(`Удалить файлы текстуры "${textureId}" из бакета?`);
             if (!ok) return;
             setStatus(elBucketStatus, '', 'Удаляем из бакета…');
-            await apiDeleteSurfacePrefix(shapeId, textureId);
+            await apiDeleteTexture(shapeId, textureId, { palette: false, files: true });
             state.bucketIndexByShapeId.delete(shapeId);
             await ensureBucketIndexLoaded(shapeId, { forceReload: true });
             renderBucketTextures(shapeId);
