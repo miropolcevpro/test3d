@@ -159,17 +159,50 @@ const state = {
 
 // ------------------------
 // Texture loading limiter (prevents spikes when user rapidly switches textures)
+// Now adaptive: accounts for memory/cores, current network and XR state.
 // ------------------------
-const TEX_LOAD_MAX_PARALLEL = (() => {
-  const dm = (typeof navigator !== 'undefined' && typeof navigator.deviceMemory === 'number') ? navigator.deviceMemory : 0;
-  // Conservative on low-memory devices.
-  if (dm && dm <= 4) return 3;
-  return 4;
-})();
+function _getConnInfo() {
+  const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  const eff = (conn && conn.effectiveType) ? String(conn.effectiveType) : '';
+  const downlink = (conn && typeof conn.downlink === 'number') ? conn.downlink : 0;
+  const rtt = (conn && typeof conn.rtt === 'number') ? conn.rtt : 0;
+  const saveData = !!(conn && conn.saveData);
+  return { conn, eff, downlink, rtt, saveData };
+}
+
+function computeTexLoadMaxParallel() {
+  try {
+    const dm = (typeof navigator !== 'undefined' && typeof navigator.deviceMemory === 'number') ? navigator.deviceMemory : 0;
+    const hc = (typeof navigator !== 'undefined' && typeof navigator.hardwareConcurrency === 'number') ? navigator.hardwareConcurrency : 0;
+    const { eff, downlink, rtt, saveData } = _getConnInfo();
+
+    // Baseline from device capacity.
+    let max = 4;
+    if (dm && dm <= 2) max = 2;
+    else if (dm && dm <= 4) max = 3;
+    if (hc && hc <= 4) max = Math.min(max, 3);
+
+    // Network-aware throttling.
+    if (saveData) max = 2;
+    if (/slow-2g|2g/i.test(eff)) max = 1;
+    if (/3g/i.test(eff)) max = Math.min(max, 2);
+    if (downlink && downlink < 2) max = Math.min(max, 2);
+    if (rtt && rtt > 250) max = Math.min(max, 2);
+
+    // XR: keep pressure low for stability.
+    if (state && state.xrSession) max = Math.min(max, 2);
+
+    return clamp(max, 1, 4);
+  } catch {
+    return 3;
+  }
+}
+
+let _texLoadMaxParallel = computeTexLoadMaxParallel();
 let _texLoadActive = 0;
 const _texLoadQueue = [];
 function _pumpTexLoadQueue() {
-  while (_texLoadActive < TEX_LOAD_MAX_PARALLEL && _texLoadQueue.length) {
+  while (_texLoadActive < _texLoadMaxParallel && _texLoadQueue.length) {
     const job = _texLoadQueue.shift();
     _texLoadActive++;
     Promise.resolve()
@@ -180,6 +213,21 @@ function _pumpTexLoadQueue() {
       );
   }
 }
+
+function updateTexLoadMaxParallel() {
+  try {
+    _texLoadMaxParallel = computeTexLoadMaxParallel();
+    _pumpTexLoadQueue();
+  } catch (_) {}
+}
+
+// React to network changes when supported.
+try {
+  const { conn } = _getConnInfo();
+  if (conn && typeof conn.addEventListener === 'function') {
+    conn.addEventListener('change', () => updateTexLoadMaxParallel());
+  }
+} catch (_) {}
 function runWithTexLoadLimit(fn, opts = {}) {
   const pr = (opts && opts.priority) ? String(opts.priority) : 'normal';
   return new Promise((resolve, reject) => {
@@ -206,6 +254,29 @@ const _texPromiseCache = new Map();
 // (quality|url) -> resolved url (2k / alt-ext) that actually exists
 const _texResolvedUrlCache = new Map();
 
+// Lightweight performance telemetry for adaptive quality decisions.
+// We track an EMA of load+decode time per map kind.
+const _texPerf = {
+  any: { ema: 0, n: 0 },
+  albedo: { ema: 0, n: 0 },
+  roughness: { ema: 0, n: 0 },
+  normal: { ema: 0, n: 0 },
+  ao: { ema: 0, n: 0 },
+  height: { ema: 0, n: 0 },
+};
+function _perfAdd(kind, ms) {
+  try {
+    const k = _texPerf[kind] ? kind : 'any';
+    const a = _texPerf[k];
+    const b = _texPerf.any;
+    const alpha = 0.22;
+    a.ema = a.n ? (a.ema * (1 - alpha) + ms * alpha) : ms;
+    a.n++;
+    b.ema = b.n ? (b.ema * (1 - alpha) + ms * alpha) : ms;
+    b.n++;
+  } catch (_) {}
+}
+
 function _cacheGet(map, key) { return map.has(key) ? map.get(key) : undefined; }
 
 function loadTextureCached(url, opts = {}) {
@@ -217,7 +288,14 @@ function loadTextureCached(url, opts = {}) {
   const priority = (opts && opts.priority) ? String(opts.priority) : 'normal';
   const silent = Boolean(opts && opts.silent);
 
-  const p = runWithTexLoadLimit(() => _globalTexLoader.loadAsync(key), { priority })
+  const kind = (opts && opts.kind) ? String(opts.kind) : '';
+  const p = runWithTexLoadLimit(async () => {
+    const t0 = performance.now();
+    const tex = await _globalTexLoader.loadAsync(key);
+    const dt = performance.now() - t0;
+    if (dt && dt < 60000) _perfAdd(kind || 'any', dt);
+    return tex;
+  }, { priority })
     .then((tex) => tex || null)
     .catch((err) => {
       if (!silent) console.warn('[surfaces] failed to load texture:', key, err);
@@ -238,7 +316,7 @@ async function loadTexSmartCached(url, label, preferredQuality, isStaleFn, opts 
 
   // If we already know the best URL for this base, try it first.
   if (cachedResolved) {
-    const t0 = await loadTextureCached(cachedResolved, { priority, silent: true });
+    const t0 = await loadTextureCached(cachedResolved, { priority, silent: true, kind: label });
     if (isStaleFn && isStaleFn()) return null;
     if (t0) return t0;
     _texResolvedUrlCache.delete(baseKey);
@@ -255,7 +333,7 @@ async function loadTexSmartCached(url, label, preferredQuality, isStaleFn, opts 
 
   for (const u of candidates) {
     if (isStaleFn && isStaleFn()) return null;
-    const tex = await loadTextureCached(u, { priority, silent: true });
+    const tex = await loadTextureCached(u, { priority, silent: true, kind: label });
     if (isStaleFn && isStaleFn()) return null;
     if (tex) {
       _texResolvedUrlCache.set(baseKey, u);
@@ -274,6 +352,11 @@ function applyMapToTileMaterial(mat, kind, tex) {
   if (tex) prepMapTex(tex, kind === 'albedo');
   if (kind === 'albedo') {
     mat.uniforms.uTex.value = tex;
+    if (mat.uniforms.uTex2) {
+      mat.uniforms.uTex2.value = null;
+      mat.uniforms.uHasTex2.value = 0;
+      mat.uniforms.uTexMix.value = 0.0;
+    }
   } else if (kind === 'normal') {
     mat.uniforms.uNormalTex.value = tex;
     mat.uniforms.uHasNormal.value = tex ? 1 : 0;
@@ -286,6 +369,150 @@ function applyMapToTileMaterial(mat, kind, tex) {
   } else if (kind === 'height') {
     mat.uniforms.uHeightTex.value = tex;
     mat.uniforms.uHasHeight.value = tex ? 1 : 0;
+  }
+}
+
+// ------------------------
+// Prefetch (predictive) + GPU warmup (reduces first-apply stutter)
+// ------------------------
+let _prefetchTimer = null;
+let _prefetchSeq = 0;
+
+// Warmup helpers (render a 1x1 offscreen pass so the texture gets uploaded to GPU).
+const _warmedTexUuids = new Set();
+let _warmupRT = null;
+let _warmupScene = null;
+let _warmupCam = null;
+let _warmupMesh = null;
+
+function warmupTextureOnGPU(tex, isColor = false) {
+  try {
+    if (!tex || !renderer || (renderer.xr && renderer.xr.isPresenting)) return;
+    if (_warmedTexUuids.has(tex.uuid)) return;
+
+    prepMapTex(tex, isColor);
+
+    if (!_warmupRT) _warmupRT = new THREE.WebGLRenderTarget(1, 1);
+    if (!_warmupScene) {
+      _warmupScene = new THREE.Scene();
+      _warmupCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+      _warmupMesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(2, 2),
+        new THREE.MeshBasicMaterial({ transparent: false })
+      );
+      _warmupScene.add(_warmupMesh);
+    }
+
+    _warmupMesh.material.map = tex;
+    _warmupMesh.material.needsUpdate = true;
+
+    const prevRT = renderer.getRenderTarget();
+    renderer.setRenderTarget(_warmupRT);
+    renderer.render(_warmupScene, _warmupCam);
+    renderer.setRenderTarget(prevRT);
+
+    _warmedTexUuids.add(tex.uuid);
+  } catch (_) {}
+}
+
+function schedulePrefetchAdjacentTiles(currentTile, list = null) {
+  try {
+    if (!currentTile) return;
+    // Connectivity-aware: avoid background prefetch on slow networks or when user enabled Save-Data.
+    const { eff, downlink, saveData } = _getConnInfo();
+    if (saveData) return;
+    if (/slow-2g|2g|3g/i.test(eff)) return;
+    if (downlink && downlink < 2) return;
+    const tiles = Array.isArray(list) ? list : (Array.isArray(state.currentAllowedTiles) ? state.currentAllowedTiles : state.tiles);
+    if (!Array.isArray(tiles) || tiles.length < 2) return;
+
+    const idx = tiles.findIndex(x => String(x.id) === String(currentTile.id));
+    if (idx < 0) return;
+
+    // Only prefetch 1 neighbor each side (max 2 textures) for safety.
+    const neighbors = [];
+    if (idx + 1 < tiles.length) neighbors.push(tiles[idx + 1]);
+    if (idx - 1 >= 0) neighbors.push(tiles[idx - 1]);
+
+    const mySeq = ++_prefetchSeq;
+
+    if (_prefetchTimer) clearTimeout(_prefetchTimer);
+    _prefetchTimer = setTimeout(async () => {
+      if (mySeq !== _prefetchSeq) return;
+
+      const preferredQuality = getPreferredSurfaceQuality({ inAR: state.phase === 'ar_final' });
+
+      for (const nt of neighbors) {
+        if (mySeq !== _prefetchSeq) return;
+
+        const aUrl = (nt.maps && nt.maps.albedo) ? nt.maps.albedo : nt.texture;
+        const rUrl = (nt.maps && nt.maps.roughness) ? nt.maps.roughness : null;
+        const nUrl = (nt.maps && nt.maps.normal) ? nt.maps.normal : null;
+
+        // Dedup is handled by caches; priorities stay 'normal' so it won't block active switching.
+        const aTexP = loadTexSmartCached(aUrl, 'albedo', '1k', null, { priority: 'normal' });
+        const rTexP = loadTexSmartCached(rUrl, 'roughness', preferredQuality, null, { priority: 'normal' });
+        const nTexP = loadTexSmartCached(nUrl, 'normal', preferredQuality, null, { priority: 'normal' });
+
+        const aTex = await aTexP;
+        if (aTex) warmupTextureOnGPU(aTex, true);
+
+        const rTex = await rTexP;
+        if (rTex) warmupTextureOnGPU(rTex, false);
+
+        // Normal is best-effort (often heavier); warm up only if it arrives quickly.
+        const nRes = await _withTimeout(nTexP, 220);
+        if (nRes.ok && nRes.v) warmupTextureOnGPU(nRes.v, false);
+      }
+    }, 180);
+  } catch (_) {}
+}
+
+// ------------------------
+// Premium albedo-only crossfade (in-shader) without touching transparency/depth
+// ------------------------
+function crossfadeAlbedoOnMaterial(mat, newAlbedoTex, durationMs = 140) {
+  try {
+    prepMapTex(newAlbedoTex, true);
+    if (!mat || !mat.uniforms || !mat.uniforms.uTex || !mat.uniforms.uTex2 || !newAlbedoTex) {
+      if (mat) applyMapToTileMaterial(mat, 'albedo', newAlbedoTex);
+      return;
+    }
+
+    const oldTex = mat.uniforms.uTex.value;
+    // If there is no old texture yet, just set.
+    if (!oldTex) {
+      applyMapToTileMaterial(mat, 'albedo', newAlbedoTex);
+      mat.uniforms.uHasTex2.value = 0;
+      mat.uniforms.uTex2.value = null;
+      mat.uniforms.uTexMix.value = 0.0;
+      return;
+    }
+
+    // Set second map + animate mix.
+    mat.uniforms.uTex2.value = newAlbedoTex;
+    mat.uniforms.uHasTex2.value = 1;
+    mat.uniforms.uTexMix.value = 0.0;
+
+    const t0 = performance.now();
+    const ease = (k) => k * k * (3.0 - 2.0 * k); // smoothstep
+
+    const step = (now) => {
+      const k = clamp((now - t0) / Math.max(1, durationMs), 0, 1);
+      mat.uniforms.uTexMix.value = ease(k);
+      if (k < 1) { requestAnimationFrame(step); return; }
+
+      // Finalize: commit new as primary, drop secondary.
+      mat.uniforms.uTex.value = newAlbedoTex;
+      mat.uniforms.uTex2.value = null;
+      mat.uniforms.uHasTex2.value = 0;
+      mat.uniforms.uTexMix.value = 0.0;
+      mat.needsUpdate = true;
+    };
+
+    requestAnimationFrame(step);
+  } catch (_) {
+    try { applyMapToTileMaterial(mat, 'albedo', newAlbedoTex); } catch (_) {}
   }
 }
 
@@ -427,10 +654,15 @@ function makeTileMaterial(arg = {}) {
   prepMapTex(heightTex, false);
 
   const mat = new THREE.ShaderMaterial({
-    transparent: true,
+    transparent: false,
+    depthWrite: true,
+    depthTest: true,
     uniforms: {
       // maps
       uTex: { value: albedoTex },
+      uTex2: { value: null },
+      uHasTex2: { value: 0 },
+      uTexMix: { value: 0.0 },
       uNormalTex: { value: normalTex },
       uRoughTex: { value: roughnessTex },
       uAoTex: { value: aoTex },
@@ -522,6 +754,9 @@ function makeTileMaterial(arg = {}) {
       varying vec4 vClipPos;
 
       uniform sampler2D uTex;
+      uniform sampler2D uTex2;
+      uniform int uHasTex2;
+      uniform float uTexMix;
       uniform sampler2D uNormalTex;
       uniform sampler2D uRoughTex;
       uniform sampler2D uAoTex;
@@ -585,7 +820,12 @@ function makeTileMaterial(arg = {}) {
         vec2 uv = safeFract(vUv);
 
         // base color
-        vec3 albedo = texture2D(uTex, uv).rgb;
+        vec3 a0 = texture2D(uTex, uv).rgb;
+        if (uHasTex2 == 1) {
+          vec3 a1 = texture2D(uTex2, uv).rgb;
+          a0 = mix(a0, a1, clamp(uTexMix, 0.0, 1.0));
+        }
+        vec3 albedo = a0;
 
         albedo *= uAlbedoGain;
         albedo *= uColorBalance;
@@ -869,6 +1109,58 @@ function crossfadeFillMeshToMaterial(newMat, durationMs = 140) {
   }
 }
 
+// ------------------------
+// Deferred heavy map streaming (AO/Height)
+// ------------------------
+let _heavyMapsTimer = null;
+let _heavyMapsSeq = 0;
+function scheduleDeferredHeavyMaps(mat, urls, preferredQuality, isStaleFn, opts = {}) {
+  try {
+    if (_heavyMapsTimer) clearTimeout(_heavyMapsTimer);
+    const mySeq = ++_heavyMapsSeq;
+
+    const delayMs = typeof opts.delayMs === 'number' ? opts.delayMs : 1200;
+    const debounceMs = typeof opts.debounceMs === 'number' ? opts.debounceMs : 350;
+    const startedAt = performance.now();
+
+    // Debounce: if the user keeps switching within debounce window, we'll re-schedule.
+    _heavyMapsTimer = setTimeout(async () => {
+      if (mySeq !== _heavyMapsSeq) return;
+      if (isStaleFn && isStaleFn()) return;
+
+      // Connectivity-aware: on slow networks keep XR light and skip heavy maps.
+      try {
+        const { eff, downlink, saveData } = _getConnInfo();
+        if (saveData) return;
+        if (/slow-2g|2g|3g/i.test(eff)) return;
+        if (downlink && downlink < 2) return;
+      } catch (_) {}
+
+      // Extra guard: do not start heavy loads immediately after a switch.
+      const dt = performance.now() - startedAt;
+      if (dt < debounceMs) return;
+
+      const { aoUrl, heightUrl } = urls || {};
+      const tasks = [];
+      if (aoUrl) tasks.push(['ao', aoUrl]);
+      if (heightUrl) tasks.push(['height', heightUrl]);
+      if (!tasks.length) return;
+
+      const ps = tasks.map(([kind, u]) => loadTexSmartCached(u, kind, preferredQuality, isStaleFn, { priority: 'normal' }));
+      const rs = await Promise.all(ps);
+      if (isStaleFn && isStaleFn()) return;
+
+      for (let i = 0; i < tasks.length; i++) {
+        applyMapToTileMaterial(mat, tasks[i][0], rs[i] || null);
+      }
+      if (fillMesh && state.phase === 'ar_final') {
+        fillMesh.material = mat;
+        fillMesh.material.needsUpdate = true;
+      }
+    }, delayMs);
+  } catch (_) {}
+}
+
 async function selectTile(tileOrId) {
   // Accept either an ID (number/string) or an in-memory tile object (for per-shape palettes)
   let t = null;
@@ -899,7 +1191,7 @@ async function selectTile(tileOrId) {
   const ns = typeof params.normalScale === 'number' ? params.normalScale : (typeof t.normalScale === 'number' ? t.normalScale : 0.0);
   const bs = typeof params.bumpScale === 'number' ? params.bumpScale : (typeof t.bumpScale === 'number' ? t.bumpScale : 0.0);
 
-  const preferredQuality = getPreferredSurfaceQuality();
+  const preferredQuality = getPreferredSurfaceQuality({ inAR: state.phase === 'ar_final' });
 
   // Start core map loads immediately (in parallel).
   const albedoP = loadTexSmartCached(albedoUrl, 'albedo', '1k', isStale, { priority: 'high' });
@@ -969,40 +1261,57 @@ if (state && state.phase === 'ar_final') {
   roughTex  = roughR.ok ? roughR.v : null;
   normalTex = normalR.ok ? normalR.v : null;
 }
-  // Build a fresh material for this tile. We do NOT reuse previous secondary maps.
-  const newMat = makeTileMaterial({
-    albedoTex,
-    normalTex,
-    roughnessTex: roughTex,
-    aoTex: null,
-    heightTex: null,
-    normalScale: ns || 0.0,
-    bumpScale: bs || 0.0,
-  });
+  // Update / create tile material in-place (premium switching without using maps from other textures).
+  if (!tileMaterial) {
+    tileMaterial = makeTileMaterial({
+      albedoTex,
+      normalTex,
+      roughnessTex: roughTex,
+      aoTex: null,
+      heightTex: null,
+      normalScale: ns || 0.0,
+      bumpScale: bs || 0.0,
+    });
+  }
+
+  const mat = tileMaterial;
 
   // Apply per-tile uniforms.
-  if (newMat.uniforms.uNormalScale) newMat.uniforms.uNormalScale.value = ns || 0.0;
-  if (newMat.uniforms.uBumpScale) newMat.uniforms.uBumpScale.value = bs || 0.0;
-  if (newMat.uniforms.uTileSize) newMat.uniforms.uTileSize.value.set(size.w, size.h);
-  if (newMat.uniforms.uUvScale) newMat.uniforms.uUvScale.value.set(uvScaleX, uvScaleY);
-  if (newMat.uniforms.uAlbedoGain) newMat.uniforms.uAlbedoGain.value = ag;
-  if (newMat.uniforms.uRoughnessMult) newMat.uniforms.uRoughnessMult.value = rm;
-  if (newMat.uniforms.uSpecStrength) newMat.uniforms.uSpecStrength.value = ss;
-  if (newMat.uniforms.uExposureMult) newMat.uniforms.uExposureMult.value = em;
+  if (mat.uniforms.uNormalScale) mat.uniforms.uNormalScale.value = ns || 0.0;
+  if (mat.uniforms.uBumpScale) mat.uniforms.uBumpScale.value = bs || 0.0;
+  if (mat.uniforms.uTileSize) mat.uniforms.uTileSize.value.set(size.w, size.h);
+  if (mat.uniforms.uUvScale) mat.uniforms.uUvScale.value.set(uvScaleX, uvScaleY);
+  if (mat.uniforms.uAlbedoGain) mat.uniforms.uAlbedoGain.value = ag;
+  if (mat.uniforms.uRoughnessMult) mat.uniforms.uRoughnessMult.value = rm;
+  if (mat.uniforms.uSpecStrength) mat.uniforms.uSpecStrength.value = ss;
+  if (mat.uniforms.uExposureMult) mat.uniforms.uExposureMult.value = em;
+
+  // Update secondary maps immediately (no cross-texture borrowing).
+  applyMapToTileMaterial(mat, 'roughness', roughTex);
+  applyMapToTileMaterial(mat, 'normal', normalTex);
+  applyMapToTileMaterial(mat, 'ao', null);
+  applyMapToTileMaterial(mat, 'height', null);
 
   // Ensure current layout mode is reflected.
   setLayout(state.layout);
 
-  // Swap material with a short crossfade in AR final mode (premium UX).
-  tileMaterial = newMat;
-  if (fillMesh && state.phase === 'ar_final') {
-    crossfadeFillMeshToMaterial(newMat, 140);
-  } else if (fillMesh) {
-    fillMesh.material = newMat;
+  // Apply albedo:
+  // - In AR final: premium in-shader crossfade (no transparency/depth side effects).
+  // - Elsewhere: apply immediately.
+  if (state.phase === 'ar_final') {
+    crossfadeAlbedoOnMaterial(mat, albedoTex, 140);
+  } else {
+    applyMapToTileMaterial(mat, 'albedo', albedoTex);
+  }
+
+  // Ensure the floor uses the current tile material (if already created).
+  if (fillMesh) {
+    fillMesh.material = mat;
     fillMesh.material.needsUpdate = true;
   }
 
   // Update UI hero/title selections.
+
   if (UI.detailHero) {
     if (!(state.selectedShape && Array.isArray(state.selectedShape.gallery) && state.selectedShape.gallery.length)) {
       const hero = t.preview || (t.maps && t.maps.albedo) || t.texture || '';
@@ -1022,16 +1331,15 @@ if (state && state.phase === 'ar_final') {
   if (UI.arProductTitle) UI.arProductTitle.textContent = t.name || '—';
 
   // Background upgrades: 2k albedo + remaining maps.
-  const matRef = newMat;
+  const matRef = mat;
   const deferMs = 80;
   setTimeout(async () => {
     if (isStale()) return;
-    if (tileMaterial !== matRef) return;
 
     // Optional 2k albedo upgrade.
     if (preferredQuality === '2k') {
       const albedo2k = await loadTexSmartCached(albedoUrl, 'albedo', preferredQuality, isStale, { priority: 'normal' });
-      if (!isStale() && tileMaterial === matRef && albedo2k && albedo2k !== albedoTex) {
+      if (!isStale() && albedo2k && albedo2k !== albedoTex) {
         applyMapToTileMaterial(matRef, 'albedo', albedo2k);
         if (previewPlane && previewPlane.material) {
           previewPlane.material.map = albedo2k;
@@ -1040,17 +1348,17 @@ if (state && state.phase === 'ar_final') {
       }
     }
 
+    // Streaming strategy:
+    // - Always keep core shading maps (roughness/normal) reasonably fresh.
+    // - Defer heavy maps (AO/Height) in AR to reduce stutter and WebXR instability.
     const jobs = [
       ['normal', normalUrl],
       ['roughness', roughUrl],
-      ['ao', aoUrl],
-      ['height', heightUrl],
     ];
 
     const promises = jobs.map(([kind, u]) => loadTexSmartCached(u, kind, preferredQuality, isStale, { priority: 'normal' }));
     const results = await Promise.all(promises);
     if (isStale()) return;
-    if (tileMaterial !== matRef) return;
 
     for (let i = 0; i < jobs.length; i++) {
       const kind = jobs[i][0];
@@ -1064,11 +1372,6 @@ if (state && state.phase === 'ar_final') {
           pm.normalScale?.set?.(ns || 0.0, ns || 0.0);
         } else if (kind === 'roughness') {
           pm.roughnessMap = tex;
-        } else if (kind === 'ao') {
-          pm.aoMap = tex;
-        } else if (kind === 'height') {
-          pm.bumpMap = tex;
-          pm.bumpScale = bs || 0.0;
         }
         pm.needsUpdate = true;
       }
@@ -1079,7 +1382,38 @@ if (state && state.phase === 'ar_final') {
       fillMesh.material = matRef;
       fillMesh.material.needsUpdate = true;
     }
+
+    // Heavy maps: load only when AR is stable (or when user has stopped switching).
+    if (state.phase === 'ar_final') {
+      // In XR we intentionally keep heavy maps at 1k to reduce memory spikes and decoder pressure.
+      scheduleDeferredHeavyMaps(matRef, { aoUrl, heightUrl }, '1k', isStale, { delayMs: 1200, debounceMs: 350 });
+    } else {
+      // Non-AR: safe to load AO/Height in the background.
+      const heavyJobs = [
+        ['ao', aoUrl],
+        ['height', heightUrl],
+      ].filter(([_, u]) => !!u);
+      if (heavyJobs.length) {
+        const heavyPs = heavyJobs.map(([kind, u]) => loadTexSmartCached(u, kind, preferredQuality, isStale, { priority: 'normal' }));
+        const heavyRs = await Promise.all(heavyPs);
+        if (isStale()) return;
+        for (let i = 0; i < heavyJobs.length; i++) {
+          const kind = heavyJobs[i][0];
+          const tex = heavyRs[i] || null;
+          applyMapToTileMaterial(matRef, kind, tex);
+          if (previewPlane && previewPlane.material && previewPlane.material.isMeshStandardMaterial) {
+            const pm = previewPlane.material;
+            if (kind === 'ao') pm.aoMap = tex;
+            else if (kind === 'height') { pm.bumpMap = tex; pm.bumpScale = bs || 0.0; }
+            pm.needsUpdate = true;
+          }
+        }
+      }
+    }
   }, deferMs);
+
+  // Predictive prefetch for snappy native-like switching.
+  schedulePrefetchAdjacentTiles(t);
 }
 
 // ------------------------
@@ -1520,7 +1854,7 @@ async function checkXrSupport() {
 // --- Surface quality (1k/2k) auto-select ---
 // Heuristic: prefer 2k on capable Android devices (more RAM/cores, big screen, good network), otherwise 1k.
 // You can override via URL param ?tex=1k or ?tex=2k
-function getPreferredSurfaceQuality() {
+function getPreferredSurfaceQuality(ctx = {}) {
   try {
     const sp = new URLSearchParams(window.location.search || '');
     const forced = (sp.get('tex') || '').toLowerCase();
@@ -1531,17 +1865,32 @@ function getPreferredSurfaceQuality() {
     const dpr = typeof window.devicePixelRatio === 'number' ? window.devicePixelRatio : 1;
     const minPx = Math.min(window.screen?.width || 0, window.screen?.height || 0) * dpr;
 
-    const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
-    const saveData = !!(conn && conn.saveData);
-    const eff = (conn && conn.effectiveType) ? String(conn.effectiveType) : '';
+    const { eff, downlink, rtt, saveData } = _getConnInfo();
+
+    const inAR = !!(ctx && (ctx.inAR || (state && state.xrSession) || state.phase === 'ar_final'));
+
+    // Runtime perf hint: if decode times are getting high, avoid 2k.
+    const avgAny = _texPerf.any.n ? _texPerf.any.ema : 0;
+    const avgAlb = _texPerf.albedo.n ? _texPerf.albedo.ema : 0;
+    const avgRgh = _texPerf.roughness.n ? _texPerf.roughness.ema : 0;
 
     if (saveData) return '1k';
-    if (/slow-2g|2g/i.test(eff)) return '1k';
+    if (/slow-2g|2g|3g/i.test(eff)) return '1k';
+    if (downlink && downlink < 2) return '1k';
+    if (rtt && rtt > 250) return '1k';
 
-    // Strong devices: 2k
-    if (dm >= 4 && hc >= 6 && minPx >= 1080 && !/3g/i.test(eff)) return '2k';
-    // Mid devices: 2k if screen is decent and network not too slow
-    if (dm >= 3 && hc >= 4 && minPx >= 900 && !/3g/i.test(eff)) return '2k';
+    // If we're already struggling to decode, keep it 1k for stability.
+    if ((avgAny && avgAny > 520) || (avgAlb && avgAlb > 420) || (avgRgh && avgRgh > 520)) return '1k';
+
+    // In AR we prefer stability: only allow 2k on very strong devices and when decode is fast.
+    if (inAR) {
+      if (dm >= 6 && hc >= 8 && minPx >= 1080 && (!avgAny || avgAny < 260)) return '2k';
+      return '1k';
+    }
+
+    // Non-AR: we can be more aggressive.
+    if (dm >= 4 && hc >= 6 && minPx >= 1080) return '2k';
+    if (dm >= 3 && hc >= 4 && minPx >= 900 && (!avgAny || avgAny < 320)) return '2k';
 
     return '1k';
   } catch {
@@ -1825,6 +2174,8 @@ async function startAR() {
   }
 
   state.xrSession = session;
+  // XR increases memory/decoder pressure; reduce parallelism while active.
+  try { updateTexLoadMaxParallel(); } catch (_) {}
   renderer.xr.setReferenceSpaceType('local');
   await renderer.xr.setSession(session);
 
@@ -1890,6 +2241,8 @@ async function startAR() {
 
 function cleanupXR() {
   state.xrSession = null;
+  // Restore adaptive parallelism for non-XR mode.
+  try { updateTexLoadMaxParallel(); } catch (_) {}
   state.referenceSpace = null;
   state.viewerSpace = null;
   state.hitTestSource = null;
