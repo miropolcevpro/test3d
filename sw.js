@@ -1,12 +1,12 @@
 /* WebAR Service Worker (runtime cache)
- * Version: 20260113180539
+ * Version: 20260113145858
  * Caches palettes/palette_settings and hot texture maps (albedo/roughness/normal best-effort).
  *
  * Notes:
  * - We intentionally do NOT cache API Gateway calls (admin backend).
  * - We keep cache sizes bounded with simple LRU stored in IndexedDB.
  */
-const SW_VERSION = "20260113180539";
+const SW_VERSION = "20260113182035";
 const STATIC_CACHE = `webar-static-${SW_VERSION}`;
 const JSON_CACHE   = `webar-json-${SW_VERSION}`;
 const TEX_CACHE    = `webar-tex-${SW_VERSION}`;
@@ -148,12 +148,11 @@ async function cacheFirst(request, cacheName, maxEntries) {
   const cached = await cache.match(request, { ignoreSearch: false });
   if (cached) {
     lruTouch(cacheName, request.url);
-    // revalidate in background (stale-while-revalidate)
-    eventWaitUntilSafe(fetchAndCache(request, cacheName, maxEntries));
+    // Background refresh (best-effort) WITHOUT event.waitUntil (avoids InvalidStateError)
+    fetchAndCache(request, cacheName, maxEntries).catch(() => {});
     return cached;
   }
-  const res = await fetchAndCache(request, cacheName, maxEntries);
-  return res;
+  return fetchAndCache(request, cacheName, maxEntries);
 }
 
 async function networkFirst(request, cacheName, maxEntries) {
@@ -179,17 +178,21 @@ async function networkFirst(request, cacheName, maxEntries) {
 async function fetchAndCache(request, cacheName, maxEntries) {
   const cache = await caches.open(cacheName);
   const res = await fetch(request);
-  if (res && res.ok) {
-    await cache.put(request, res.clone());
-    await lruTouch(cacheName, request.url);
-    await lruTrim(cacheName, maxEntries);
+  // IMPORTANT: never cache opaque responses (no-cors). They break later CORS fetches.
+  if (res && res.ok && res.type !== "opaque") {
+    try {
+      await cache.put(request, res.clone());
+      await lruTouch(cacheName, request.url);
+      await lruTrim(cacheName, maxEntries);
+    } catch (e) {
+      // ignore cache errors (quota, opaque, etc.)
+    }
   }
   return res;
 }
 
-function eventWaitUntilSafe(promise) {
-  // Used inside fetch handler where we can't access event directly
-  // We'll patch by assigning a closure variable when handling fetch.
+function eventWaitUntilSafe(_promise) {
+  // no-op: do not call event.waitUntil from async code; it can throw InvalidStateError.
 }
 
 // ---------- SW lifecycle ----------
@@ -227,10 +230,6 @@ self.addEventListener("fetch", (event) => {
 
   // never cache api gateway calls
   if (isApiGateway(url)) return;
-
-  // Allow background revalidation use
-  eventWaitUntilSafe = (p) => event.waitUntil(p);
-
   // palettes/settings: prefer fresh but fallback cache
   if (isPaletteJson(url)) {
     event.respondWith(networkFirst(request, JSON_CACHE, MAX_JSON));
@@ -238,14 +237,7 @@ self.addEventListener("fetch", (event) => {
   }
 
   // textures: cache-first (fast) with LRU
-  // IMPORTANT: do NOT serve cached "opaque" (no-cors) responses to CORS fetch() calls.
-  // Some loaders (e.g. <img>) produce no-cors requests; caching those would break later fetch() in app code.
   if (isTextureMap(url)) {
-    if (request.mode !== "cors") {
-      // passthrough for no-cors/image requests
-      event.respondWith(fetch(request));
-      return;
-    }
     event.respondWith(cacheFirst(request, TEX_CACHE, MAX_TEX));
     return;
   }

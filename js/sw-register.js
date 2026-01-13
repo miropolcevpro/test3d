@@ -1,4 +1,4 @@
-// Service Worker registration (generated 20260113180539)
+// Service Worker registration (generated 20260113182035)
 (function () {
   if (!('serviceWorker' in navigator)) return;
 
@@ -6,7 +6,7 @@
   const parts = location.pathname.split('/').filter(Boolean);
   const base = parts.length ? `/${parts[0]}/` : '/';
 
-  const SW_BUILD = "20260113180539";
+  const SW_BUILD = "20260113182035";
   const swUrl = base + 'sw.js?v=' + SW_BUILD;
 
   navigator.serviceWorker.register(swUrl).catch((err) => {
