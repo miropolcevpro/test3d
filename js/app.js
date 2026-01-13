@@ -1332,7 +1332,6 @@ function getPreferredSurfaceQuality() {
   }
 }
 
-\1
 function makeAltExtCandidates(url) {
   if (!url || typeof url !== 'string') return [];
   const m = url.match(/^(.*)\.([a-zA-Z0-9]+)(\?.*)?$/);
