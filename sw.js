@@ -1,12 +1,12 @@
 /* WebAR Service Worker (runtime cache)
- * Version: 20260113145858
+ * Version: 20260113203500
  * Caches palettes/palette_settings and hot texture maps (albedo/roughness/normal best-effort).
  *
  * Notes:
  * - We intentionally do NOT cache API Gateway calls (admin backend).
  * - We keep cache sizes bounded with simple LRU stored in IndexedDB.
  */
-const SW_VERSION = "20260113182035";
+const SW_VERSION = "20260113203500";
 const STATIC_CACHE = `webar-static-${SW_VERSION}`;
 const JSON_CACHE   = `webar-json-${SW_VERSION}`;
 const TEX_CACHE    = `webar-tex-${SW_VERSION}`;
@@ -228,6 +228,12 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(request.url);
 
+  // Critical safety: never intercept cross-origin Object Storage requests.
+  // Cross-origin responses may be opaque (no-cors) for some loaders and later
+  // reused as CORS responses, which breaks texture loading and turns materials white.
+  // We keep Object Storage caching in app-level logic, not in SW.
+  if (isBucket(url)) return;
+
   // never cache api gateway calls
   if (isApiGateway(url)) return;
   // palettes/settings: prefer fresh but fallback cache
@@ -236,9 +242,10 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // textures: cache-first (fast) with LRU
-  if (isTextureMap(url)) {
-    event.respondWith(cacheFirst(request, TEX_CACHE, MAX_TEX));
+  // textures in Object Storage are intentionally NOT cached here (see above)
+
+  // never cache SW artifacts themselves (prevents stuck/old SW)
+  if (isSameOrigin(url) && (url.pathname.endsWith("/sw.js") || url.pathname.endsWith("/js/sw-register.js"))) {
     return;
   }
 
