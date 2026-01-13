@@ -799,12 +799,9 @@ if (!albedoTex) albedoTex = getFallbackWhiteTex();
 if (!tileMaterial) {
   tileMaterial = makeTileMaterial({ albedoTex });
 } else {
-  // Reset optional maps to avoid showing previous tile's maps until new ones are ready.
-  applyMapToTileMaterial(tileMaterial, 'albedo', albedoTex);
-  applyMapToTileMaterial(tileMaterial, 'normal', null);
-  applyMapToTileMaterial(tileMaterial, 'roughness', null);
-  applyMapToTileMaterial(tileMaterial, 'ao', null);
-  applyMapToTileMaterial(tileMaterial, 'height', null);
+	  // Apply albedo immediately, but keep previous secondary maps until new ones are ready.
+	  // This avoids a brief "flash" (over-bright look) caused by temporarily losing roughness/normal.
+	  applyMapToTileMaterial(tileMaterial, 'albedo', albedoTex);
 }
 
 // Apply per-tile scalar uniforms immediately (cheap).
@@ -854,12 +851,9 @@ if (previewPlane && previewPlane.material) {
   if (pm.map && pm.map.repeat) pm.map.repeat.set((3 / size.w) * uvScaleX, (3 / size.h) * uvScaleY);
 
   if (pm.isMeshStandardMaterial) {
-    // reset optional maps until loaded
-    pm.normalMap = null;
-    pm.roughnessMap = null;
-    pm.aoMap = null;
-    pm.bumpMap = null;
-    pm.needsUpdate = true;
+	    // Keep previous optional maps until replacements are ready.
+	    // Clearing them immediately causes a noticeable brightness "flash" during switches.
+	    pm.needsUpdate = true;
   } else {
     pm.needsUpdate = true;
   }
@@ -901,30 +895,32 @@ setTimeout(async () => {
 
   if (isStale()) return;
 
-  for (let i = 0; i < jobs.length; i++) {
-    const kind = jobs[i][0];
-    const tex = results[i] || null;
-    if (!tex) continue;
-
-    applyMapToTileMaterial(tileMaterial, kind, tex);
-
-    // Mirror into desktop preview material if present
-    if (previewPlane && previewPlane.material && previewPlane.material.isMeshStandardMaterial) {
-      const pm = previewPlane.material;
-      if (kind === 'normal') {
-        pm.normalMap = tex;
-        pm.normalScale?.set?.(ns || 0.0, ns || 0.0);
-      } else if (kind === 'roughness') {
-        pm.roughnessMap = tex;
-      } else if (kind === 'ao') {
-        pm.aoMap = tex;
-      } else if (kind === 'height') {
-        pm.bumpMap = tex;
-        pm.bumpScale = bs || 0.0;
-      }
-      pm.needsUpdate = true;
-    }
-  }
+	  for (let i = 0; i < jobs.length; i++) {
+	    const kind = jobs[i][0];
+	    const srcUrl = jobs[i][1];
+	    const tex = results[i] || null;
+	
+	    // If the new tile doesn't have this map (or it failed to load), explicitly clear it.
+	    // We clear *after* the load attempt to prevent a temporary over-bright flash.
+	    applyMapToTileMaterial(tileMaterial, kind, tex);
+	
+	    // Mirror into desktop preview material if present
+	    if (previewPlane && previewPlane.material && previewPlane.material.isMeshStandardMaterial) {
+	      const pm = previewPlane.material;
+	      if (kind === 'normal') {
+	        pm.normalMap = tex;
+	        pm.normalScale?.set?.(ns || 0.0, ns || 0.0);
+	      } else if (kind === 'roughness') {
+	        pm.roughnessMap = tex;
+	      } else if (kind === 'ao') {
+	        pm.aoMap = tex;
+	      } else if (kind === 'height') {
+	        pm.bumpMap = tex;
+	        pm.bumpScale = bs || 0.0;
+	      }
+	      pm.needsUpdate = true;
+	    }
+	  }
 
   // If in AR final, ensure material is applied (should already be).
   if (fillMesh && state.phase === 'ar_final') {
