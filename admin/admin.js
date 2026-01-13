@@ -975,21 +975,6 @@ async function apiDeleteTexture(shapeId, textureId, opts = {}) {
     const warn = (res?.filesResult?.remainingKeysCount > 0) ? ` В бакете ещё осталось ${res.filesResult.remainingKeysCount} файлов (возможна задержка).` : '';
     setStatus(elPaletteStatus, 'ok', delMsg + warn);
   }
-  
-    if (alsoBucket) {
-      await apiDeleteTexture(shapeId, textureId, { palette: false, files: true });
-    }
-
-    // Refresh caches/UI
-    state.paletteByShapeId.delete(shapeId);
-    try {
-      await ensureBucketIndexLoaded(shapeId, { forceReload: true });
-    } catch {}
-    const fresh = await ensurePaletteLoaded(shapeId, { forceReload: true });
-    renderTextures(shapeId, Array.isArray(fresh?.items) ? fresh.items : []);
-    renderBucketTextures(shapeId);
-    setStatus(elPaletteStatus, 'ok', alsoBucket ? 'Удалено из палитры и из бакета.' : 'Удалено из палитры.');
-  }
 
   function isBucketTextureBroken(t) {
     const q1 = t?.qualities?.['1k'];
