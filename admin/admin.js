@@ -24,18 +24,32 @@
   const BUCKET_BASE_URL = (window.BUCKET_BASE_URL || 'https://storage.yandexcloud.net/webar3dtexture/').replace(/\/+$/, '/') ;
 
   // Canonical textureId handling
-  // Over time we had several ID formats for the same texture:
-  //   - klassika:paver_...   (legacy, invalid in URLs)
-  //   - klassika_paver_...   (current, matches bucket folders)
-  //   - paver_...            (raw)
-  // To avoid duplicates / undeletable items we normalize everything to: <shapeId>_<raw>.
+  // Bucket folder naming convention: surfaces/<shapeId>/<textureId>/...
+  // IMPORTANT: <textureId> MUST NOT contain the <shapeId> prefix.
+  // We normalize legacy IDs:
+  //   - "klassika:paver_..." -> "paver_..."
+  //   - "klassika_paver_..." -> "paver_..."
+  // and sanitize any remaining ":" to "_".
   function canonicalTextureId(shapeId, anyId) {
     if (!anyId) return '';
     let s = String(anyId).trim();
     if (!s) return '';
     try { s = decodeURIComponent(s); } catch {}
-    const p1 = shapeId ? (shapeId + ':') : '';
-    if (p1 && s.startsWith(p1)) return shapeId + '_' + s.slice(p1.length);
+
+    const sid = String(shapeId || '').trim();
+    if (sid) {
+      const pColon = sid + ':';
+      const pUnd = sid + '_';
+      // Some legacy data ended up with repeated prefixes, e.g. "klassika:klassika_kara_dag".
+      // Strip prefixes repeatedly until stable.
+      // Also trim in-between to be robust against accidental spaces.
+      for (let i = 0; i < 3; i++) {
+        if (s.startsWith(pColon)) { s = s.slice(pColon.length).trim(); continue; }
+        if (s.startsWith(pUnd)) { s = s.slice(pUnd.length).trim(); continue; }
+        break;
+      }
+    }
+
     if (s.includes(':')) s = s.replace(/:/g, '_');
     return s;
   }
@@ -45,10 +59,16 @@
     let s = String(v).trim();
     if (!s) return s;
     try { s = decodeURIComponent(s); } catch {}
+    const sid = String(shapeId || '').trim();
+
     // If someone stored preview as "klassika:..._albedo.png" (no slashes) — treat as invalid to avoid ORB/CORB.
     if (!s.includes('/') && s.includes(':')) return '';
-    // Replace "klassika:" inside bucket-relative paths with "klassika_"
-    if (shapeId) s = s.replace(new RegExp('\\b' + shapeId + ':', 'g'), shapeId + '_');
+    if (!sid) return s;
+
+    // Fix common legacy prefixing mistakes inside bucket-relative paths:
+    //   surfaces/<sid>/<sid>_foo/...  -> surfaces/<sid>/foo/...
+    //   surfaces/<sid>/<sid>:foo/...  -> surfaces/<sid>/foo/...
+    s = s.replace(new RegExp('surfaces/' + sid + '/' + sid + '[_:]', 'g'), 'surfaces/' + sid + '/');
     return s;
   }
 
@@ -121,9 +141,13 @@ function resolveMediaUrl(u, opts = {}) {
     const textureId = opts.textureId || '';
     const quality = opts.quality || '1k';
     if (shapeId && textureId) {
-      return new URL(`surfaces/${shapeId}/${textureId}/${quality}/${s}`, BUCKET_BASE_URL).toString();
+      const tid = canonicalTextureId(shapeId, textureId);
+      return new URL(`surfaces/${shapeId}/${tid}/${quality}/${s}`, BUCKET_BASE_URL).toString();
     }
-    return ''; // unknown -> do not load
+    // As a defensive fallback, treat it as a bucket-root object. This prevents
+    // the browser from requesting it from the GitHub Pages origin (which often
+    // returns HTML and triggers ORB in Chrome).
+    return new URL(s, BUCKET_BASE_URL).toString();
   }
 
   // Bucket-relative paths (surfaces/..., palettes/..., shape_settings/...)
@@ -1090,19 +1114,40 @@ async function apiSyncTexture(shapeId, textureId) {
   
     setStatus(elPaletteStatus, '', 'Удаляем...');
     const res = await apiDeleteTexture(shapeId, canonicalId || textureId, { palette: true, files: alsoBucket });
+    if (!res?.ok) {
+      const msg = res?.message || 'Delete failed';
+      setStatus(elPaletteStatus, 'error', msg);
+      return;
+    }
   
     // Refresh caches/UI
     state.paletteByShapeId.delete(shapeId);
-    try {
-      await ensureBucketIndexLoaded(shapeId, { forceReload: true });
-    } catch {}
-    const fresh = await ensurePaletteLoaded(shapeId, { forceReload: true });
+    try { state.bucketIndexByShapeId.delete(shapeId); } catch {}
+    try { await ensureBucketIndexLoaded(shapeId); } catch {}
+    const fresh = await ensurePaletteLoaded(shapeId);
     renderTextures(shapeId, Array.isArray(fresh?.items) ? fresh.items : []);
     renderBucketTextures(shapeId);
   
-    const delMsg = alsoBucket ? 'Удалено из палитры и из бакета.' : 'Удалено из палитры.';
-    const warn = (res?.filesResult?.remainingKeysCount > 0) ? ` В бакете ещё осталось ${res.filesResult.remainingKeysCount} файлов (возможна задержка).` : '';
-    setStatus(elPaletteStatus, 'ok', delMsg + warn);
+    const removed = Number(res?.paletteResult?.removed || 0);
+    const delObjects = Number(res?.filesResult?.deletedObjects || 0);
+    const delPrefixes = Array.isArray(res?.filesResult?.deletedPrefixes) ? res.filesResult.deletedPrefixes.length : 0;
+    const deleteErrors = Array.isArray(res?.filesResult?.deleteErrors) ? res.filesResult.deleteErrors : [];
+
+    // If palette was not actually changed, treat as a problem (UI would otherwise lie).
+    if (removed === 0) {
+      const hint = 'Текстура не была удалена из палитры (возможен несоответствующий textureId в данных).';
+      setStatus(elPaletteStatus, 'error', hint);
+      return;
+    }
+
+    const delMsg = alsoBucket
+      ? `Удалено из палитры и из бакета (объекты: ${delObjects}, префиксы: ${delPrefixes}).`
+      : 'Удалено из палитры.';
+
+    const warn = deleteErrors.length
+      ? ` Ошибки при удалении файлов: ${deleteErrors.map(e => e.key || e.prefix || 'unknown').join(', ')}`
+      : '';
+    setStatus(elPaletteStatus, deleteErrors.length ? 'warn' : 'ok', delMsg + warn);
   }
 
   function isBucketTextureBroken(t) {
@@ -1371,7 +1416,8 @@ async function apiSyncTexture(shapeId, textureId) {
     }
     if (elUploadTextureName) elUploadTextureName.value = '';
     if (elUploadAutoAdd) elUploadAutoAdd.checked = true;
-    setStatus(elUploadStatus, 'warn', `Режим обновления: ${textureId}. Загруженные файлы перезапишут surfaces/${shapeId}/${textureId}/... После загрузки палитра будет синхронизирована автоматически.`);
+    const tid = canonicalTextureId(shapeId, textureId);
+    setStatus(elUploadStatus, 'warn', `Режим обновления: ${tid}. Загруженные файлы перезапишут surfaces/${shapeId}/${tid}/... После загрузки палитра будет синхронизирована автоматически.`);
   }
 
   function renderUploadQueue() {
@@ -1488,7 +1534,8 @@ async function apiSyncTexture(shapeId, textureId) {
 
     for (const [mapType, file] of byType.entries()) {
       const fileName = standardMapFilename(textureId, mapType, file.name);
-      const key = `surfaces/${shapeId}/${textureId}/${quality}/${fileName}`;
+      const tid = canonicalTextureId(shapeId, textureId);
+      const key = `surfaces/${shapeId}/${tid}/${quality}/${fileName}`;
       out.push({
         mapType,
         file,
@@ -1689,14 +1736,16 @@ async function apiSyncTexture(shapeId, textureId) {
   }
 
 function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, tileSizeMOrNull) {
+    // Persist canonical IDs in palette to avoid duplicates and to keep delete/update stable.
+    const canonicalId = canonicalTextureId(shapeId, textureId);
     const maps = {};
     for (const t of tasks) {
-      const rel = `surfaces/${shapeId}/${textureId}/${quality}/${t.fileName}`;
+      const rel = `surfaces/${shapeId}/${canonicalId}/${quality}/${t.fileName}`;
       maps[t.mapType] = rel;
     }
     const item = {
-      id: textureId,
-      name: name || textureId,
+      id: canonicalId,
+      name: name || canonicalId,
       preview: maps.albedo || '',
       maps,
       params: {},
@@ -1716,9 +1765,16 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
   async function upsertItemAndSavePalette(shapeId, item) {
     const palette = await ensurePaletteLoaded(shapeId);
     const items = Array.isArray(palette?.items) ? [...palette.items] : [];
-    const idx = items.findIndex(x => x && x.id === item.id);
-    if (idx >= 0) items[idx] = item;
-    else items.push(item);
+    // Compare by canonical ID to avoid duplicates caused by legacy prefixes.
+    const itemCanonicalId = canonicalTextureId(shapeId, item?.id || '');
+    const idx = items.findIndex(x => {
+      const xid = canonicalTextureId(shapeId, x?.id || x?.textureId || '');
+      return xid && xid === itemCanonicalId;
+    });
+    // Ensure the saved palette always keeps canonical IDs.
+    const normalizedItem = { ...item, id: itemCanonicalId };
+    if (idx >= 0) items[idx] = normalizedItem;
+    else items.push(normalizedItem);
     const next = {
       shapeId,
       items,
