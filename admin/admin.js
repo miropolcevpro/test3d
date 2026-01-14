@@ -24,18 +24,30 @@
   const BUCKET_BASE_URL = (window.BUCKET_BASE_URL || 'https://storage.yandexcloud.net/webar3dtexture/').replace(/\/+$/, '/') ;
 
   
+
 function resolveMediaUrl(u, opts = {}) {
   if (!u) return '';
   const s = String(u).trim();
   if (!s) return '';
+
+  // Absolute URL
   if (/^https?:\/\//i.test(s)) return s;
 
   // Site assets
   if (s.startsWith('assets/')) return resolveSiteUrl(s);
 
-  // If it's a bare filename like "xxx_albedo.webp", try to reconstruct a bucket path.
-  // This prevents Chrome ORB (Opaque Response Blocking) caused by loading non-images/HTML error pages as <img>.
+  // Block legacy/garbage identifiers early ("klassika:paver...")
+  // These are not valid bucket-relative paths and may trigger ORB/CORB in Chrome when used as <img src>.
+  if (s.includes(':') && !s.startsWith('surfaces/') && !s.startsWith('palettes/') && !s.startsWith('shape_settings/') && !s.startsWith('palette_settings/')) {
+    return '';
+  }
+
+  // Bare filename. Only reconstruct when we have strong context and the name looks safe.
   if (!s.includes('/')) {
+    // Reject suspicious names (e.g. containing ':' or query/hash)
+    if (s.includes(':')) return '';
+    if (/[?#]/.test(s)) return '';
+
     const shapeId = opts.shapeId || '';
     const textureId = opts.textureId || '';
     const quality = opts.quality || '1k';
@@ -45,19 +57,11 @@ function resolveMediaUrl(u, opts = {}) {
     return ''; // unknown -> do not load
   }
 
-  // Reject obvious garbage (e.g. "klassika:paver..." without path segments)
-  if (s.includes(':') && !s.startsWith('surfaces/') && !s.startsWith('palettes/') && !s.startsWith('shape_settings/') && !s.startsWith('palette_settings/')) {
-    return '';
-  }
-
   // Bucket-relative paths (surfaces/..., palettes/..., shape_settings/...)
   return new URL(s.replace(/^\/+/, ''), BUCKET_BASE_URL).toString();
 }
 
-  // Try multiple candidate fields and pick the first resolvable URL.
-  // Prevents Chrome ORB errors when legacy/invalid preview values are present
-  // (e.g. "klassika:paver..._albedo.png" or other bare names that do not exist in the bucket).
-  function pickMediaUrl(candidates, opts) {
+function pickMediaUrl(candidates, opts) {
     const arr = Array.isArray(candidates) ? candidates : [candidates];
     for (const c of arr) {
       const url = resolveMediaUrl(c, opts);
@@ -952,7 +956,7 @@ async function apiDeleteTexture(shapeId, textureId, opts = {}) {
           <input type="checkbox" data-action="select" data-id="${escapeHtml(id)}" ${selected ? 'checked' : ''} />
           <span></span>
         </label>
-        <img class="thumb" alt="" loading="lazy" referrerpolicy="no-referrer" src="${escapeHtml(previewUrl)}">
+        <img class="thumb" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display='none'" src="${escapeHtml(previewUrl)}">
         <div class="meta">
           <div class="name">${escapeHtml(name)}</div>
           <div class="id">${escapeHtml(id)}</div>
@@ -1081,10 +1085,11 @@ async function apiDeleteTexture(shapeId, textureId, opts = {}) {
       const inPalette = paletteIds.has(textureId);
       const broken = isBucketTextureBroken(t);
       const has2k = !!t?.qualities?.['2k'];
-      const previewKey = t?.previewKey || t?.qualities?.['1k']?.maps?.albedo?.key || '';
-      // Use the bucket textureId as fallback context when previewKey is not an absolute URL.
-      // This prevents broken relative URLs like "klassika:paver_..._albedo.png" and avoids ORB blocks.
-      const previewUrl = resolveMediaUrl(previewKey, { shapeId: (state.activeShapeId || shapeId || ''), textureId, quality: '1k' });
+      const previewUrl = pickMediaUrl([
+        t?.qualities?.['1k']?.maps?.albedo?.key,
+        t?.previewKey,
+        t?.preview,
+      ], { shapeId: (state.activeShapeId || shapeId || ''), textureId, quality: '1k' });
 
       const pills = [
         inPalette ? '<span class="pill pill--set">в палитре</span>' : '<span class="pill">не в палитре</span>',
@@ -1096,7 +1101,7 @@ async function apiDeleteTexture(shapeId, textureId, opts = {}) {
       const card = document.createElement('div');
       card.className = 'tile';
       card.innerHTML = `
-        <img class="thumb" alt="" loading="lazy" referrerpolicy="no-referrer" src="${escapeHtml(previewUrl)}">
+        <img class="thumb" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display='none'" src="${escapeHtml(previewUrl)}">
         <div class="meta">
           <div class="name">${escapeHtml(textureId)}</div>
           <div class="muted mtSm">${pills}</div>
@@ -1837,7 +1842,8 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
       item?.preview,
     ], { shapeId: (state.activeShapeId || ''), textureId: (item?.id || item?.textureId || ''), quality: '1k' });
     if (elTexPreview && previewUrl) {
-      elTexPreview.src = previewUrl;
+      elTexPreview.onerror = () => { try { elTexPreview.style.display = 'none'; } catch {} };
+    elTexPreview.src = previewUrl;
       elTexPreviewHint.textContent = 'Превью: albedo (из палитры)';
     } else {
       elTexPreviewHint.textContent = 'Превью недоступно (в palletes/*.json нет preview/albedo)';
