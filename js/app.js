@@ -253,25 +253,6 @@ try { _globalTexLoader.setCrossOrigin?.('anonymous'); } catch (_) {}
 const _texPromiseCache = new Map();
 // (quality|url) -> resolved url (2k / alt-ext) that actually exists
 const _texResolvedUrlCache = new Map();
-// Remembers per-map availability of 2k for a given canonical URL.
-// Key: "<kind>|<canon>"  Value: "2k" or "1k"
-const _texBestQualityCache = new Map();
-
-function _canonTexKey(url) {
-  try {
-    if (!url) return '';
-    const s0 = String(url);
-    const s = s0.split('?')[0];
-    // Replace quality segment with placeholder to share cache between 1k/2k attempts.
-    const q = s.replace(/\/(1k|2k)\//, '/{q}/');
-    // Strip extension so webp/png/jpg all share the same key.
-    const m = q.match(/^(.*)\.[a-zA-Z0-9]+$/);
-    return m ? m[1] : q;
-  } catch {
-    return String(url || '');
-  }
-}
-
 
 // Lightweight performance telemetry for adaptive quality decisions.
 // We track an EMA of load+decode time per map kind.
@@ -327,77 +308,42 @@ function loadTextureCached(url, opts = {}) {
 
 async function loadTexSmartCached(url, label, preferredQuality, isStaleFn, opts = {}) {
   if (!url) return null;
-
-  const priority = (opts && opts.priority) ? String(opts.priority) : 'normal';
-  const kind = label ? String(label) : 'any';
-
-  let desiredQuality = (preferredQuality === '2k') ? '2k' : '1k';
-
-  // If we already learned that 2k is not available for this map, skip 2k attempts for speed/stability.
-  const canon = _canonTexKey(url);
-  const qKey = `${kind}|${canon}`;
-  const learnedBest = _cacheGet(_texBestQualityCache, qKey);
-  if (desiredQuality === '2k' && learnedBest === '1k') desiredQuality = '1k';
-
-  const baseKey = `${desiredQuality}|${String(url)}`;
+  const quality = preferredQuality === '2k' ? '2k' : '1k';
+  const baseKey = `${quality}|${String(url)}`;
   const cachedResolved = _cacheGet(_texResolvedUrlCache, baseKey);
 
-  // If we already know a working URL for this base, try it first.
+  const priority = (opts && opts.priority) ? String(opts.priority) : 'normal';
+
+  // If we already know the best URL for this base, try it first.
   if (cachedResolved) {
-    const t0 = await loadTextureCached(cachedResolved, { priority, silent: true, kind });
+    const t0 = await loadTextureCached(cachedResolved, { priority, silent: true, kind: label });
     if (isStaleFn && isStaleFn()) return null;
     if (t0) return t0;
     _texResolvedUrlCache.delete(baseKey);
   }
 
   const candidates = [];
-  const pushUnique = (u) => { if (u && !candidates.includes(u)) candidates.push(u); };
-  const pushWithAlts = (u) => { pushUnique(u); for (const a of makeAltExtCandidates(u)) pushUnique(a); };
-
-  // We always build both quality candidates:
-  //  - preferred quality first (2k or 1k)
-  //  - then fallback quality (usually 1k)
-  const u1k = make1kCandidateUrl(url);
-  const u2k = make2kCandidateUrl(url);
-
-  if (desiredQuality === '2k') {
-    // Try 2k first (even if url already points to 2k).
-    pushWithAlts(u2k);
-    // Fallback: 1k (even if url already points to 2k).
-    pushWithAlts(u1k);
-  } else {
-    // 1k preferred
-    pushWithAlts(u1k);
-    // If incoming url is 2k, try it only after 1k (rare, but keeps behavior predictable).
-    if (u2k && u2k !== u1k) pushWithAlts(u2k);
+  if (quality === '2k') {
+    const cand2k = make2kCandidateUrl(url);
+    if (cand2k && cand2k !== url) {
+      candidates.push(cand2k, ...makeAltExtCandidates(cand2k));
+    }
   }
+  candidates.push(url, ...makeAltExtCandidates(url));
 
   for (const u of candidates) {
     if (isStaleFn && isStaleFn()) return null;
-
-    const tex = await loadTextureCached(u, { priority, silent: true, kind });
+    const tex = await loadTextureCached(u, { priority, silent: true, kind: label });
     if (isStaleFn && isStaleFn()) return null;
-
     if (tex) {
       _texResolvedUrlCache.set(baseKey, u);
-
-      // Learn which quality actually worked for this map, so next time we avoid wasting 2k attempts.
-      const usedQ = (String(u).includes('/2k/')) ? '2k' : '1k';
-      _texBestQualityCache.set(qKey, usedQ);
-
       // Only warn when we had to deviate from the original URL (helps debugging naming/ext issues).
-      if (label && u !== url) {
-        console.warn(`[surfaces] used alternate URL for ${kind}: ${u}`);
+      if (label && u !== url && quality !== '2k') {
+        console.warn(`[surfaces] used alternate URL for ${label}: ${u}`);
       }
       return tex;
     }
   }
-
-  // If we wanted 2k but failed to load anything, remember that 2k is likely unavailable for this map.
-  if ((preferredQuality === '2k') && !_cacheGet(_texBestQualityCache, qKey)) {
-    _texBestQualityCache.set(qKey, '1k');
-  }
-
   return null;
 }
 
@@ -494,10 +440,7 @@ function schedulePrefetchAdjacentTiles(currentTile, list = null) {
     _prefetchTimer = setTimeout(async () => {
       if (mySeq !== _prefetchSeq) return;
 
-      let preferredQuality = getPreferredSurfaceQuality({ inAR: state.phase === 'ar_final' });
-  // Optional per-texture override (admin can set this when 2k pack is not available yet).
-  const _fq = (params && typeof params.forceQuality === 'string') ? params.forceQuality.trim().toLowerCase() : '';
-  if (_fq === '1k' || _fq === '2k') preferredQuality = _fq;
+      const preferredQuality = getPreferredSurfaceQuality({ inAR: state.phase === 'ar_final' });
 
       for (const nt of neighbors) {
         if (mySeq !== _prefetchSeq) return;
@@ -1239,7 +1182,6 @@ async function selectTile(tileOrId) {
   const _mySeq = ++_selectTileSeq;
   const isStale = () => _mySeq !== _selectTileSeq;
 
-  const _prevTile = state.selectedTile;
   state.selectedTile = t;
 
   const albedoUrl = (t.maps && t.maps.albedo) ? t.maps.albedo : t.texture;
@@ -1263,13 +1205,7 @@ async function selectTile(tileOrId) {
 
   let albedoTex = await albedoP;
   if (isStale()) return;
-
-  // Critical map: without albedo we must NOT swap the material (would look white / broken).
-  if (!albedoTex) {
-    console.warn('[surfaces] albedo missing, keeping previous material for stability:', albedoUrl);
-    state.selectedTile = _prevTile || state.selectedTile;
-    return;
-  }
+  if (!albedoTex) albedoTex = getFallbackWhiteTex();
 
   // Compute per-tile settings (cheap).
   const size = t.tileSizeM || { w: 0.2, h: 0.2 };
@@ -1988,15 +1924,6 @@ function make2kCandidateUrl(url) {
   if (!url || typeof url !== 'string') return url;
   // Replace only the first occurrence to avoid unexpected rewrites.
   return url.replace(/\/1k\//, '/2k/');
-}
-
-// Build a "1k" URL candidate from a given map URL.
-// - If the path contains '/2k/' it will be replaced with '/1k/'.
-// - Otherwise returns the original URL.
-// Extension changes are handled separately by makeAltExtCandidates().
-function make1kCandidateUrl(url) {
-  if (!url || typeof url !== 'string') return url;
-  return url.replace(/\/2k\//, '/1k/');
 }
 
 function makeAltExtCandidates(url) {
