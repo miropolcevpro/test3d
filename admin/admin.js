@@ -1062,7 +1062,9 @@ async function apiDeleteTexture(shapeId, textureId, opts = {}) {
       const broken = isBucketTextureBroken(t);
       const has2k = !!t?.qualities?.['2k'];
       const previewKey = t?.previewKey || t?.qualities?.['1k']?.maps?.albedo?.key || '';
-      const previewUrl = resolveMediaUrl(previewKey, { shapeId: state.activeShapeId || '', textureId: (item?.id || item?.textureId || ''), quality: '1k' });
+      // Use the bucket textureId as fallback context when previewKey is not an absolute URL.
+      // This prevents broken relative URLs like "klassika:paver_..._albedo.png" and avoids ORB blocks.
+      const previewUrl = resolveMediaUrl(previewKey, { shapeId: (state.activeShapeId || shapeId || ''), textureId, quality: '1k' });
 
       const pills = [
         inPalette ? '<span class="pill pill--set">в палитре</span>' : '<span class="pill">не в палитре</span>',
