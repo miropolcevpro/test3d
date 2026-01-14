@@ -54,6 +54,18 @@ function resolveMediaUrl(u, opts = {}) {
   return new URL(s.replace(/^\/+/, ''), BUCKET_BASE_URL).toString();
 }
 
+  // Try multiple candidate fields and pick the first resolvable URL.
+  // Prevents Chrome ORB errors when legacy/invalid preview values are present
+  // (e.g. "klassika:paver..._albedo.png" or other bare names that do not exist in the bucket).
+  function pickMediaUrl(candidates, opts) {
+    const arr = Array.isArray(candidates) ? candidates : [candidates];
+    for (const c of arr) {
+      const url = resolveMediaUrl(c, opts);
+      if (url) return url;
+    }
+    return '';
+  }
+
   const $ = (id) => document.getElementById(id);
 
   // Auth / common
@@ -915,7 +927,15 @@ async function apiDeleteTexture(shapeId, textureId, opts = {}) {
     for (const it of list) {
       const id = it?.id || it?.textureId || '';
       const name = it?.name || id || '(без названия)';
-      const previewUrl = resolveMediaUrl(it?.previewUrl || it?.preview || it?.maps?.albedoUrl || it?.maps?.albedo || '', { shapeId, textureId: id, quality: '1k' });
+      // Prefer material map URLs over "preview" fields.
+      // Preview fields historically contained broken values (e.g. "shapeId:textureId_albedo.png"),
+      // which triggers Chrome ORB and produces noisy errors in DevTools.
+      const previewUrl = pickMediaUrl([
+        it?.maps?.albedoUrl,
+        it?.maps?.albedo,
+        it?.previewUrl,
+        it?.preview,
+      ], { shapeId, textureId: id, quality: '1k' });
 
       const hasTileOverride = !!it?.tileSizeM;
       const hasParams = it?.params && typeof it.params === 'object' && Object.keys(it.params).length > 0;
@@ -1810,7 +1830,12 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
     elTexModalTitle.textContent = 'Настройка текстуры';
     elTexModalSubtitle.textContent = `Форма: ${shapeId} • Текстура: ${itemId}`;
 
-    const previewUrl = resolveMediaUrl(item?.previewUrl || item?.preview || item?.maps?.albedoUrl || item?.maps?.albedo || '', { shapeId: (state.activeShapeId || ''), textureId: (item?.id || item?.textureId || ''), quality: '1k' });
+    const previewUrl = pickMediaUrl([
+      item?.maps?.albedoUrl,
+      item?.maps?.albedo,
+      item?.previewUrl,
+      item?.preview,
+    ], { shapeId: (state.activeShapeId || ''), textureId: (item?.id || item?.textureId || ''), quality: '1k' });
     if (elTexPreview && previewUrl) {
       elTexPreview.src = previewUrl;
       elTexPreviewHint.textContent = 'Превью: albedo (из палитры)';
