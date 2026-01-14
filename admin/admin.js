@@ -23,6 +23,75 @@
   //   window.BUCKET_BASE_URL = "https://storage.yandexcloud.net/webar3dtexture/";
   const BUCKET_BASE_URL = (window.BUCKET_BASE_URL || 'https://storage.yandexcloud.net/webar3dtexture/').replace(/\/+$/, '/') ;
 
+  // Canonical textureId handling
+  // Over time we had several ID formats for the same texture:
+  //   - klassika:paver_...   (legacy, invalid in URLs)
+  //   - klassika_paver_...   (current, matches bucket folders)
+  //   - paver_...            (raw)
+  // To avoid duplicates / undeletable items we normalize everything to: <shapeId>_<raw>.
+  function canonicalTextureId(shapeId, anyId) {
+    if (!anyId) return '';
+    let s = String(anyId).trim();
+    if (!s) return '';
+    try { s = decodeURIComponent(s); } catch {}
+    const p1 = shapeId ? (shapeId + ':') : '';
+    if (p1 && s.startsWith(p1)) return shapeId + '_' + s.slice(p1.length);
+    if (s.includes(':')) s = s.replace(/:/g, '_');
+    return s;
+  }
+
+  function normalizePathLike(shapeId, v) {
+    if (!v) return v;
+    let s = String(v).trim();
+    if (!s) return s;
+    try { s = decodeURIComponent(s); } catch {}
+    // If someone stored preview as "klassika:..._albedo.png" (no slashes) — treat as invalid to avoid ORB/CORB.
+    if (!s.includes('/') && s.includes(':')) return '';
+    // Replace "klassika:" inside bucket-relative paths with "klassika_"
+    if (shapeId) s = s.replace(new RegExp('\\b' + shapeId + ':', 'g'), shapeId + '_');
+    return s;
+  }
+
+  function normalizePaletteForUi(shapeId, palette) {
+    if (!palette || typeof palette !== 'object') return palette;
+    const items = Array.isArray(palette.items) ? palette.items : [];
+    const byId = new Map();
+    const score = (obj) => {
+      let sc = 0;
+      if (obj && typeof obj === 'object') {
+        if (obj.name) sc += 1;
+        if (obj.preview) sc += 1;
+        if (obj.tileSizeM) sc += 1;
+        if (obj.params && Object.keys(obj.params).length) sc += 2;
+        if (obj.maps && Object.keys(obj.maps).length) sc += 3;
+      }
+      return sc;
+    };
+
+    for (const it of items) {
+      if (!it || typeof it !== 'object') continue;
+      const id0 = it.id || it.textureId || '';
+      const id = canonicalTextureId(shapeId, id0);
+      if (!id) continue;
+
+      const next = { ...it, id };
+      if ('preview' in next) next.preview = normalizePathLike(shapeId, next.preview);
+      if (next.maps && typeof next.maps === 'object') {
+        const maps = { ...next.maps };
+        for (const k of Object.keys(maps)) maps[k] = normalizePathLike(shapeId, maps[k]);
+        next.maps = maps;
+      }
+
+      const prev = byId.get(id);
+      if (!prev) byId.set(id, next);
+      else byId.set(id, score(next) >= score(prev) ? next : prev);
+    }
+
+    palette.items = Array.from(byId.values());
+    return palette;
+  }
+
+
   
 
 function resolveMediaUrl(u, opts = {}) {
@@ -761,7 +830,7 @@ function getToken() {
   }
 
 
-async function apiDeleteTexture(shapeId, textureId, opts = {}) {
+async function apiDeleteTexture(shapeId, canonicalId || textureId, opts = {}) {
   const palette = opts.palette !== false;
   const files = opts.files !== false;
   const qs = `?palette=${palette ? 1 : 0}&files=${files ? 1 : 0}`;
@@ -1013,12 +1082,14 @@ async function apiDeleteTexture(shapeId, textureId, opts = {}) {
     renderRoute().catch(() => {});
   }
   async function deleteTextureFlow(shapeId, textureId) {
-    const okPalette = confirm(`Удалить текстуру "${textureId}" из палитры формы "${shapeId}"?`);
+    const canonicalId = canonicalTextureId(shapeId, textureId);
+    const labelId = (canonicalId && canonicalId !== textureId) ? `${textureId} → ${canonicalId}` : textureId;
+    const okPalette = confirm(`Удалить текстуру "${labelId}" из палитры формы "${shapeId}"?`);
     if (!okPalette) return;
     const alsoBucket = confirm('Также удалить файлы из бакета (surfaces/<shapeId>/<textureId>/...) ?\n\nРекомендуется, если текстура больше не нужна вовсе.');
   
     setStatus(elPaletteStatus, '', 'Удаляем...');
-    const res = await apiDeleteTexture(shapeId, textureId, { palette: true, files: alsoBucket });
+    const res = await apiDeleteTexture(shapeId, canonicalId || textureId, { palette: true, files: alsoBucket });
   
     // Refresh caches/UI
     state.paletteByShapeId.delete(shapeId);
@@ -1173,7 +1244,7 @@ async function apiDeleteTexture(shapeId, textureId, opts = {}) {
             const ok = confirm(`Удалить файлы текстуры "${textureId}" из бакета?`);
             if (!ok) return;
             setStatus(elBucketStatus, '', 'Удаляем из бакета…');
-            await apiDeleteTexture(shapeId, textureId, { palette: false, files: true });
+            await apiDeleteTexture(shapeId, canonicalId || textureId, { palette: false, files: true });
             state.bucketIndexByShapeId.delete(shapeId);
             await ensureBucketIndexLoaded(shapeId, { forceReload: true });
             renderBucketTextures(shapeId);
@@ -1224,7 +1295,8 @@ async function apiDeleteTexture(shapeId, textureId, opts = {}) {
     if (!shapeId) return null;
     if (state.paletteByShapeId.has(shapeId)) return state.paletteByShapeId.get(shapeId);
     setStatus(elStatus, '', `Загружаем палитру формы: ${shapeId} …`);
-    const palette = await apiFetch('/api/palettes/' + encodeURIComponent(shapeId));
+    const rawPalette = await apiFetch('/api/palettes/' + encodeURIComponent(shapeId));
+    const palette = normalizePaletteForUi(shapeId, rawPalette || { shapeId, items: [] });
     state.paletteByShapeId.set(shapeId, palette);
     const items = Array.isArray(palette?.items) ? palette.items : [];
     if (palette?._meta?.missing) {
@@ -1242,7 +1314,15 @@ async function apiDeleteTexture(shapeId, textureId, opts = {}) {
     try {
       const res = await apiFetch('/api/surfaces/' + encodeURIComponent(shapeId));
       const textures = Array.isArray(res?.textures) ? res.textures : (Array.isArray(res?.data?.textures) ? res.data.textures : (Array.isArray(res?.textures) ? res.textures : []));
-      const idx = { shapeId, textures: Array.isArray(textures) ? textures : [] };
+      const normalized = (Array.isArray(textures) ? textures : []).map((t) => {
+        if (typeof t === 'string') return { textureId: canonicalTextureId(shapeId, t) };
+        const copy = { ...t };
+        copy.textureId = canonicalTextureId(shapeId, t.textureId || t.id || t.name || t.key || '');
+        return copy;
+      }).filter((t) => t && t.textureId);
+      const uniqMap = new Map();
+      for (const t of normalized) { if (!uniqMap.has(t.textureId)) uniqMap.set(t.textureId, t); }
+      const idx = { shapeId, textures: Array.from(uniqMap.values()) };
       state.bucketIndexByShapeId.set(shapeId, idx);
       setStatus(elBucketStatus, 'ok', `Найдено в бакете: ${idx.textures.length} textureId`);
       return idx;

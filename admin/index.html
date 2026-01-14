@@ -5,7 +5,7 @@
   <link rel="icon" href="../favicon.ico" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Админка контента — WebAR плитка</title>
-  <link rel="stylesheet" href="./admin.css" />
+  <link rel="stylesheet" href="./admin.css?v=20260114" />
 </head>
 <body>
   <header class="topbar">
@@ -491,9 +491,13 @@
       </div>
     </div>
   </div>
-
-  <script src="./config.js"></script>
-<script src="../js/sw-register.js"></script>
-  <script src="./admin.js"></script>
+  <!--
+    IMPORTANT:
+    Admin must NOT be cached by the Service Worker (it caused stale JS/JSON and "phantom" textures).
+    We intentionally do NOT register SW here.
+    Cache-busting query params force browsers/CDN to fetch the latest scripts after deploy.
+  -->
+  <script src="./config.js?v=20260114"></script>
+  <script src="./admin.js?v=20260114"></script>
 </body>
 </html>
