@@ -830,7 +830,7 @@ function getToken() {
   }
 
 
-async function apiDeleteTexture(shapeId, canonicalId || textureId, opts = {}) {
+async function apiDeleteTexture(shapeId, textureId, opts = {}) {
   const palette = opts.palette !== false;
   const files = opts.files !== false;
   const qs = `?palette=${palette ? 1 : 0}&files=${files ? 1 : 0}`;
@@ -839,7 +839,7 @@ async function apiDeleteTexture(shapeId, canonicalId || textureId, opts = {}) {
   });
 }
 
-  async function apiSyncTexture(shapeId, textureId) {
+async function apiSyncTexture(shapeId, textureId) {
     return apiFetch(`/api/textures/${encodeURIComponent(shapeId)}/${encodeURIComponent(textureId)}/sync`, {
       method: 'POST',
       body: JSON.stringify({}),
