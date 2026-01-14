@@ -163,6 +163,11 @@
     paletteSettingsByShapeId: new Map(),
     bucketIndexByShapeId: new Map(),
     uploadTasks: [],
+    uploadContext: {
+      mode: 'new', // 'new' | 'update'
+      shapeId: null,
+      textureId: null,
+    },
     selectedTextureIdsByShapeId: new Map(),
   };
 
@@ -310,7 +315,20 @@
   }
 
   function normalizeTextureId(v) {
-    return String(v || '').trim();
+    const raw = String(v || '').trim();
+    if (!raw) return '';
+    // Bucket-safe textureId:
+    // - disallow ':' and whitespace
+    // - keep only [a-z0-9_-] (convert other chars to '_')
+    // - collapse multiple '_' and trim
+    let s = raw
+      .replace(/[:\s]+/g, '_')
+      .replace(/[^a-zA-Z0-9_-]+/g, '_')
+      .replace(/_+/g, '_')
+      .replace(/^_+|_+$/g, '');
+    // We recommend lowercase for consistency across tools/OS.
+    s = s.toLowerCase();
+    return s;
   }
 
   function standardMapFilename(textureId, mapType, originalName) {
@@ -680,6 +698,35 @@ function getToken() {
     return json;
   }
 
+  async function apiDeletePaletteItem(shapeId, textureId) {
+    return apiFetch(`/api/palettes/${encodeURIComponent(shapeId)}/items/${encodeURIComponent(textureId)}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async function apiDeleteSurfacePrefix(shapeId, textureId) {
+    return apiFetch(`/api/surfaces/${encodeURIComponent(shapeId)}/${encodeURIComponent(textureId)}`, {
+      method: 'DELETE',
+    });
+  }
+
+
+async function apiDeleteTexture(shapeId, textureId, opts = {}) {
+  const palette = opts.palette !== false;
+  const files = opts.files !== false;
+  const qs = `?palette=${palette ? 1 : 0}&files=${files ? 1 : 0}`;
+  return apiFetch(`/api/textures/${encodeURIComponent(shapeId)}/${encodeURIComponent(textureId)}${qs}`, {
+    method: 'DELETE',
+  });
+}
+
+  async function apiSyncTexture(shapeId, textureId) {
+    return apiFetch(`/api/textures/${encodeURIComponent(shapeId)}/${encodeURIComponent(textureId)}/sync`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  }
+
   function showLoggedInUI(isLoggedIn) {
     elLoginCard.hidden = !!isLoggedIn;
     elMainCard.hidden = !isLoggedIn;
@@ -856,8 +903,10 @@ function getToken() {
           <div class="name">${escapeHtml(name)}</div>
           <div class="id">${escapeHtml(id)}</div>
           <div class="muted mtSm">${pills}</div>
-          <div class="row" style="justify-content:flex-end; gap:8px; margin-top:10px;">
+          <div class="row" style="justify-content:flex-end; gap:8px; margin-top:10px; flex-wrap:wrap;">
             <button class="btn btn--ghost btn--sm" data-action="edit" data-id="${escapeHtml(id)}">Настроить</button>
+            <button class="btn btn--ghost btn--sm" data-action="update" data-id="${escapeHtml(id)}" title="Перезагрузить файлы карты (обновить текущую текстуру)">Обновить файлы</button>
+            <button class="btn btn--danger btn--sm" data-action="delete" data-id="${escapeHtml(id)}" title="Удалить текстуру">Удалить</button>
           </div>
         </div>
       `;
@@ -879,9 +928,52 @@ function getToken() {
           setStatus(elPaletteStatus, 'err', `Не удалось открыть редактор: ${err.message}`);
         });
       });
+
+      card.querySelector('[data-action="update"]').addEventListener('click', (e) => {
+        e.stopPropagation();
+        goToUpdateUpload(shapeId, id);
+      });
+
+      card.querySelector('[data-action="delete"]').addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await deleteTextureFlow(shapeId, id).catch(err => {
+          console.warn(err);
+          setStatus(elPaletteStatus, 'err', `Не удалось удалить: ${err.message}`);
+        });
+      });
       frag.appendChild(card);
     }
     elTexturesGrid.appendChild(frag);
+  }
+
+  function goToUpdateUpload(shapeId, textureId) {
+    clearUploadUI();
+    setUploadModeUpdate(shapeId, textureId);
+    // Switch to Upload tab.
+    location.hash = `#/shape/${encodeURIComponent(shapeId)}/upload`;
+    // renderRoute will run on hashchange, but also run immediately for better UX.
+    renderRoute().catch(() => {});
+  }
+  async function deleteTextureFlow(shapeId, textureId) {
+    const okPalette = confirm(`Удалить текстуру "${textureId}" из палитры формы "${shapeId}"?`);
+    if (!okPalette) return;
+    const alsoBucket = confirm('Также удалить файлы из бакета (surfaces/<shapeId>/<textureId>/...) ?\n\nРекомендуется, если текстура больше не нужна вовсе.');
+  
+    setStatus(elPaletteStatus, '', 'Удаляем...');
+    const res = await apiDeleteTexture(shapeId, textureId, { palette: true, files: alsoBucket });
+  
+    // Refresh caches/UI
+    state.paletteByShapeId.delete(shapeId);
+    try {
+      await ensureBucketIndexLoaded(shapeId, { forceReload: true });
+    } catch {}
+    const fresh = await ensurePaletteLoaded(shapeId, { forceReload: true });
+    renderTextures(shapeId, Array.isArray(fresh?.items) ? fresh.items : []);
+    renderBucketTextures(shapeId);
+  
+    const delMsg = alsoBucket ? 'Удалено из палитры и из бакета.' : 'Удалено из палитры.';
+    const warn = (res?.filesResult?.remainingKeysCount > 0) ? ` В бакете ещё осталось ${res.filesResult.remainingKeysCount} файлов (возможна задержка).` : '';
+    setStatus(elPaletteStatus, 'ok', delMsg + warn);
   }
 
   function isBucketTextureBroken(t) {
@@ -952,8 +1044,13 @@ function getToken() {
         <div class="meta">
           <div class="name">${escapeHtml(textureId)}</div>
           <div class="muted mtSm">${pills}</div>
-          <div class="row" style="justify-content:flex-end; gap:8px; margin-top:10px;">
-            ${inPalette ? `<button class="btn btn--ghost btn--sm" data-action="edit" data-id="${escapeHtml(textureId)}">Настроить</button>` : `<button class="btn btn--sm" data-action="add" data-id="${escapeHtml(textureId)}" ${broken ? 'disabled' : ''}>Добавить в палитру</button>`}
+          <div class="row" style="justify-content:flex-end; gap:8px; margin-top:10px; flex-wrap:wrap;">
+            ${inPalette
+              ? `<button class="btn btn--ghost btn--sm" data-action="edit" data-id="${escapeHtml(textureId)}">Настроить</button>`
+              : `<button class="btn btn--sm" data-action="add" data-id="${escapeHtml(textureId)}" ${broken ? 'disabled' : ''}>Добавить в палитру</button>`
+            }
+            <button class="btn btn--ghost btn--sm" data-action="update" data-id="${escapeHtml(textureId)}" title="Перезагрузить файлы карты (обновить текущую текстуру)">Обновить файлы</button>
+            <button class="btn btn--danger btn--sm" data-action="delete" data-id="${escapeHtml(textureId)}" title="Удалить текстуру">Удалить</button>
           </div>
         </div>
       `;
@@ -990,6 +1087,40 @@ function getToken() {
             console.warn(err);
             setStatus(elBucketStatus, 'err', `Не удалось открыть редактор: ${String(err.message || err)}`);
           });
+        });
+      }
+
+      const btnUpdate = card.querySelector('[data-action="update"]');
+      if (btnUpdate) {
+        btnUpdate.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          goToUpdateUpload(shapeId, textureId);
+        });
+      }
+
+      const btnDel = card.querySelector('[data-action="delete"]');
+      if (btnDel) {
+        btnDel.addEventListener('click', async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          try {
+            if (inPalette) {
+              await deleteTextureFlow(shapeId, textureId);
+              return;
+            }
+            const ok = confirm(`Удалить файлы текстуры "${textureId}" из бакета?`);
+            if (!ok) return;
+            setStatus(elBucketStatus, '', 'Удаляем из бакета…');
+            await apiDeleteTexture(shapeId, textureId, { palette: false, files: true });
+            state.bucketIndexByShapeId.delete(shapeId);
+            await ensureBucketIndexLoaded(shapeId, { forceReload: true });
+            renderBucketTextures(shapeId);
+            setStatus(elBucketStatus, 'ok', 'Удалено из бакета.');
+          } catch (err) {
+            console.warn(err);
+            setStatus(elBucketStatus, 'err', `Не удалось удалить: ${String(err.message || err)}`);
+          }
         });
       }
 
@@ -1080,6 +1211,26 @@ function getToken() {
     if (elUploadZip) elUploadZip.value = '';
     renderUploadQueue();
     setStatus(elUploadStatus, '', '');
+  }
+
+  function setUploadModeNew() {
+    state.uploadContext = { mode: 'new', shapeId: null, textureId: null };
+    if (elUploadTextureId) {
+      elUploadTextureId.disabled = false;
+      if (!elUploadTextureId.value) elUploadTextureId.value = '';
+    }
+    if (elUploadTextureName) elUploadTextureName.value = '';
+  }
+
+  function setUploadModeUpdate(shapeId, textureId) {
+    state.uploadContext = { mode: 'update', shapeId, textureId };
+    if (elUploadTextureId) {
+      elUploadTextureId.value = textureId || '';
+      elUploadTextureId.disabled = true;
+    }
+    if (elUploadTextureName) elUploadTextureName.value = '';
+    if (elUploadAutoAdd) elUploadAutoAdd.checked = true;
+    setStatus(elUploadStatus, 'warn', `Режим обновления: ${textureId}. Загруженные файлы перезапишут surfaces/${shapeId}/${textureId}/... После загрузки палитра будет синхронизирована автоматически.`);
   }
 
   function renderUploadQueue() {
@@ -2162,9 +2313,13 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
       }
 
       if (r.tab === 'upload') {
-        // keep existing queue; just re-render
+        // If user just opened Upload tab manually - default to "new" mode.
+        const ctx = state.uploadContext || { mode: 'new' };
+        if (ctx.mode !== 'update' || ctx.shapeId !== shapeId) {
+          setUploadModeNew();
+          setStatus(elUploadStatus, '', '');
+        }
         renderUploadQueue();
-        setStatus(elUploadStatus, '', '');
       }
       if (r.tab === 'settings') {
         const settings = await ensurePaletteSettingsLoaded(shapeId);
@@ -2377,6 +2532,10 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
           const manualTextureId = normalizeTextureId(elUploadTextureId?.value);
           const displayName = String(elUploadTextureName?.value || '').trim();
 
+          const ctx = state.uploadContext || { mode: 'new' };
+          const isUpdateMode = ctx.mode === 'update' && ctx.shapeId === shapeId && Boolean(ctx.textureId);
+          const targetTextureId = isUpdateMode ? String(ctx.textureId) : manualTextureId;
+
           if (!shapeId) {
             setStatus(elUploadStatus, 'err', 'Неизвестна форма (shapeId).');
             return;
@@ -2393,6 +2552,14 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
             if (zipFile) zip = await unzipToFiles(zipFile);
 
             const isStructuredZip = Boolean(zip?.meta?.structured) && (Array.isArray(zip?.meta?.textureIds) && zip.meta.textureIds.length > 0);
+
+            // In "update" mode we only allow a single textureId.
+            if (isUpdateMode && isStructuredZip) {
+              const tids = Array.isArray(zip?.meta?.textureIds) ? zip.meta.textureIds.filter(Boolean) : [];
+              if (tids.length !== 1 || tids[0] !== targetTextureId) {
+                throw new Error(`Режим обновления поддерживает только одну текстуру. В ZIP найдены textureId: ${tids.join(', ') || '—'}. Ожидается: ${targetTextureId}.`);
+              }
+            }
 
             // --- MODE 1: "умная сборка" (ZIP уже содержит структуру surfaces/<shapeId>/<textureId>/<quality>/...)
             if (isStructuredZip) {
@@ -2413,7 +2580,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
                 throw new Error(`ZIP содержит shapeId="${foundShapeIds[0]}", но вы открыли форму "${shapeId}". Выберите правильную форму или используйте другой ZIP.`);
               }
 
-              if (manualTextureId) {
+              if (manualTextureId && !isUpdateMode) {
                 setStatus(elUploadStatus, 'warn', `В ZIP уже есть структура по textureId. Поле textureId ("${manualTextureId}") будет проигнорировано.`);
                 await sleep(250);
               }
@@ -2498,11 +2665,29 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
                 } catch {}
               }
 
+              // Sync palette item maps from bucket (guards against mixed formats / custom file names).
+              // In "update" mode it is mandatory; in "new" mode it is also useful after structured ZIP.
+              try {
+                const toSync = (parsed?.textures && typeof parsed.textures.keys === 'function')
+                  ? Array.from(parsed.textures.keys())
+                  : [];
+                for (const tid of toSync) {
+                  if (!tid) continue;
+                  await apiSyncTexture(shapeId, tid);
+                }
+                state.paletteByShapeId.delete(shapeId);
+                const fresh2 = await ensurePaletteLoaded(shapeId, { forceReload: true });
+                if (parseRoute().name === 'shape') renderTextures(shapeId, Array.isArray(fresh2?.items) ? fresh2.items : []);
+              } catch (e) {
+                console.warn(e);
+                setStatus(elUploadStatus, 'warn', 'Файлы загружены, но синхронизация палитры по бакету не удалась. Проверьте backend / доступы S3.');
+              }
+
               return;
             }
 
             // --- MODE 2: "ручной" (файлы/ZIP без структуры) — как раньше: один textureId
-            const textureId = manualTextureId;
+            const textureId = targetTextureId;
             if (!textureId) {
               setStatus(elUploadStatus, 'err', 'Укажите textureId (или используйте ZIP со структурой surfaces/... для умной сборки).');
               return;
@@ -2564,10 +2749,23 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
 
               const item = buildPaletteItemFromUpload(shapeId, textureId, displayName, quality, tasks, tileSizeM);
               await upsertItemAndSavePalette(shapeId, item);
+
+              // Sync from bucket to ensure correct extensions/paths (png/webp mix, non-standard names).
+              try {
+                await apiSyncTexture(shapeId, textureId);
+              } catch (e) {
+                console.warn(e);
+                setStatus(elUploadStatus, 'warn', 'Палитра обновлена, но синхронизация по бакету не удалась. Проверьте backend / доступы S3.');
+              }
               setStatus(elUploadStatus, 'ok', 'Готово: файлы загружены, палитра обновлена и сохранена.');
               try {
                 await ensureBucketIndexLoaded(shapeId, { forceReload: true });
               } catch {}
+            }
+
+            // Exit update mode after successful overwrite (prevents accidental overwrites).
+            if (isUpdateMode) {
+              setUploadModeNew();
             }
           } catch (e) {
             console.warn(e);
