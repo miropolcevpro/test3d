@@ -863,6 +863,11 @@ async function apiDeleteTexture(shapeId, textureId, opts = {}) {
   });
 }
 
+
+async function apiGetConfig() {
+  return apiFetch('/api/config', { method: 'GET' });
+}
+
 async function apiSyncTexture(shapeId, textureId) {
     return apiFetch(`/api/textures/${encodeURIComponent(shapeId)}/${encodeURIComponent(textureId)}/sync`, {
       method: 'POST',
@@ -1112,6 +1117,21 @@ async function apiSyncTexture(shapeId, textureId) {
     if (!okPalette) return;
     const alsoBucket = confirm('Также удалить файлы из бакета (surfaces/<shapeId>/<textureId>/...) ?\n\nРекомендуется, если текстура больше не нужна вовсе.');
   
+// Config sanity check: the most common root cause of “DELETE 200 but not deleted”
+// is that backend writes/deletes to another bucket than the UI reads from.
+try {
+  const cfg = await apiGetConfig();
+  if (cfg?.public?.bucketMismatch) {
+    setStatus(elPaletteStatus, 'error',
+      `Конфиг неконсистентен: backend пишет/удаляет в бакет "${cfg.s3.bucket}", а UI читает из "${cfg.public.expectedBucketFromPublicUrl}". ` +
+      `Исправьте env (S3_BUCKET / PALETTES_BASE_URL / SURFACES_PUBLIC_BASE_URL), затем повторите удаление.`);
+    return;
+  }
+} catch (e) {
+  // If config endpoint is not available, backend will still validate on the DELETE call.
+  console.warn('apiGetConfig failed', e);
+}
+
     setStatus(elPaletteStatus, '', 'Удаляем...');
     const res = await apiDeleteTexture(shapeId, canonicalId || textureId, { palette: true, files: alsoBucket });
     if (!res?.ok) {
