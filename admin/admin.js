@@ -23,15 +23,36 @@
   //   window.BUCKET_BASE_URL = "https://storage.yandexcloud.net/webar3dtexture/";
   const BUCKET_BASE_URL = (window.BUCKET_BASE_URL || 'https://storage.yandexcloud.net/webar3dtexture/').replace(/\/+$/, '/') ;
 
-  function resolveMediaUrl(u) {
-    if (!u) return '';
-    const s = String(u);
-    if (/^https?:\/\//i.test(s)) return s;
-    // Site assets
-    if (s.startsWith('assets/')) return resolveSiteUrl(s);
-    // Bucket-relative paths (surfaces/..., palettes/..., shape_settings/...)
-    return new URL(s.replace(/^\/+/, ''), BUCKET_BASE_URL).toString();
+  
+function resolveMediaUrl(u, opts = {}) {
+  if (!u) return '';
+  const s = String(u).trim();
+  if (!s) return '';
+  if (/^https?:\/\//i.test(s)) return s;
+
+  // Site assets
+  if (s.startsWith('assets/')) return resolveSiteUrl(s);
+
+  // If it's a bare filename like "xxx_albedo.webp", try to reconstruct a bucket path.
+  // This prevents Chrome ORB (Opaque Response Blocking) caused by loading non-images/HTML error pages as <img>.
+  if (!s.includes('/')) {
+    const shapeId = opts.shapeId || '';
+    const textureId = opts.textureId || '';
+    const quality = opts.quality || '1k';
+    if (shapeId && textureId) {
+      return new URL(`surfaces/${shapeId}/${textureId}/${quality}/${s}`, BUCKET_BASE_URL).toString();
+    }
+    return ''; // unknown -> do not load
   }
+
+  // Reject obvious garbage (e.g. "klassika:paver..." without path segments)
+  if (s.includes(':') && !s.startsWith('surfaces/') && !s.startsWith('palettes/') && !s.startsWith('shape_settings/') && !s.startsWith('palette_settings/')) {
+    return '';
+  }
+
+  // Bucket-relative paths (surfaces/..., palettes/..., shape_settings/...)
+  return new URL(s.replace(/^\/+/, ''), BUCKET_BASE_URL).toString();
+}
 
   const $ = (id) => document.getElementById(id);
 
@@ -314,22 +335,35 @@
     return '';
   }
 
-  function normalizeTextureId(v) {
-    const raw = String(v || '').trim();
-    if (!raw) return '';
-    // Bucket-safe textureId:
-    // - disallow ':' and whitespace
-    // - keep only [a-z0-9_-] (convert other chars to '_')
-    // - collapse multiple '_' and trim
-    let s = raw
-      .replace(/[:\s]+/g, '_')
-      .replace(/[^a-zA-Z0-9_-]+/g, '_')
-      .replace(/_+/g, '_')
-      .replace(/^_+|_+$/g, '');
-    // We recommend lowercase for consistency across tools/OS.
-    s = s.toLowerCase();
-    return s;
+  
+function normalizeTextureId(v, shapeId) {
+  const raw0 = String(v || '').trim();
+  if (!raw0) return '';
+
+  // If a shape is selected, strip accidental shape prefixes:
+  // - "klassika:paver_..." -> "paver_..."
+  // - "klassika_paver_..." -> "paver_..."
+  let raw = raw0;
+  if (shapeId) {
+    const s1 = `${shapeId}:`;
+    const s2 = `${shapeId}_`;
+    if (raw.startsWith(s1)) raw = raw.slice(s1.length);
+    else if (raw.startsWith(s2)) raw = raw.slice(s2.length);
   }
+
+  // Bucket-safe textureId:
+  // - disallow ':' and whitespace
+  // - keep only [a-z0-9_-] (convert other chars to '_')
+  // - collapse multiple '_' and trim
+  let s = raw
+    .replace(/[:\s]+/g, '_')
+    .replace(/[^a-zA-Z0-9_-]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '');
+
+  // We recommend lowercase for consistency across tools/OS.
+  return s.toLowerCase();
+}
 
   function standardMapFilename(textureId, mapType, originalName) {
     const ext = String(originalName || '').split('.').pop() || 'bin';
@@ -620,7 +654,7 @@
       if (m) {
         structured = true;
         shapeIds.add(m[1]);
-        textureIds.add(m[2]);
+        textureIds.add(normalizeTextureId(m[2], m[1]));
         qualities.add(m[3]);
       }
 
@@ -881,7 +915,7 @@ async function apiDeleteTexture(shapeId, textureId, opts = {}) {
     for (const it of list) {
       const id = it?.id || it?.textureId || '';
       const name = it?.name || id || '(без названия)';
-      const previewUrl = resolveMediaUrl(it?.previewUrl || it?.preview || it?.maps?.albedoUrl || it?.maps?.albedo || '');
+      const previewUrl = resolveMediaUrl(it?.previewUrl || it?.preview || it?.maps?.albedoUrl || it?.maps?.albedo || '', { shapeId, textureId: id, quality: '1k' });
 
       const hasTileOverride = !!it?.tileSizeM;
       const hasParams = it?.params && typeof it.params === 'object' && Object.keys(it.params).length > 0;
@@ -1028,7 +1062,7 @@ async function apiDeleteTexture(shapeId, textureId, opts = {}) {
       const broken = isBucketTextureBroken(t);
       const has2k = !!t?.qualities?.['2k'];
       const previewKey = t?.previewKey || t?.qualities?.['1k']?.maps?.albedo?.key || '';
-      const previewUrl = resolveMediaUrl(previewKey);
+      const previewUrl = resolveMediaUrl(previewKey, { shapeId: state.activeShapeId || '', textureId: (item?.id || item?.textureId || ''), quality: '1k' });
 
       const pills = [
         inPalette ? '<span class="pill pill--set">в палитре</span>' : '<span class="pill">не в палитре</span>',
@@ -1387,7 +1421,7 @@ async function apiDeleteTexture(shapeId, textureId, opts = {}) {
       if (!m) continue;
 
       const shapeIdInZip = m[1];
-      const textureId = m[2];
+      const textureId = normalizeTextureId(m[2], currentShapeId);
       const quality = m[3];
       const filename = m[4].split('/').pop();
 
@@ -1774,7 +1808,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
     elTexModalTitle.textContent = 'Настройка текстуры';
     elTexModalSubtitle.textContent = `Форма: ${shapeId} • Текстура: ${itemId}`;
 
-    const previewUrl = resolveMediaUrl(item?.previewUrl || item?.preview || item?.maps?.albedoUrl || item?.maps?.albedo || '');
+    const previewUrl = resolveMediaUrl(item?.previewUrl || item?.preview || item?.maps?.albedoUrl || item?.maps?.albedo || '', { shapeId: (state.activeShapeId || ''), textureId: (item?.id || item?.textureId || ''), quality: '1k' });
     if (elTexPreview && previewUrl) {
       elTexPreview.src = previewUrl;
       elTexPreviewHint.textContent = 'Превью: albedo (из палитры)';
@@ -2529,7 +2563,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
           if (r.name !== 'shape') return;
           const shapeId = decodeURIComponent(r.id || '');
           const quality = String(elUploadQuality?.value || '1k');
-          const manualTextureId = normalizeTextureId(elUploadTextureId?.value);
+          const manualTextureId = normalizeTextureId(elUploadTextureId?.value, shapeId);
           const displayName = String(elUploadTextureName?.value || '').trim();
 
           const ctx = state.uploadContext || { mode: 'new' };
