@@ -23,144 +23,20 @@
   //   window.BUCKET_BASE_URL = "https://storage.yandexcloud.net/webar3dtexture/";
   const BUCKET_BASE_URL = (window.BUCKET_BASE_URL || 'https://storage.yandexcloud.net/webar3dtexture/').replace(/\/+$/, '/') ;
 
-  // Canonical textureId handling
-  // Bucket folder naming convention: surfaces/<shapeId>/<textureId>/...
-  // IMPORTANT: <textureId> MUST NOT contain the <shapeId> prefix.
-  // We normalize legacy IDs:
-  //   - "klassika:paver_..." -> "paver_..."
-  //   - "klassika_paver_..." -> "paver_..."
-  // and sanitize any remaining ":" to "_".
-  function canonicalTextureId(shapeId, anyId) {
-    if (!anyId) return '';
-    let s = String(anyId).trim();
+  function resolveMediaUrl(u) {
+    if (!u) return '';
+    const s = String(u).trim();
     if (!s) return '';
-    try { s = decodeURIComponent(s); } catch {}
-
-    const sid = String(shapeId || '').trim();
-    if (sid) {
-      const pColon = sid + ':';
-      const pUnd = sid + '_';
-      // Some legacy data ended up with repeated prefixes, e.g. "klassika:klassika_kara_dag".
-      // Strip prefixes repeatedly until stable.
-      // Also trim in-between to be robust against accidental spaces.
-      for (let i = 0; i < 3; i++) {
-        if (s.startsWith(pColon)) { s = s.slice(pColon.length).trim(); continue; }
-        if (s.startsWith(pUnd)) { s = s.slice(pUnd.length).trim(); continue; }
-        break;
-      }
+    if (/^https?:\/\//i.test(s)) return s;
+    // Guard: strings like "klassika:paver_..." are interpreted as a custom URL scheme ("klassika:")
+    // and get blocked by the browser (ERR_BLOCKED_BY_ORB). Treat them as relative paths instead.
+    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(s) && !/^https?:/i.test(s) && !s.includes('/')) {
+      return new URL(`./${s}`, BUCKET_BASE_URL).toString();
     }
-
-    if (s.includes(':')) s = s.replace(/:/g, '_');
-    return s;
-  }
-
-  function normalizePathLike(shapeId, v) {
-    if (!v) return v;
-    let s = String(v).trim();
-    if (!s) return s;
-    try { s = decodeURIComponent(s); } catch {}
-    const sid = String(shapeId || '').trim();
-
-    // If someone stored preview as "klassika:..._albedo.png" (no slashes) — treat as invalid to avoid ORB/CORB.
-    if (!s.includes('/') && s.includes(':')) return '';
-    if (!sid) return s;
-
-    // Fix common legacy prefixing mistakes inside bucket-relative paths:
-    //   surfaces/<sid>/<sid>_foo/...  -> surfaces/<sid>/foo/...
-    //   surfaces/<sid>/<sid>:foo/...  -> surfaces/<sid>/foo/...
-    s = s.replace(new RegExp('surfaces/' + sid + '/' + sid + '[_:]', 'g'), 'surfaces/' + sid + '/');
-    return s;
-  }
-
-  function normalizePaletteForUi(shapeId, palette) {
-    if (!palette || typeof palette !== 'object') return palette;
-    const items = Array.isArray(palette.items) ? palette.items : [];
-    const byId = new Map();
-    const score = (obj) => {
-      let sc = 0;
-      if (obj && typeof obj === 'object') {
-        if (obj.name) sc += 1;
-        if (obj.preview) sc += 1;
-        if (obj.tileSizeM) sc += 1;
-        if (obj.params && Object.keys(obj.params).length) sc += 2;
-        if (obj.maps && Object.keys(obj.maps).length) sc += 3;
-      }
-      return sc;
-    };
-
-    for (const it of items) {
-      if (!it || typeof it !== 'object') continue;
-      const id0 = it.id || it.textureId || '';
-      const id = canonicalTextureId(shapeId, id0);
-      if (!id) continue;
-
-      const next = { ...it, id };
-      if ('preview' in next) next.preview = normalizePathLike(shapeId, next.preview);
-      if (next.maps && typeof next.maps === 'object') {
-        const maps = { ...next.maps };
-        for (const k of Object.keys(maps)) maps[k] = normalizePathLike(shapeId, maps[k]);
-        next.maps = maps;
-      }
-
-      const prev = byId.get(id);
-      if (!prev) byId.set(id, next);
-      else byId.set(id, score(next) >= score(prev) ? next : prev);
-    }
-
-    palette.items = Array.from(byId.values());
-    return palette;
-  }
-
-
-  
-
-function resolveMediaUrl(u, opts = {}) {
-  if (!u) return '';
-  const s = String(u).trim();
-  if (!s) return '';
-
-  // Absolute URL
-  if (/^https?:\/\//i.test(s)) return s;
-
-  // Site assets
-  if (s.startsWith('assets/')) return resolveSiteUrl(s);
-
-  // Block legacy/garbage identifiers early ("klassika:paver...")
-  // These are not valid bucket-relative paths and may trigger ORB/CORB in Chrome when used as <img src>.
-  if (s.includes(':') && !s.startsWith('surfaces/') && !s.startsWith('palettes/') && !s.startsWith('shape_settings/') && !s.startsWith('palette_settings/')) {
-    return '';
-  }
-
-  // Bare filename. Only reconstruct when we have strong context and the name looks safe.
-  if (!s.includes('/')) {
-    // Reject suspicious names (e.g. containing ':' or query/hash)
-    if (s.includes(':')) return '';
-    if (/[?#]/.test(s)) return '';
-
-    const shapeId = opts.shapeId || '';
-    const textureId = opts.textureId || '';
-    const quality = opts.quality || '1k';
-    if (shapeId && textureId) {
-      const tid = canonicalTextureId(shapeId, textureId);
-      return new URL(`surfaces/${shapeId}/${tid}/${quality}/${s}`, BUCKET_BASE_URL).toString();
-    }
-    // As a defensive fallback, treat it as a bucket-root object. This prevents
-    // the browser from requesting it from the GitHub Pages origin (which often
-    // returns HTML and triggers ORB in Chrome).
-    return new URL(s, BUCKET_BASE_URL).toString();
-  }
-
-  // Bucket-relative paths (surfaces/..., palettes/..., shape_settings/...)
-  return new URL(s.replace(/^\/+/, ''), BUCKET_BASE_URL).toString();
-}
-
-function pickMediaUrl(candidates, opts) {
-    const arr = Array.isArray(candidates) ? candidates : [candidates];
-    for (const c of arr) {
-      const url = resolveMediaUrl(c, opts);
-      if (url) return url;
-    }
-    return '';
+    // Site assets
+    if (s.startsWith('assets/')) return resolveSiteUrl(s);
+    // Bucket-relative paths (surfaces/..., palettes/..., shape_settings/...)
+    return new URL(s.replace(/^\/+/, ''), BUCKET_BASE_URL).toString();
   }
 
   const $ = (id) => document.getElementById(id);
@@ -444,35 +320,22 @@ function pickMediaUrl(candidates, opts) {
     return '';
   }
 
-  
-function normalizeTextureId(v, shapeId) {
-  const raw0 = String(v || '').trim();
-  if (!raw0) return '';
-
-  // If a shape is selected, strip accidental shape prefixes:
-  // - "klassika:paver_..." -> "paver_..."
-  // - "klassika_paver_..." -> "paver_..."
-  let raw = raw0;
-  if (shapeId) {
-    const s1 = `${shapeId}:`;
-    const s2 = `${shapeId}_`;
-    if (raw.startsWith(s1)) raw = raw.slice(s1.length);
-    else if (raw.startsWith(s2)) raw = raw.slice(s2.length);
+  function normalizeTextureId(v) {
+    const raw = String(v || '').trim();
+    if (!raw) return '';
+    // Bucket-safe textureId:
+    // - disallow ':' and whitespace
+    // - keep only [a-z0-9_-] (convert other chars to '_')
+    // - collapse multiple '_' and trim
+    let s = raw
+      .replace(/[:\s]+/g, '_')
+      .replace(/[^a-zA-Z0-9_-]+/g, '_')
+      .replace(/_+/g, '_')
+      .replace(/^_+|_+$/g, '');
+    // We recommend lowercase for consistency across tools/OS.
+    s = s.toLowerCase();
+    return s;
   }
-
-  // Bucket-safe textureId:
-  // - disallow ':' and whitespace
-  // - keep only [a-z0-9_-] (convert other chars to '_')
-  // - collapse multiple '_' and trim
-  let s = raw
-    .replace(/[:\s]+/g, '_')
-    .replace(/[^a-zA-Z0-9_-]+/g, '_')
-    .replace(/_+/g, '_')
-    .replace(/^_+|_+$/g, '');
-
-  // We recommend lowercase for consistency across tools/OS.
-  return s.toLowerCase();
-}
 
   function standardMapFilename(textureId, mapType, originalName) {
     const ext = String(originalName || '').split('.').pop() || 'bin';
@@ -763,7 +626,7 @@ function normalizeTextureId(v, shapeId) {
       if (m) {
         structured = true;
         shapeIds.add(m[1]);
-        textureIds.add(normalizeTextureId(m[2], m[1]));
+        textureIds.add(m[2]);
         qualities.add(m[3]);
       }
 
@@ -863,12 +726,7 @@ async function apiDeleteTexture(shapeId, textureId, opts = {}) {
   });
 }
 
-
-async function apiGetConfig() {
-  return apiFetch('/api/config', { method: 'GET' });
-}
-
-async function apiSyncTexture(shapeId, textureId) {
+  async function apiSyncTexture(shapeId, textureId) {
     return apiFetch(`/api/textures/${encodeURIComponent(shapeId)}/${encodeURIComponent(textureId)}/sync`, {
       method: 'POST',
       body: JSON.stringify({}),
@@ -1029,15 +887,7 @@ async function apiSyncTexture(shapeId, textureId) {
     for (const it of list) {
       const id = it?.id || it?.textureId || '';
       const name = it?.name || id || '(без названия)';
-      // Prefer material map URLs over "preview" fields.
-      // Preview fields historically contained broken values (e.g. "shapeId:textureId_albedo.png"),
-      // which triggers Chrome ORB and produces noisy errors in DevTools.
-      const previewUrl = pickMediaUrl([
-        it?.maps?.albedoUrl,
-        it?.maps?.albedo,
-        it?.previewUrl,
-        it?.preview,
-      ], { shapeId, textureId: id, quality: '1k' });
+      const previewUrl = resolveMediaUrl(it?.previewUrl || it?.preview || it?.maps?.albedoUrl || it?.maps?.albedo || '');
 
       const hasTileOverride = !!it?.tileSizeM;
       const hasParams = it?.params && typeof it.params === 'object' && Object.keys(it.params).length > 0;
@@ -1054,7 +904,7 @@ async function apiSyncTexture(shapeId, textureId) {
           <input type="checkbox" data-action="select" data-id="${escapeHtml(id)}" ${selected ? 'checked' : ''} />
           <span></span>
         </label>
-        <img class="thumb" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display='none'" src="${escapeHtml(previewUrl)}">
+        <img class="thumb" alt="" loading="lazy" referrerpolicy="no-referrer" src="${escapeHtml(previewUrl)}">
         <div class="meta">
           <div class="name">${escapeHtml(name)}</div>
           <div class="id">${escapeHtml(id)}</div>
@@ -1111,63 +961,25 @@ async function apiSyncTexture(shapeId, textureId) {
     renderRoute().catch(() => {});
   }
   async function deleteTextureFlow(shapeId, textureId) {
-    const canonicalId = canonicalTextureId(shapeId, textureId);
-    const labelId = (canonicalId && canonicalId !== textureId) ? `${textureId} → ${canonicalId}` : textureId;
-    const okPalette = confirm(`Удалить текстуру "${labelId}" из палитры формы "${shapeId}"?`);
+    const okPalette = confirm(`Удалить текстуру "${textureId}" из палитры формы "${shapeId}"?`);
     if (!okPalette) return;
     const alsoBucket = confirm('Также удалить файлы из бакета (surfaces/<shapeId>/<textureId>/...) ?\n\nРекомендуется, если текстура больше не нужна вовсе.');
   
-// Config sanity check: the most common root cause of “DELETE 200 but not deleted”
-// is that backend writes/deletes to another bucket than the UI reads from.
-try {
-  const cfg = await apiGetConfig();
-  if (cfg?.public?.bucketMismatch) {
-    setStatus(elPaletteStatus, 'error',
-      `Конфиг неконсистентен: backend пишет/удаляет в бакет "${cfg.s3.bucket}", а UI читает из "${cfg.public.expectedBucketFromPublicUrl}". ` +
-      `Исправьте env (S3_BUCKET / PALETTES_BASE_URL / SURFACES_PUBLIC_BASE_URL), затем повторите удаление.`);
-    return;
-  }
-} catch (e) {
-  // If config endpoint is not available, backend will still validate on the DELETE call.
-  console.warn('apiGetConfig failed', e);
-}
-
     setStatus(elPaletteStatus, '', 'Удаляем...');
-    const res = await apiDeleteTexture(shapeId, canonicalId || textureId, { palette: true, files: alsoBucket });
-    if (!res?.ok) {
-      const msg = res?.message || 'Delete failed';
-      setStatus(elPaletteStatus, 'error', msg);
-      return;
-    }
+    const res = await apiDeleteTexture(shapeId, textureId, { palette: true, files: alsoBucket });
   
     // Refresh caches/UI
     state.paletteByShapeId.delete(shapeId);
-    try { state.bucketIndexByShapeId.delete(shapeId); } catch {}
-    try { await ensureBucketIndexLoaded(shapeId); } catch {}
-    const fresh = await ensurePaletteLoaded(shapeId);
+    try {
+      await ensureBucketIndexLoaded(shapeId, { forceReload: true });
+    } catch {}
+    const fresh = await ensurePaletteLoaded(shapeId, { forceReload: true });
     renderTextures(shapeId, Array.isArray(fresh?.items) ? fresh.items : []);
     renderBucketTextures(shapeId);
   
-    const removed = Number(res?.paletteResult?.removed || 0);
-    const delObjects = Number(res?.filesResult?.deletedObjects || 0);
-    const delPrefixes = Array.isArray(res?.filesResult?.deletedPrefixes) ? res.filesResult.deletedPrefixes.length : 0;
-    const deleteErrors = Array.isArray(res?.filesResult?.deleteErrors) ? res.filesResult.deleteErrors : [];
-
-    // If palette was not actually changed, treat as a problem (UI would otherwise lie).
-    if (removed === 0) {
-      const hint = 'Текстура не была удалена из палитры (возможен несоответствующий textureId в данных).';
-      setStatus(elPaletteStatus, 'error', hint);
-      return;
-    }
-
-    const delMsg = alsoBucket
-      ? `Удалено из палитры и из бакета (объекты: ${delObjects}, префиксы: ${delPrefixes}).`
-      : 'Удалено из палитры.';
-
-    const warn = deleteErrors.length
-      ? ` Ошибки при удалении файлов: ${deleteErrors.map(e => e.key || e.prefix || 'unknown').join(', ')}`
-      : '';
-    setStatus(elPaletteStatus, deleteErrors.length ? 'warn' : 'ok', delMsg + warn);
+    const delMsg = alsoBucket ? 'Удалено из палитры и из бакета.' : 'Удалено из палитры.';
+    const warn = (res?.filesResult?.remainingKeysCount > 0) ? ` В бакете ещё осталось ${res.filesResult.remainingKeysCount} файлов (возможна задержка).` : '';
+    setStatus(elPaletteStatus, 'ok', delMsg + warn);
   }
 
   function isBucketTextureBroken(t) {
@@ -1221,11 +1033,8 @@ try {
       const inPalette = paletteIds.has(textureId);
       const broken = isBucketTextureBroken(t);
       const has2k = !!t?.qualities?.['2k'];
-      const previewUrl = pickMediaUrl([
-        t?.qualities?.['1k']?.maps?.albedo?.key,
-        t?.previewKey,
-        t?.preview,
-      ], { shapeId: (state.activeShapeId || shapeId || ''), textureId, quality: '1k' });
+      const previewKey = t?.previewKey || t?.qualities?.['1k']?.maps?.albedo?.key || '';
+      const previewUrl = resolveMediaUrl(previewKey);
 
       const pills = [
         inPalette ? '<span class="pill pill--set">в палитре</span>' : '<span class="pill">не в палитре</span>',
@@ -1237,7 +1046,7 @@ try {
       const card = document.createElement('div');
       card.className = 'tile';
       card.innerHTML = `
-        <img class="thumb" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display='none'" src="${escapeHtml(previewUrl)}">
+        <img class="thumb" alt="" loading="lazy" referrerpolicy="no-referrer" src="${escapeHtml(previewUrl)}">
         <div class="meta">
           <div class="name">${escapeHtml(textureId)}</div>
           <div class="muted mtSm">${pills}</div>
@@ -1309,7 +1118,7 @@ try {
             const ok = confirm(`Удалить файлы текстуры "${textureId}" из бакета?`);
             if (!ok) return;
             setStatus(elBucketStatus, '', 'Удаляем из бакета…');
-            await apiDeleteTexture(shapeId, canonicalId || textureId, { palette: false, files: true });
+            await apiDeleteTexture(shapeId, textureId, { palette: false, files: true });
             state.bucketIndexByShapeId.delete(shapeId);
             await ensureBucketIndexLoaded(shapeId, { forceReload: true });
             renderBucketTextures(shapeId);
@@ -1360,8 +1169,7 @@ try {
     if (!shapeId) return null;
     if (state.paletteByShapeId.has(shapeId)) return state.paletteByShapeId.get(shapeId);
     setStatus(elStatus, '', `Загружаем палитру формы: ${shapeId} …`);
-    const rawPalette = await apiFetch('/api/palettes/' + encodeURIComponent(shapeId));
-    const palette = normalizePaletteForUi(shapeId, rawPalette || { shapeId, items: [] });
+    const palette = await apiFetch('/api/palettes/' + encodeURIComponent(shapeId));
     state.paletteByShapeId.set(shapeId, palette);
     const items = Array.isArray(palette?.items) ? palette.items : [];
     if (palette?._meta?.missing) {
@@ -1379,15 +1187,7 @@ try {
     try {
       const res = await apiFetch('/api/surfaces/' + encodeURIComponent(shapeId));
       const textures = Array.isArray(res?.textures) ? res.textures : (Array.isArray(res?.data?.textures) ? res.data.textures : (Array.isArray(res?.textures) ? res.textures : []));
-      const normalized = (Array.isArray(textures) ? textures : []).map((t) => {
-        if (typeof t === 'string') return { textureId: canonicalTextureId(shapeId, t) };
-        const copy = { ...t };
-        copy.textureId = canonicalTextureId(shapeId, t.textureId || t.id || t.name || t.key || '');
-        return copy;
-      }).filter((t) => t && t.textureId);
-      const uniqMap = new Map();
-      for (const t of normalized) { if (!uniqMap.has(t.textureId)) uniqMap.set(t.textureId, t); }
-      const idx = { shapeId, textures: Array.from(uniqMap.values()) };
+      const idx = { shapeId, textures: Array.isArray(textures) ? textures : [] };
       state.bucketIndexByShapeId.set(shapeId, idx);
       setStatus(elBucketStatus, 'ok', `Найдено в бакете: ${idx.textures.length} textureId`);
       return idx;
@@ -1436,8 +1236,7 @@ try {
     }
     if (elUploadTextureName) elUploadTextureName.value = '';
     if (elUploadAutoAdd) elUploadAutoAdd.checked = true;
-    const tid = canonicalTextureId(shapeId, textureId);
-    setStatus(elUploadStatus, 'warn', `Режим обновления: ${tid}. Загруженные файлы перезапишут surfaces/${shapeId}/${tid}/... После загрузки палитра будет синхронизирована автоматически.`);
+    setStatus(elUploadStatus, 'warn', `Режим обновления: ${textureId}. Загруженные файлы перезапишут surfaces/${shapeId}/${textureId}/... После загрузки палитра будет синхронизирована автоматически.`);
   }
 
   function renderUploadQueue() {
@@ -1554,8 +1353,7 @@ try {
 
     for (const [mapType, file] of byType.entries()) {
       const fileName = standardMapFilename(textureId, mapType, file.name);
-      const tid = canonicalTextureId(shapeId, textureId);
-      const key = `surfaces/${shapeId}/${tid}/${quality}/${fileName}`;
+      const key = `surfaces/${shapeId}/${textureId}/${quality}/${fileName}`;
       out.push({
         mapType,
         file,
@@ -1595,7 +1393,7 @@ try {
       if (!m) continue;
 
       const shapeIdInZip = m[1];
-      const textureId = normalizeTextureId(m[2], currentShapeId);
+      const textureId = m[2];
       const quality = m[3];
       const filename = m[4].split('/').pop();
 
@@ -1756,16 +1554,14 @@ try {
   }
 
 function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, tileSizeMOrNull) {
-    // Persist canonical IDs in palette to avoid duplicates and to keep delete/update stable.
-    const canonicalId = canonicalTextureId(shapeId, textureId);
     const maps = {};
     for (const t of tasks) {
-      const rel = `surfaces/${shapeId}/${canonicalId}/${quality}/${t.fileName}`;
+      const rel = `surfaces/${shapeId}/${textureId}/${quality}/${t.fileName}`;
       maps[t.mapType] = rel;
     }
     const item = {
-      id: canonicalId,
-      name: name || canonicalId,
+      id: textureId,
+      name: name || textureId,
       preview: maps.albedo || '',
       maps,
       params: {},
@@ -1784,20 +1580,37 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
 
   async function upsertItemAndSavePalette(shapeId, item) {
     const palette = await ensurePaletteLoaded(shapeId);
-    const items = Array.isArray(palette?.items) ? [...palette.items] : [];
-    // Compare by canonical ID to avoid duplicates caused by legacy prefixes.
-    const itemCanonicalId = canonicalTextureId(shapeId, item?.id || '');
-    const idx = items.findIndex(x => {
-      const xid = canonicalTextureId(shapeId, x?.id || x?.textureId || '');
-      return xid && xid === itemCanonicalId;
-    });
-    // Ensure the saved palette always keeps canonical IDs.
-    const normalizedItem = { ...item, id: itemCanonicalId };
-    if (idx >= 0) items[idx] = normalizedItem;
-    else items.push(normalizedItem);
+    // De-duplicate across legacy id variants ("shape:...", "shape_...", "...")
+    // to avoid "phantom" duplicates that cannot be managed consistently.
+    const normKey = (sid, tid) => {
+      const s = String(tid || '').trim();
+      let raw = s;
+      if (sid && raw.startsWith(sid + ':')) raw = raw.slice(sid.length + 1);
+      if (sid && raw.startsWith(sid + '_')) raw = raw.slice(sid.length + 1);
+      raw = raw.replace(/\s+/g, '_').replace(/:/g, '_');
+      return (sid || '') + '_' + raw;
+    };
+
+    const itemsIn = Array.isArray(palette?.items) ? palette.items.filter(Boolean) : [];
+    const target = normKey(shapeId, item.id);
+    const kept = [];
+    let replaced = false;
+    for (const it of itemsIn) {
+      if (normKey(shapeId, it.id) === target) {
+        if (!replaced) {
+          kept.push(item);
+          replaced = true;
+        }
+        // drop other duplicates
+      } else {
+        kept.push(it);
+      }
+    }
+    if (!replaced) kept.push(item);
     const next = {
+      ...(palette && typeof palette === 'object' ? palette : {}),
       shapeId,
-      items,
+      items: kept,
     };
     await savePalette(shapeId, next);
     // refresh
@@ -1991,15 +1804,9 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
     elTexModalTitle.textContent = 'Настройка текстуры';
     elTexModalSubtitle.textContent = `Форма: ${shapeId} • Текстура: ${itemId}`;
 
-    const previewUrl = pickMediaUrl([
-      item?.maps?.albedoUrl,
-      item?.maps?.albedo,
-      item?.previewUrl,
-      item?.preview,
-    ], { shapeId: (state.activeShapeId || ''), textureId: (item?.id || item?.textureId || ''), quality: '1k' });
+    const previewUrl = resolveMediaUrl(item?.previewUrl || item?.preview || item?.maps?.albedoUrl || item?.maps?.albedo || '');
     if (elTexPreview && previewUrl) {
-      elTexPreview.onerror = () => { try { elTexPreview.style.display = 'none'; } catch {} };
-    elTexPreview.src = previewUrl;
+      elTexPreview.src = previewUrl;
       elTexPreviewHint.textContent = 'Превью: albedo (из палитры)';
     } else {
       elTexPreviewHint.textContent = 'Превью недоступно (в palletes/*.json нет preview/albedo)';
@@ -2752,7 +2559,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
           if (r.name !== 'shape') return;
           const shapeId = decodeURIComponent(r.id || '');
           const quality = String(elUploadQuality?.value || '1k');
-          const manualTextureId = normalizeTextureId(elUploadTextureId?.value, shapeId);
+          const manualTextureId = normalizeTextureId(elUploadTextureId?.value);
           const displayName = String(elUploadTextureName?.value || '').trim();
 
           const ctx = state.uploadContext || { mode: 'new' };
