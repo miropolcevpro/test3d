@@ -1111,11 +1111,10 @@ async function apiSyncTexture(shapeId, textureId) {
     renderRoute().catch(() => {});
   }
   async function deleteTextureFlow(shapeId, textureId) {
-    const canonicalId = canonicalTextureId(shapeId, textureId);
-    const labelId = (canonicalId && canonicalId !== textureId) ? `${textureId} → ${canonicalId}` : textureId;
-    const okPalette = confirm(`Удалить текстуру "${labelId}" из палитры формы "${shapeId}"?`);
+    const okPalette = confirm(`Удалить текстуру "${textureId}" из палитры формы "${shapeId}" и удалить файлы из бакета?`);
     if (!okPalette) return;
-    const alsoBucket = confirm('Также удалить файлы из бакета (surfaces/<shapeId>/<textureId>/...) ?\n\nРекомендуется, если текстура больше не нужна вовсе.');
+    // Пользовательский сценарий: удаляем "по всем фронтам" всегда.
+    const alsoBucket = true;
   
 // Config sanity check: the most common root cause of “DELETE 200 but not deleted”
 // is that backend writes/deletes to another bucket than the UI reads from.
@@ -1133,7 +1132,9 @@ try {
 }
 
     setStatus(elPaletteStatus, '', 'Удаляем...');
-    const res = await apiDeleteTexture(shapeId, canonicalId || textureId, { palette: true, files: alsoBucket });
+    // На backend реализован резолв папок в бакете по textureId (с учётом префиксов),
+    // поэтому передаём ровно то значение, которое отображается в админке.
+    const res = await apiDeleteTexture(shapeId, textureId, { palette: true, files: alsoBucket });
     if (!res?.ok) {
       const msg = res?.message || 'Delete failed';
       setStatus(elPaletteStatus, 'error', msg);
@@ -1153,18 +1154,11 @@ try {
     const delPrefixes = Array.isArray(res?.filesResult?.deletedPrefixes) ? res.filesResult.deletedPrefixes.length : 0;
     const deleteErrors = Array.isArray(res?.filesResult?.deleteErrors) ? res.filesResult.deleteErrors : [];
 
-    // If palette was not changed, decide based on what happened with files.
-    // This situation is common when the bucket was cleaned manually earlier and you are now trying to
-    // remove stale entries from the palette UI.
+    // If palette was not actually changed, treat as a problem (UI would otherwise lie).
     if (removed === 0) {
-      if (alsoBucket || delObjects > 0 || delPrefixes > 0) {
-        const hint = 'Палитра не изменилась (запись уже отсутствует), но операция с файлами выполнена/проверена. Обновите страницу, чтобы убедиться, что запись пропала.';
-        setStatus(elPaletteStatus, 'warn', hint);
-      } else {
-        const hint = 'Текстура не была удалена из палитры (возможен несоответствующий textureId в данных).';
-        setStatus(elPaletteStatus, 'error', hint);
-        return;
-      }
+      const hint = 'Текстура не была удалена из палитры (возможен несоответствующий textureId в данных).';
+      setStatus(elPaletteStatus, 'error', hint);
+      return;
     }
 
     const delMsg = alsoBucket
@@ -1313,14 +1307,16 @@ try {
               await deleteTextureFlow(shapeId, textureId);
               return;
             }
-            const ok = confirm(`Удалить файлы текстуры "${textureId}" из бакета?`);
+            const ok = confirm(`Удалить текстуру "${textureId}" полностью (baket + previews + палитра)?`);
             if (!ok) return;
-            setStatus(elBucketStatus, '', 'Удаляем из бакета…');
-            await apiDeleteTexture(shapeId, canonicalId || textureId, { palette: false, files: true });
+            setStatus(elBucketStatus, '', 'Удаляем…');
+            // Backend now resolves real bucket folder names (shapeId_/pack_ prefixes),
+            // so we always send the logical textureId from UI.
+            await apiDeleteTexture(shapeId, textureId, { palette: true, files: true });
             state.bucketIndexByShapeId.delete(shapeId);
             await ensureBucketIndexLoaded(shapeId, { forceReload: true });
             renderBucketTextures(shapeId);
-            setStatus(elBucketStatus, 'ok', 'Удалено из бакета.');
+            setStatus(elBucketStatus, 'ok', 'Удаление выполнено.');
           } catch (err) {
             console.warn(err);
             setStatus(elBucketStatus, 'err', `Не удалось удалить: ${String(err.message || err)}`);
@@ -1367,7 +1363,7 @@ try {
     if (!shapeId) return null;
     if (state.paletteByShapeId.has(shapeId)) return state.paletteByShapeId.get(shapeId);
     setStatus(elStatus, '', `Загружаем палитру формы: ${shapeId} …`);
-    const rawPalette = await apiFetch('/api/palettes/' + encodeURIComponent(shapeId) + '?reconcile=1');
+    const rawPalette = await apiFetch('/api/palettes/' + encodeURIComponent(shapeId));
     const palette = normalizePaletteForUi(shapeId, rawPalette || { shapeId, items: [] });
     state.paletteByShapeId.set(shapeId, palette);
     const items = Array.isArray(palette?.items) ? palette.items : [];
