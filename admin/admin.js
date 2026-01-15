@@ -1148,22 +1148,10 @@ try {
     renderTextures(shapeId, Array.isArray(fresh?.items) ? fresh.items : []);
     renderBucketTextures(shapeId);
   
-    const paletteRes = res?.palette || res?.paletteResult || {};
-    const filesRes = res?.files || res?.filesResult || {};
-    const removed = Number(paletteRes?.removed || 0);
-
-    // Backward/forward compatibility across backend versions:
-    // - new backend: { deletedObjects, deletedPrefixes, palette: {...} }
-    // - legacy backend: { filesResult: { deletedObjects, deletedPrefixes }, paletteResult: {...} }
-    const delObjects = Number((res?.deletedObjects ?? filesRes?.deletedObjects) || 0);
-    const delPrefixesArr = Array.isArray(res?.deletedPrefixes)
-      ? res.deletedPrefixes
-      : (Array.isArray(filesRes?.deletedPrefixes) ? filesRes.deletedPrefixes : []);
-    const delPrefixes = delPrefixesArr.length;
-
-    const deleteErrors = Array.isArray(res?.deleteErrors)
-      ? res.deleteErrors
-      : (Array.isArray(filesRes?.deleteErrors) ? filesRes.deleteErrors : []);
+    const removed = Number(res?.paletteResult?.removed || 0);
+    const delObjects = Number(res?.filesResult?.deletedObjects || 0);
+    const delPrefixes = Array.isArray(res?.filesResult?.deletedPrefixes) ? res.filesResult.deletedPrefixes.length : 0;
+    const deleteErrors = Array.isArray(res?.filesResult?.deleteErrors) ? res.filesResult.deleteErrors : [];
 
     // If palette was not actually changed, treat as a problem (UI would otherwise lie).
     if (removed === 0) {
