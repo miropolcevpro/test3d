@@ -14,6 +14,13 @@ const PALETTE_SETTINGS_BASE_URL = (typeof window !== 'undefined' && window.__PAL
   ? String(window.__PALETTE_SETTINGS_BASE_URL__).replace(/\/+$/, '') + '/'
   : 'https://storage.yandexcloud.net/webar3dtexture/palette_settings/';
 
+
+// Optional API Gateway base (Admin API) used for reconcile/filtering.
+// Set window.__API_BASE_URL__ in index.html before loading app.js, for example:
+//   window.__API_BASE_URL__ = 'https://<your_api_gw_id>.apigw.yandexcloud.net';
+const API_BASE_URL = (typeof window !== 'undefined' && window.__API_BASE_URL__)
+  ? String(window.__API_BASE_URL__).replace(/\/+$/, '') + '/'
+  : '';
 // ------------------------
 // UI
 // ------------------------
@@ -494,11 +501,11 @@ function schedulePrefetchAdjacentTiles(currentTile, list = null) {
     _prefetchTimer = setTimeout(async () => {
       if (mySeq !== _prefetchSeq) return;
 
-	    let preferredQuality = getPreferredSurfaceQuality({ inAR: state.phase === 'ar_final' });
-	    // Optional per-texture override (admin can set this when 2k pack is not available yet).
-	    const params = (currentTile && typeof currentTile === 'object' && currentTile.params) ? currentTile.params : {};
-	    const _fq = (params && typeof params.forceQuality === 'string') ? params.forceQuality.trim().toLowerCase() : '';
-	    if (_fq === '1k' || _fq === '2k') preferredQuality = _fq;
+      let preferredQuality = getPreferredSurfaceQuality({ inAR: state.phase === 'ar_final' });
+      // Optional per-texture override (admin can set this when 2k pack is not available yet).
+      const params = (currentTile && currentTile.params && typeof currentTile.params === 'object') ? currentTile.params : null;
+      const _fq = (params && typeof params.forceQuality === 'string') ? params.forceQuality.trim().toLowerCase() : '';
+  if (_fq === '1k' || _fq === '2k') preferredQuality = _fq;
 
       for (const nt of neighbors) {
         if (mySeq !== _prefetchSeq) return;
@@ -1636,6 +1643,59 @@ async function loadPaletteDefaultsForShape(shapeId) {
   }
 }
 
+
+function _normalizeTextureKey(shapeId, textureId) {
+  const s = String(textureId || '').trim();
+  if (!s) return '';
+  let t = s;
+  // Undo legacy separators
+  t = t.replace(/%3A/ig, ':');
+  // Remove shape prefixes (klassika_, klassika:, etc.)
+  if (shapeId) {
+    const sh = String(shapeId);
+    t = t.replace(new RegExp('^' + sh + '[:_\-]+', 'i'), '');
+  }
+  // Remove pack_ prefix
+  t = t.replace(/^pack[:_\-]+/i, '');
+  // Collapse to a comparable token
+  t = t.toLowerCase();
+  t = t.replace(/[^a-z0-9_\-]+/g, '_');
+  t = t.replace(/_+/g, '_').replace(/^_+|_+$/g, '');
+  return t;
+}
+
+async function _filterPaletteItemsBySurfaces(shapeId, items) {
+  try {
+    if (!API_BASE_URL) return items;
+    const url = `${API_BASE_URL}api/surfaces/${encodeURIComponent(shapeId)}`;
+    const res = await fetch(url);
+    if (!res.ok) return items;
+    const data = await res.json();
+    const textures = data && data.textures;
+    let folderNames = [];
+    if (Array.isArray(textures)) {
+      folderNames = textures.map(t => t && (t.id || t.textureId || t.folder || t.name)).filter(Boolean);
+    } else if (textures && typeof textures === 'object') {
+      folderNames = Object.keys(textures);
+    }
+    if (!folderNames.length) return items;
+
+    const normSet = new Set(folderNames.map(fn => _normalizeTextureKey(shapeId, fn)).filter(Boolean));
+    const out = (Array.isArray(items) ? items : []).filter((it) => {
+      if (!it || typeof it !== 'object') return false;
+      const candidates = [it.id, it.textureId, it.canonicalId, it.name].filter(Boolean);
+      for (const c of candidates) {
+        const n = _normalizeTextureKey(shapeId, c);
+        if (n && normSet.has(n)) return true;
+      }
+      return false;
+    });
+    return out;
+  } catch (_) {
+    return items;
+  }
+}
+
 function paletteItemsToTiles(items, defaults = null) {
   const d = (defaults && typeof defaults === 'object') ? defaults : null;
   const dTile = (d && d.tileSizeM && typeof d.tileSizeM.w === 'number' && typeof d.tileSizeM.h === 'number')
@@ -1753,14 +1813,23 @@ async function openDetail(shapeId) {
   // Otherwise, try the default Object Storage convention:
   //   <SURFACE_PALETTE_BASE_URL>/<shapeId>.json
   let paletteUrl = s.surfacePalette || '';
-  if (!paletteUrl && SURFACE_PALETTE_BASE_URL) {
+
+  // Prefer Admin API reconcile endpoint when API_BASE_URL is provided.
+  // This removes "ghost" textures that are no longer present in the bucket.
+  if (API_BASE_URL) {
+    const ts = Date.now();
+    paletteUrl = `${API_BASE_URL}api/palettes/${encodeURIComponent(s.id)}?reconcile=1&_=${ts}`;
+  } else if (!paletteUrl && SURFACE_PALETTE_BASE_URL) {
     paletteUrl = `${SURFACE_PALETTE_BASE_URL}${encodeURIComponent(s.id)}.json`;
   }
 
   if (paletteUrl) {
     // Optional defaults file: palette_settings/<shapeId>.json
     const paletteDefaults = await loadPaletteDefaultsForShape(s.id);
-    const items = await loadSurfacePalette(paletteUrl);
+    let items = await loadSurfacePalette(paletteUrl);
+    if (API_BASE_URL) {
+      items = await filterPaletteItemsBySurfaces(s.id, items);
+    }
     if (Array.isArray(items) && items.length) {
       allowed = paletteItemsToTiles(items, paletteDefaults);
       paletteActive = true;
