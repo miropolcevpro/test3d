@@ -1153,11 +1153,18 @@ try {
     const delPrefixes = Array.isArray(res?.filesResult?.deletedPrefixes) ? res.filesResult.deletedPrefixes.length : 0;
     const deleteErrors = Array.isArray(res?.filesResult?.deleteErrors) ? res.filesResult.deleteErrors : [];
 
-    // If palette was not actually changed, treat as a problem (UI would otherwise lie).
+    // If palette was not changed, decide based on what happened with files.
+    // This situation is common when the bucket was cleaned manually earlier and you are now trying to
+    // remove stale entries from the palette UI.
     if (removed === 0) {
-      const hint = 'Текстура не была удалена из палитры (возможен несоответствующий textureId в данных).';
-      setStatus(elPaletteStatus, 'error', hint);
-      return;
+      if (alsoBucket || delObjects > 0 || delPrefixes > 0) {
+        const hint = 'Палитра не изменилась (запись уже отсутствует), но операция с файлами выполнена/проверена. Обновите страницу, чтобы убедиться, что запись пропала.';
+        setStatus(elPaletteStatus, 'warn', hint);
+      } else {
+        const hint = 'Текстура не была удалена из палитры (возможен несоответствующий textureId в данных).';
+        setStatus(elPaletteStatus, 'error', hint);
+        return;
+      }
     }
 
     const delMsg = alsoBucket
@@ -1360,7 +1367,7 @@ try {
     if (!shapeId) return null;
     if (state.paletteByShapeId.has(shapeId)) return state.paletteByShapeId.get(shapeId);
     setStatus(elStatus, '', `Загружаем палитру формы: ${shapeId} …`);
-    const rawPalette = await apiFetch('/api/palettes/' + encodeURIComponent(shapeId));
+    const rawPalette = await apiFetch('/api/palettes/' + encodeURIComponent(shapeId) + '?reconcile=1');
     const palette = normalizePaletteForUi(shapeId, rawPalette || { shapeId, items: [] });
     state.paletteByShapeId.set(shapeId, palette);
     const items = Array.isArray(palette?.items) ? palette.items : [];
