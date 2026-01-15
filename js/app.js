@@ -494,10 +494,11 @@ function schedulePrefetchAdjacentTiles(currentTile, list = null) {
     _prefetchTimer = setTimeout(async () => {
       if (mySeq !== _prefetchSeq) return;
 
-      let preferredQuality = getPreferredSurfaceQuality({ inAR: state.phase === 'ar_final' });
-  // Optional per-texture override (admin can set this when 2k pack is not available yet).
-  const _fq = (params && typeof params.forceQuality === 'string') ? params.forceQuality.trim().toLowerCase() : '';
-  if (_fq === '1k' || _fq === '2k') preferredQuality = _fq;
+	    let preferredQuality = getPreferredSurfaceQuality({ inAR: state.phase === 'ar_final' });
+	    // Optional per-texture override (admin can set this when 2k pack is not available yet).
+	    const params = (currentTile && typeof currentTile === 'object' && currentTile.params) ? currentTile.params : {};
+	    const _fq = (params && typeof params.forceQuality === 'string') ? params.forceQuality.trim().toLowerCase() : '';
+	    if (_fq === '1k' || _fq === '2k') preferredQuality = _fq;
 
       for (const nt of neighbors) {
         if (mySeq !== _prefetchSeq) return;
