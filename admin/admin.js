@@ -65,10 +65,11 @@
     if (!s.includes('/') && s.includes(':')) return '';
     if (!sid) return s;
 
-    // Fix common legacy prefixing mistakes inside bucket-relative paths:
-    //   surfaces/<sid>/<sid>_foo/...  -> surfaces/<sid>/foo/...
-    //   surfaces/<sid>/<sid>:foo/...  -> surfaces/<sid>/foo/...
-    s = s.replace(new RegExp('surfaces/' + sid + '/' + sid + '[_:]', 'g'), 'surfaces/' + sid + '/');
+    // IMPORTANT:
+    // Do NOT rewrite bucket keys that contain shapeId prefixes (e.g. "surfaces/klassika/klassika_kara_dag/...").
+    // In this project those prefixes are valid real folder names in the bucket.
+    // Rewriting them would point the UI to non-existing objects and makes the admin think the palette is empty.
+    // We only block obviously invalid legacy identifiers elsewhere ("shapeId:textureId..." without slashes).
     return s;
   }
 
@@ -1359,11 +1360,23 @@ try {
     setStatus(elStatus, 'ok', `Загружено форм: ${shapes.length}`);
   }
 
-  async function ensurePaletteLoaded(shapeId) {
+  async function ensurePaletteLoaded(shapeId, { forceReload = false, reconcile = true } = {}) {
     if (!shapeId) return null;
-    if (state.paletteByShapeId.has(shapeId)) return state.paletteByShapeId.get(shapeId);
+    if (!forceReload && state.paletteByShapeId.has(shapeId)) return state.paletteByShapeId.get(shapeId);
     setStatus(elStatus, '', `Загружаем палитру формы: ${shapeId} …`);
-    const rawPalette = await apiFetch('/api/palettes/' + encodeURIComponent(shapeId));
+
+    // Always bust caches and, by default, reconcile palette with actual bucket folders.
+    // This prevents the admin UI from "missing" recently added items when folder names differ
+    // (shapeId_ / pack_ prefixes, legacy ids, etc.).
+    const ts = Date.now();
+    const url = '/api/palettes/' + encodeURIComponent(shapeId)
+      + (reconcile ? `?reconcile=1&ts=${ts}` : `?ts=${ts}`);
+    const raw = await apiFetch(url);
+
+    // Backwards/forwards compatible parsing:
+    // - Newer backend returns palette object directly.
+    // - Some older deployments may wrap it in { data: {...} }.
+    const rawPalette = (raw && typeof raw === 'object' && raw.data && typeof raw.data === 'object') ? raw.data : raw;
     const palette = normalizePaletteForUi(shapeId, rawPalette || { shapeId, items: [] });
     state.paletteByShapeId.set(shapeId, palette);
     const items = Array.isArray(palette?.items) ? palette.items : [];
@@ -1803,10 +1816,13 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
       items,
     };
     await savePalette(shapeId, next);
-    // refresh
+    // Refresh: force reload palette from backend (with reconcile) so UI reflects what was persisted.
     state.paletteByShapeId.delete(shapeId);
-    const fresh = await ensurePaletteLoaded(shapeId);
+    const fresh = await ensurePaletteLoaded(shapeId, { forceReload: true, reconcile: true });
     renderTextures(shapeId, Array.isArray(fresh?.items) ? fresh.items : []);
+    // Also refresh bucket view pills ("в палитре" / "не в палитре").
+    try { await ensureBucketIndexLoaded(shapeId, { forceReload: true }); } catch {}
+    renderBucketTextures(shapeId);
   }
 
   function num(v, fallback = null) {
