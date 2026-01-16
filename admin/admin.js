@@ -1057,18 +1057,24 @@ async function apiSyncTexture(shapeId, textureId) {
           <input type="checkbox" data-action="select" data-id="${escapeHtml(id)}" ${selected ? 'checked' : ''} />
           <span></span>
         </label>
-        <img class="thumb" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display='none'" src="${escapeHtml(previewUrl)}">
+        <img class="thumb" alt="" loading="lazy" referrerpolicy="no-referrer" src="${escapeHtml(previewUrl)}">
         <div class="meta">
           <div class="name">${escapeHtml(name)}</div>
           <div class="id">${escapeHtml(id)}</div>
           <div class="muted mtSm">${pills}</div>
-          <div class="row" style="justify-content:flex-end; gap:8px; margin-top:10px; flex-wrap:wrap;">
+          <div class="row tileActions">
             <button class="btn btn--ghost btn--sm" data-action="edit" data-id="${escapeHtml(id)}">Настроить</button>
             <button class="btn btn--ghost btn--sm" data-action="update" data-id="${escapeHtml(id)}" title="Перезагрузить файлы карты (обновить текущую текстуру)">Обновить файлы</button>
             <button class="btn btn--danger btn--sm" data-action="delete" data-id="${escapeHtml(id)}" title="Удалить текстуру">Удалить</button>
           </div>
         </div>
       `;
+
+      // Avoid inline event handlers (CSP-friendly).
+      const img = card.querySelector('img.thumb');
+      if (img) img.addEventListener('error', () => {
+        try { img.style.display = 'none'; } catch {}
+      });
 
       const selCb = card.querySelector('input[data-action="select"]');
       selCb.addEventListener('change', () => {
@@ -1204,11 +1210,17 @@ try {
     const idx = state.bucketIndexByShapeId.get(shapeId) || { textures: [] };
     const textures = Array.isArray(idx.textures) ? idx.textures : [];
     const palette = state.paletteByShapeId.get(shapeId);
-    const paletteIds = new Set((Array.isArray(palette?.items) ? palette.items : []).map(x => x?.id).filter(Boolean));
+    // Compare in canonical space to avoid legacy prefixes ("klassika:paver...") and casing drift.
+    const paletteIds = new Set(
+      (Array.isArray(palette?.items) ? palette.items : [])
+        .map(x => canonicalTextureId(shapeId, x?.id || x?.textureId || ''))
+        .filter(Boolean)
+    );
 
     const filter = (elBucketFilter && elBucketFilter.value) || 'all';
     const list = textures.filter(t => {
-      const inPalette = paletteIds.has(t.textureId);
+      const texId = canonicalTextureId(shapeId, t?.textureId || '');
+      const inPalette = !!texId && paletteIds.has(texId);
       const broken = isBucketTextureBroken(t);
       if (filter === 'missingInPalette') return !inPalette;
       if (filter === 'inPalette') return inPalette;
@@ -1222,7 +1234,8 @@ try {
     const frag = document.createDocumentFragment();
     for (const t of list) {
       const textureId = t?.textureId || '';
-      const inPalette = paletteIds.has(textureId);
+      const texCanonical = canonicalTextureId(shapeId, textureId);
+      const inPalette = !!texCanonical && paletteIds.has(texCanonical);
       const broken = isBucketTextureBroken(t);
       const has2k = !!t?.qualities?.['2k'];
       const previewUrl = pickMediaUrl([
@@ -1241,11 +1254,11 @@ try {
       const card = document.createElement('div');
       card.className = 'tile';
       card.innerHTML = `
-        <img class="thumb" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display='none'" src="${escapeHtml(previewUrl)}">
+        <img class="thumb" alt="" loading="lazy" referrerpolicy="no-referrer" src="${escapeHtml(previewUrl)}">
         <div class="meta">
           <div class="name">${escapeHtml(textureId)}</div>
           <div class="muted mtSm">${pills}</div>
-          <div class="row" style="justify-content:flex-end; gap:8px; margin-top:10px; flex-wrap:wrap;">
+          <div class="row tileActions">
             ${inPalette
               ? `<button class="btn btn--ghost btn--sm" data-action="edit" data-id="${escapeHtml(textureId)}">Настроить</button>`
               : `<button class="btn btn--sm" data-action="add" data-id="${escapeHtml(textureId)}" ${broken ? 'disabled' : ''}>Добавить в палитру</button>`
@@ -1255,6 +1268,12 @@ try {
           </div>
         </div>
       `;
+
+      // Avoid inline event handlers (CSP-friendly).
+      const img = card.querySelector('img.thumb');
+      if (img) img.addEventListener('error', () => {
+        try { img.style.display = 'none'; } catch {}
+      });
 
       const btnAdd = card.querySelector('[data-action="add"]');
       if (btnAdd) {
@@ -1810,6 +1829,10 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
     state.paletteByShapeId.delete(shapeId);
     const fresh = await ensurePaletteLoaded(shapeId);
     renderTextures(shapeId, Array.isArray(fresh?.items) ? fresh.items : []);
+
+    // Also refresh the bucket scan view so the newly added texture is shown as "already in palette".
+    // This avoids user confusion where the palette is saved but the "bucket" list still looks unchanged.
+    try { renderBucketTextures(shapeId); } catch {}
   }
 
   function num(v, fallback = null) {
