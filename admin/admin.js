@@ -1175,7 +1175,7 @@ try {
   function isBucketTextureBroken(t) {
     const q1 = t?.qualities?.['1k'];
     if (!q1 || !q1.maps) return true;
-    const need = ['albedo','normal','roughness','height'];
+    const need = ['albedo','normal','roughness'];
     return need.some(k => !q1.maps[k]?.key);
   }
 
@@ -1268,6 +1268,12 @@ try {
             const item = buildPaletteItemFromBucket(shapeId, textureId, t);
             await upsertItemAndSavePalette(shapeId, item);
             setStatus(elBucketStatus, 'ok', `Добавлено в палитру: ${textureId}`);
+            try {
+              // force palette UI refresh immediately
+              state.paletteByShapeId.delete(shapeId);
+              const pal = await ensurePaletteLoaded(shapeId, { forceReload: true, reconcile: false });
+              renderTextures(shapeId, Array.isArray(pal?.items) ? pal.items : []);
+            } catch (e) { console.warn('palette reload after add failed', e); }
             // refresh bucket view pills
             renderBucketTextures(shapeId);
           } catch (err) {
@@ -1360,7 +1366,7 @@ try {
     setStatus(elStatus, 'ok', `Загружено форм: ${shapes.length}`);
   }
 
-  async function ensurePaletteLoaded(shapeId, { forceReload = false, reconcile = true } = {}) {
+  async function ensurePaletteLoaded(shapeId, { forceReload = false, reconcile = false } = {}) {
     if (!shapeId) return null;
     if (!forceReload && state.paletteByShapeId.has(shapeId)) return state.paletteByShapeId.get(shapeId);
     setStatus(elStatus, '', `Загружаем палитру формы: ${shapeId} …`);
@@ -1818,7 +1824,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
     await savePalette(shapeId, next);
     // Refresh: force reload palette from backend (with reconcile) so UI reflects what was persisted.
     state.paletteByShapeId.delete(shapeId);
-    const fresh = await ensurePaletteLoaded(shapeId, { forceReload: true, reconcile: true });
+    const fresh = await ensurePaletteLoaded(shapeId, { forceReload: true, reconcile: false });
     renderTextures(shapeId, Array.isArray(fresh?.items) ? fresh.items : []);
     // Also refresh bucket view pills ("в палитре" / "не в палитре").
     try { await ensureBucketIndexLoaded(shapeId, { forceReload: true }); } catch {}
@@ -2907,25 +2913,16 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
                 } catch {}
               }
 
-              // Sync palette item maps from bucket (guards against mixed formats / custom file names).
-              // In "update" mode it is mandatory; in "new" mode it is also useful after structured ZIP.
+              // Note: endpoint /api/textures/{shapeId}/{textureId}/sync is not exposed in the current API Gateway.
+              // To avoid CORS/preflight failures, we only refresh the bucket index here.
               try {
-                const toSync = (parsed?.textures && typeof parsed.textures.keys === 'function')
-                  ? Array.from(parsed.textures.keys())
-                  : [];
-                for (const tid of toSync) {
-                  if (!tid) continue;
-                  await apiSyncTexture(shapeId, tid);
-                }
-                state.paletteByShapeId.delete(shapeId);
-                const fresh2 = await ensurePaletteLoaded(shapeId, { forceReload: true });
-                if (parseRoute().name === 'shape') renderTextures(shapeId, Array.isArray(fresh2?.items) ? fresh2.items : []);
+                state.bucketIndexByShapeId.delete(shapeId);
+                await ensureBucketIndexLoaded(shapeId, { forceReload: true });
               } catch (e) {
                 console.warn(e);
-                setStatus(elUploadStatus, 'warn', 'Файлы загружены, но синхронизация палитры по бакету не удалась. Проверьте backend / доступы S3.');
               }
 
-              return;
+return;
             }
 
             // --- MODE 2: "ручной" (файлы/ZIP без структуры) — как раньше: один textureId
@@ -2992,13 +2989,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
               const item = buildPaletteItemFromUpload(shapeId, textureId, displayName, quality, tasks, tileSizeM);
               await upsertItemAndSavePalette(shapeId, item);
 
-              // Sync from bucket to ensure correct extensions/paths (png/webp mix, non-standard names).
-              try {
-                await apiSyncTexture(shapeId, textureId);
-              } catch (e) {
-                console.warn(e);
-                setStatus(elUploadStatus, 'warn', 'Палитра обновлена, но синхронизация по бакету не удалась. Проверьте backend / доступы S3.');
-              }
+              // Note: /sync endpoint is not available via Gateway (causes CORS). Skip and only refresh bucket index.
               setStatus(elUploadStatus, 'ok', 'Готово: файлы загружены, палитра обновлена и сохранена.');
               try {
                 await ensureBucketIndexLoaded(shapeId, { forceReload: true });
