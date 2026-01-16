@@ -1,5 +1,5 @@
-// BUILD: v28 2026-01-16b
-const __BUILD_ID__ = "v28-20260116b";
+// BUILD: v28 2026-01-16d
+const __BUILD_ID__ = "v28-20260116d";
 console.log("[Admin] build", __BUILD_ID__);
 /* Admin (Step 3 start) — shapes list + shape details (read-only palette), router scaffold */
 (() => {
