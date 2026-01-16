@@ -1,5 +1,5 @@
-// BUILD: v28 2026-01-16d
-const __BUILD_ID__ = "v28-20260116d";
+// BUILD: v28 2026-01-16e
+const __BUILD_ID__ = "v28-20260116e";
 console.log("[Admin] build", __BUILD_ID__);
 /* Admin (Step 3 start) — shapes list + shape details (read-only palette), router scaffold */
 (() => {
@@ -813,7 +813,7 @@ function getToken() {
     return sessionStorage.getItem(TOKEN_KEY) || '';
   }
 
-  function setToken(t) {
+  async function setToken(t) {
     if (t) sessionStorage.setItem(TOKEN_KEY, t);
     else sessionStorage.removeItem(TOKEN_KEY);
   }
@@ -878,7 +878,7 @@ async function apiSyncTexture(shapeId, textureId) {
     });
   }
 
-  function showLoggedInUI(isLoggedIn) {
+  async function showLoggedInUI(isLoggedIn) {
     elLoginCard.hidden = !!isLoggedIn;
     elMainCard.hidden = !isLoggedIn;
   }
@@ -2013,7 +2013,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
     ctxAfter.putImageData(adjusted, 0, 0);
   }
 
-  function scheduleTexturePreviewRedraw(shapeId) {
+  async function scheduleTexturePreviewRedraw(shapeId) {
     if (!elTexCanvasAfter) return;
     if (texPreviewDrawTimer) clearTimeout(texPreviewDrawTimer);
     texPreviewDrawTimer = setTimeout(() => {
