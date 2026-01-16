@@ -1,10 +1,67 @@
-// BUILD: v28 2026-01-16e
-const __BUILD_ID__ = "v28-20260116e";
+// BUILD: v28 2026-01-16f (runtime-config)
+const __BUILD_ID__ = "v28-20260116f";
 console.log("[Admin] build", __BUILD_ID__);
 /* Admin (Step 3 start) — shapes list + shape details (read-only palette), router scaffold */
-(() => {
+(async () => {
   const API_BASE_URL = (window.API_BASE_URL || '').replace(/\/+$/, '');
   const TOKEN_KEY = 'admin_jwt';
+
+  // Remote runtime config (safe, non-breaking):
+  // - Tries to GET ${API_BASE_URL}/api/config
+  // - On success sets window.BUCKET_BASE_URL (and a couple of optional overrides)
+  // - On failure does NOTHING (falls back to current hardcoded defaults)
+  async function tryLoadRemoteConfig() {
+    if (!API_BASE_URL) return null;
+    // Prefer public config (no JWT). If gateway does not expose it, we fall back to /api/config.
+    const base = API_BASE_URL.replace(/\/+$/, '');
+    const urls = [base + '/config', base + '/api/config'];
+    const controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    const timer = setTimeout(() => {
+      try { controller && controller.abort(); } catch {}
+    }, 1500);
+    try {
+      for (const url of urls) {
+        const res = await fetch(url, {
+          method: 'GET',
+          cache: 'no-store',
+          signal: controller ? controller.signal : undefined,
+        });
+        if (!res.ok) continue;
+        const data = await res.json();
+        if (!data || data.ok !== true) continue;
+        return data;
+      }
+      return null;
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  function applyRemoteConfig(cfg) {
+    try {
+      // Preferred new shape (stable)
+      if (cfg && cfg.public) {
+        if (cfg.public.bucketBaseUrl) {
+          window.BUCKET_BASE_URL = String(cfg.public.bucketBaseUrl).replace(/\/+$/, '/') ;
+        }
+        // Optional: allow overriding these for future use without hardcoding.
+        if (cfg.public.palettesBaseUrl) window.PALETTES_BASE_URL = String(cfg.public.palettesBaseUrl).replace(/\/+$/, '');
+        if (cfg.public.surfacesPublicBaseUrl) window.SURFACES_PUBLIC_BASE_URL = String(cfg.public.surfacesPublicBaseUrl).replace(/\/+$/, '');
+      }
+      // Optional: expose build in console for debugging.
+      if (cfg && cfg.build) {
+        const b = (cfg.build.api || cfg.build).toString();
+        if (b) console.log('[Admin] backend build', b);
+      }
+    } catch {}
+  }
+
+  // Do not block UI on config longer than the timeout.
+  // If API Gateway does not expose /api/config yet, this will silently noop.
+  const remoteCfg = await tryLoadRemoteConfig();
+  if (remoteCfg) applyRemoteConfig(remoteCfg);
 
   // In GitHub Pages the admin lives under /<repo>/admin/, while site assets are under /<repo>/assets/.
   // Resolve any relative asset paths (e.g. "assets/forms/klassika.png") against the site root ("/<repo>/").
