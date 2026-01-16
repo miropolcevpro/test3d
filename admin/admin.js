@@ -1,3 +1,6 @@
+// BUILD: v28 2026-01-16
+const __BUILD_ID__ = "v28-20260116";
+console.log("[Admin] build", __BUILD_ID__);
 /* Admin (Step 3 start) — shapes list + shape details (read-only palette), router scaffold */
 (() => {
   const API_BASE_URL = (window.API_BASE_URL || '').replace(/\/+$/, '');
@@ -823,7 +826,7 @@ function getToken() {
     if (token) headers.set('Authorization', `Bearer ${token}`);
     if (opts.body && !(opts.body instanceof FormData)) headers.set('Content-Type', 'application/json');
 
-    const res = await fetch(url, { ...opts, headers, cache: 'no-store' });
+    const res = await fetch(url,{cache:"no-store", ...opts, headers, cache: 'no-store' });
     let json = null;
     const ct = res.headers.get('content-type') || '';
     if (ct.includes('application/json')) json = await res.json().catch(() => null);
