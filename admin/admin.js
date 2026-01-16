@@ -1,5 +1,5 @@
-// BUILD: v28 2026-01-16
-const __BUILD_ID__ = "v28-20260116";
+// BUILD: v28 2026-01-16b
+const __BUILD_ID__ = "v28-20260116b";
 console.log("[Admin] build", __BUILD_ID__);
 /* Admin (Step 3 start) — shapes list + shape details (read-only palette), router scaffold */
 (() => {
@@ -1385,8 +1385,25 @@ try {
     if (!shapeId) return null;
     if (state.paletteByShapeId.has(shapeId)) return state.paletteByShapeId.get(shapeId);
     setStatus(elStatus, '', `Загружаем палитру формы: ${shapeId} …`);
-    const rawPalette = await apiFetch('/api/palettes/' + encodeURIComponent(shapeId));
-    const palette = normalizePaletteForUi(shapeId, rawPalette || { shapeId, items: [] });
+    const payload = await apiFetch('/api/palettes/' + encodeURIComponent(shapeId));
+
+    // Backwards/forwards compatible parsing.
+    // Depending on backend version, response can be:
+    //  - direct palette JSON: { shapeId, items:[...] }
+    //  - wrapped: { ok:true, palette:{...} }
+    //  - wrapped: { ok:true, data:{...} }
+    //  - nested:  { ok:true, data:{ palette:{...} } }
+    //  - legacy:  { ok:true, data:{ data:{...} } }
+    const rawPalette =
+      (payload && Array.isArray(payload.items) ? payload : null) ||
+      (payload?.palette && Array.isArray(payload.palette.items) ? payload.palette : null) ||
+      (payload?.data && Array.isArray(payload.data.items) ? payload.data : null) ||
+      (payload?.data?.palette && Array.isArray(payload.data.palette.items) ? payload.data.palette : null) ||
+      (payload?.data?.data && Array.isArray(payload.data.data.items) ? payload.data.data : null) ||
+      (payload?.data?.data?.palette && Array.isArray(payload.data.data.palette.items) ? payload.data.data.palette : null) ||
+      null;
+
+    const palette = normalizePaletteForUi(shapeId, rawPalette || { shapeId, items: [], _meta: payload?._meta });
     state.paletteByShapeId.set(shapeId, palette);
     const items = Array.isArray(palette?.items) ? palette.items : [];
     if (palette?._meta?.missing) {
