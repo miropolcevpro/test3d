@@ -14,6 +14,12 @@ const PALETTE_SETTINGS_BASE_URL = (typeof window !== 'undefined' && window.__PAL
   ? String(window.__PALETTE_SETTINGS_BASE_URL__).replace(/\/+$/, '') + '/'
   : 'https://storage.yandexcloud.net/webar3dtexture/palette_settings/';
 
+// Palette settings are OPTIONAL and are NOT used in the current product flow.
+// We keep support for future needs, but disable it by default to avoid
+// unnecessary network calls (and noisy 404 logs) when the file is absent.
+// To enable, set window.__ENABLE_PALETTE_SETTINGS__ = true before loading app.js.
+const ENABLE_PALETTE_SETTINGS = (typeof window !== 'undefined' && window.__ENABLE_PALETTE_SETTINGS__ === true);
+
 
 // Optional API Gateway base (Admin API) used for reconcile/filtering.
 // Set window.__API_BASE_URL__ in index.html before loading app.js, for example:
@@ -1738,6 +1744,9 @@ async function loadSurfacePalette(url) {
 }
 
 async function loadPaletteDefaultsForShape(shapeId) {
+  // Disabled by default (see ENABLE_PALETTE_SETTINGS above). This prevents
+  // noisy 404s for projects that keep all parameters inside palettes/<shapeId>.json.
+  if (!ENABLE_PALETTE_SETTINGS) return null;
   if (!shapeId || !PALETTE_SETTINGS_BASE_URL) return null;
   state._paletteDefaultsCache = state._paletteDefaultsCache || new Map();
   const url = `${PALETTE_SETTINGS_BASE_URL}${encodeURIComponent(shapeId)}.json`;
