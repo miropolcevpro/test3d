@@ -2914,6 +2914,9 @@ function createFlagMarker({
   hit.position.y = 0.06;
   g.add(hit);
 
+  // Visibility tweak: enlarge marker by 30% (no AR logic changes)
+  g.scale.setScalar(1.3);
+
   return g;
 }
 
