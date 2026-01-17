@@ -70,6 +70,10 @@ const UI = {
   finalPatterns: document.getElementById('finalPatterns'),
   finalColors: document.getElementById('finalColors'),
 
+  // AR texture load progress
+  texLoadBarWrap: document.getElementById('texLoadBarWrap'),
+  texLoadBar: document.getElementById('texLoadBar'),
+
   // Hidden tech
   layoutSelect: document.getElementById('layoutSelect'),
   toggleOcclusion: document.getElementById('toggleOcclusion'),
@@ -114,6 +118,55 @@ function updateArBottomStripVar() {
 
 
 // ------------------------
+
+// ------------------------
+// AR: texture load progress indicator (thin bar under pattern buttons)
+// ------------------------
+const _arTexProgress = { seq: 0, total: 0, done: 0, hideTimer: 0 };
+
+function _arTexProgressShow(seq, total) {
+  try {
+    if (!UI.texLoadBarWrap || !UI.texLoadBar) return;
+    _arTexProgress.seq = seq;
+    _arTexProgress.total = Math.max(1, Number(total) || 1);
+    _arTexProgress.done = 0;
+    if (_arTexProgress.hideTimer) {
+      clearTimeout(_arTexProgress.hideTimer);
+      _arTexProgress.hideTimer = 0;
+    }
+    UI.texLoadBar.style.width = '0%';
+    UI.texLoadBarWrap.classList.add('is-visible');
+    show(UI.texLoadBarWrap, true);
+    // ensure layout-safe offset recalculation
+    updateArBottomStripVar();
+  } catch (_) {}
+}
+
+function _arTexProgressTick(seq) {
+  try {
+    if (seq !== _arTexProgress.seq) return;
+    if (!UI.texLoadBar) return;
+    _arTexProgress.done++;
+    const pct = Math.max(0, Math.min(100, (_arTexProgress.done / _arTexProgress.total) * 100));
+    UI.texLoadBar.style.width = `${pct.toFixed(0)}%`;
+    if (_arTexProgress.done >= _arTexProgress.total) _arTexProgressHide(seq);
+  } catch (_) {}
+}
+
+function _arTexProgressHide(seq) {
+  try {
+    if (seq !== _arTexProgress.seq) return;
+    if (!UI.texLoadBarWrap) return;
+    // Finish smoothly then fade out.
+    if (UI.texLoadBar) UI.texLoadBar.style.width = '100%';
+    UI.texLoadBarWrap.classList.remove('is-visible');
+    _arTexProgress.hideTimer = setTimeout(() => {
+      if (seq !== _arTexProgress.seq) return;
+      show(UI.texLoadBarWrap, false);
+      updateArBottomStripVar();
+    }, 220);
+  } catch (_) {}
+}
 // App state
 // ------------------------
 const state = {
@@ -1262,12 +1315,27 @@ async function selectTile(tileOrId) {
 
   const preferredQuality = getPreferredSurfaceQuality({ inAR: state.phase === 'ar_final' });
 
+  const _showTexProgress = state.phase === 'ar_final';
+  const _texProgSeq = _showTexProgress ? (_arTexProgress.seq + 1) : 0;
+  if (_showTexProgress) {
+    const _total = [albedoUrl, roughUrl, aoUrl].filter(Boolean).length;
+    _arTexProgressShow(_texProgSeq, _total);
+  }
+
+
   // Start core map loads immediately (in parallel).
   // Premium stability rule: keep map quality consistent across core maps.
   const albedoP = loadTexSmartCached(albedoUrl, 'albedo', preferredQuality, isStale, { priority: 'high' });
   const roughP  = loadTexSmartCached(roughUrl,  'roughness', preferredQuality, isStale, { priority: 'high' });
   const aoP     = aoUrl ? loadTexSmartCached(aoUrl, 'ao', preferredQuality, isStale, { priority: 'high' }) : Promise.resolve(null);
   const normalP = loadTexSmartCached(normalUrl, 'normal',    preferredQuality, isStale, { priority: 'normal' });
+
+  if (_showTexProgress) {
+    albedoP.finally(() => _arTexProgressTick(_texProgSeq));
+    roughP.finally(() => _arTexProgressTick(_texProgSeq));
+    aoP.finally(() => _arTexProgressTick(_texProgSeq));
+  }
+
 
   let albedoTex = await albedoP;
   if (isStale()) return;
