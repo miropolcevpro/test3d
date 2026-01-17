@@ -3600,16 +3600,42 @@ init().catch(err => {
 // ------------------------
 // Shape picker (AR UI)
 // ------------------------
+function _readCssPxVar(name, fallback = 0) {
+  try {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    const n = parseInt(v, 10);
+    return Number.isFinite(n) ? n : fallback;
+  } catch (_) {
+    return fallback;
+  }
+}
+
+function _clampShapePickerPanelBounds() {
+  try {
+    if (!UI.shapePickerPanel) return;
+    // Keep the drawer between AR top controls and the bottom bar.
+    const top = _readCssPxVar('--ar-top-strip', 56);
+    const bottom = _readCssPxVar('--ar-bottom-strip', 0);
+    UI.shapePickerPanel.style.top = `${Math.max(56, top)}px`;
+    UI.shapePickerPanel.style.bottom = `${Math.max(0, bottom)}px`;
+  } catch (_) {}
+}
+
 function setShapePickerOpen(open) {
   if (!UI.shapePickerPanel || !UI.shapePickerBackdrop) return;
   if (open) {
     // Ensure the drawer is always clamped between the AR top bar and the bottom controls.
     updateArTopStripVar();
     updateArBottomStripVar();
+    _clampShapePickerPanelBounds();
     UI.shapePickerBackdrop.hidden = false;
     UI.shapePickerPanel.hidden = false;
     // allow CSS transition
     requestAnimationFrame(() => {
+      // On some mobile browsers the bars resize a moment after UI changes; clamp again.
+      updateArTopStripVar();
+      updateArBottomStripVar();
+      _clampShapePickerPanelBounds();
       UI.shapePickerPanel.classList.add('open');
     });
   } else {

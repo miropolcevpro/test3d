@@ -648,10 +648,10 @@ to   { transform: scale(1.12); }
   border-radius:7px;
   overflow:hidden;
   background:rgba(255,255,255,0.04);
-  /* Show 5 items in the visible drawer height, others scroll */
-  height:calc((100% - 40px) / 5);
-  min-height:86px;
-  max-height:132px;
+  /* Show 5 items in the visible drawer height (between top + bottom AR bars), others scroll */
+  height:calc((100% - (4 * 10px)) / 5);
+  min-height:96px;
+  max-height:160px;
 }
 .shapePickerItem button{
   width:100%;
@@ -663,6 +663,8 @@ to   { transform: scale(1.12); }
   display:flex;
   flex-direction:column;
   height:100%;
+  /* Critical for mobile Safari flexbox: allow inner preview to shrink instead of overflowing (which looks like "cropped") */
+  min-height:0;
 }
 .shapePickerThumbWrap{
   flex:1;
@@ -674,13 +676,17 @@ to   { transform: scale(1.12); }
   background:rgba(0,0,0,0.18);
   border-radius:7px;
   margin:8px 8px 0;
+  /* Allow shrink inside flex column; prevent overflow clipping by the parent card */
+  min-height:0;
+  overflow:hidden;
 }
 .shapePickerThumb{
   width:100%;
   height:100%;
   max-width:100%;
   max-height:100%;
-  object-fit:contain;
+  object-fit:contain !important;
+  object-position:center;
   display:block;
   border-radius:7px;
 }
