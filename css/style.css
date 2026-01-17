@@ -344,7 +344,13 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   backdrop-filter: blur(10px);
   display:flex;flex-direction:column;gap:10px;
 }
-.finalPatterns{display:flex;gap:10px;justify-content:flex-start;}
+.finalPatterns{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  width:100%;
+  justify-content:space-between;
+}
 .texLoadBarWrap{
   width:100%;
   height:3px;
@@ -585,4 +591,75 @@ to   { transform: scale(1.12); }
 
 @media (prefers-reduced-motion: reduce) {
   #splashScreen { animation: none; }
+}
+
+
+/* --- AR Shape Picker --- */
+.shapePickerBackdrop{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,0.0);
+  z-index:9998;
+}
+.shapePickerPanel{
+  position:fixed;
+  right:0;
+  top:70px;
+  bottom:110px;
+  width:25vw;
+  max-width:260px;
+  min-width:160px;
+  background:rgba(12,12,12,0.82);
+  backdrop-filter: blur(8px);
+  border-left:1px solid rgba(255,255,255,0.12);
+  z-index:9999;
+  transform:translateX(100%);
+  transition:transform 180ms ease;
+  display:flex;
+  flex-direction:column;
+}
+.shapePickerPanel.open{
+  transform:translateX(0);
+}
+.shapePickerHeader{
+  padding:10px 10px 8px;
+  font-size:12px;
+  opacity:0.9;
+  border-bottom:1px solid rgba(255,255,255,0.10);
+}
+.shapePickerList{
+  overflow-y:auto;
+  padding:10px;
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+.shapePickerItem{
+  border:1px solid rgba(255,255,255,0.12);
+  border-radius:10px;
+  overflow:hidden;
+  background:rgba(255,255,255,0.03);
+}
+.shapePickerItem button{
+  width:100%;
+  padding:0;
+  border:0;
+  background:transparent;
+  color:#fff;
+  text-align:left;
+}
+.shapePickerThumb{
+  width:100%;
+  aspect-ratio: 1 / 1;
+  object-fit:cover;
+  display:block;
+}
+.shapePickerName{
+  padding:8px 10px 10px;
+  font-size:12px;
+  line-height:1.2;
+  opacity:0.95;
+}
+.shapePickerItem.active{
+  border-color: rgba(57, 213, 82, 0.75);
 }

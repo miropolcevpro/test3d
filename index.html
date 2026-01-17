@@ -225,6 +225,7 @@
       <div id="finalBar" class="finalBar" hidden>
         <div class="finalPatterns" id="finalPatterns">
           <button id="btnLayoutCycle" class="patternTab" type="button">Смена укладки</button>
+          <button id="btnShapePicker" class="patternTab" type="button">Выбрать форму</button>
         </div>
         <div id="texLoadBarWrap" class="texLoadBarWrap" hidden aria-hidden="true">
           <div id="texLoadBar" class="texLoadBar"></div>
@@ -241,6 +242,14 @@
       <label id="toggleOcclusionWrap" class="hidden" aria-hidden="true">
         <input type="checkbox" id="toggleOcclusion" />
       </label>
+
+      <!-- Shape picker (AR) -->
+      <div id="shapePickerBackdrop" class="shapePickerBackdrop" hidden></div>
+      <aside id="shapePickerPanel" class="shapePickerPanel" hidden>
+        <div class="shapePickerHeader">Формы</div>
+        <div id="shapePickerList" class="shapePickerList"></div>
+      </aside>
+
     </section>
 
   </div>

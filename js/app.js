@@ -75,6 +75,10 @@ const UI = {
   finalBar: document.getElementById('finalBar'),
   finalPatterns: document.getElementById('finalPatterns'),
   btnLayoutCycle: document.getElementById('btnLayoutCycle'),
+  btnShapePicker: document.getElementById('btnShapePicker'),
+  shapePickerBackdrop: document.getElementById('shapePickerBackdrop'),
+  shapePickerPanel: document.getElementById('shapePickerPanel'),
+  shapePickerList: document.getElementById('shapePickerList'),
   finalColors: document.getElementById('finalColors'),
 
   // AR texture load progress
@@ -2575,6 +2579,9 @@ function cleanupXR() {
   previewGrid.visible = true;
 
   // UI
+  // close shape picker if open
+  try { setShapePickerOpen(false); } catch (_) {}
+  // UI
   if (!state._restartingAR) {
     setActiveScreen('detail');
     state.phase = 'detail';
@@ -3488,6 +3495,21 @@ UI.btnDone?.addEventListener('click', () => {
   }
   setLayout(state.layout);
 
+  // Shape picker (open side menu to switch shape)
+  if (UI.btnShapePicker) {
+    UI.btnShapePicker.onclick = () => {
+      if (!UI.shapePickerPanel || !UI.shapePickerList) return;
+      if (!UI.shapePickerPanel.hasAttribute('data-built')) {
+        try { buildShapePickerList(); } catch (e) { console.warn('shape picker build failed', e); }
+        UI.shapePickerPanel.setAttribute('data-built', '1');
+      }
+      setShapePickerOpen(UI.shapePickerPanel.hidden);
+    };
+  }
+  if (UI.shapePickerBackdrop) {
+    UI.shapePickerBackdrop.onclick = () => setShapePickerOpen(false);
+  }
+
   renderColorRow(UI.finalColors, (Array.isArray(state.currentAllowedTiles) && state.currentAllowedTiles.length ? state.currentAllowedTiles : state.tiles.slice(0, 8)));
 
   // hide hint
@@ -3515,6 +3537,7 @@ async function init() {
   try {
     const shapesData = await loadShapes();
     state.shapes = shapesData.shapes || [];
+    try { buildShapePickerList(); } catch (e) {}
   } catch (e) {
     console.warn('shapes.json не найден или повреждён — используем плитки как каталог', e);
     // fallback: каждая плитка как отдельная "форма"
@@ -3526,6 +3549,7 @@ async function init() {
       tileIds: [t.id],
       tech: { 'Размер': `${t.tileSizeM.w.toFixed(2)}×${t.tileSizeM.h.toFixed(2)} м` },
     }));
+    try { buildShapePickerList(); } catch (e) {}
   }
 
   // initial
@@ -3560,3 +3584,74 @@ init().catch(err => {
   console.error(err);
   alert('Ошибка инициализации: ' + (err?.message || err));
 });
+
+
+// ------------------------
+// Shape picker (AR UI)
+// ------------------------
+function setShapePickerOpen(open) {
+  if (!UI.shapePickerPanel || !UI.shapePickerBackdrop) return;
+  if (open) {
+    UI.shapePickerBackdrop.hidden = false;
+    UI.shapePickerPanel.hidden = false;
+    // allow CSS transition
+    requestAnimationFrame(() => {
+      UI.shapePickerPanel.classList.add('open');
+    });
+  } else {
+    UI.shapePickerPanel.classList.remove('open');
+    UI.shapePickerBackdrop.hidden = true;
+    // hide panel after transition
+    setTimeout(() => {
+      if (!UI.shapePickerPanel.classList.contains('open')) {
+        UI.shapePickerPanel.hidden = true;
+      }
+    }, 210);
+  }
+}
+
+function buildShapePickerList() {
+  if (!UI.shapePickerList) return;
+  UI.shapePickerList.innerHTML = '';
+
+  const shapes = Array.isArray(state.shapes) ? state.shapes : [];
+  for (const s of shapes) {
+    const wrap = document.createElement('div');
+    wrap.className = 'shapePickerItem';
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+
+    const icon = s.icon ? s.icon : '';
+    const name = s.name ? s.name : s.id;
+
+    btn.innerHTML = `
+      <img class="shapePickerThumb" src="${icon}" alt="" loading="lazy">
+      <div class="shapePickerName">${name}</div>
+    `;
+
+    btn.addEventListener('click', async () => {
+      setShapePickerOpen(false);
+
+      // If already on the same shape — just close.
+      if (state.selectedShape && state.selectedShape.id === s.id) return;
+
+      // Safest behavior: stop AR session then open detail of the selected shape.
+      try {
+        if (state.xrSession) await stopAR();
+      } catch (e) {
+        console.warn('stopAR failed', e);
+      }
+
+      try {
+        await openDetail(s.id);
+      } catch (e) {
+        console.error('openDetail failed', e);
+      }
+    });
+
+    wrap.appendChild(btn);
+    UI.shapePickerList.appendChild(wrap);
+  }
+}
+
