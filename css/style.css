@@ -607,8 +607,9 @@ to   { transform: scale(1.12); }
   position:fixed;
   right:0;
   /* Keep clear of the top AR controls and align with the top edge of the bottom bar */
-  top:var(--ar-top-strip);
-  bottom:var(--ar-bottom-strip);
+  /* Provide safe fallbacks in case JS didn't set the variables yet */
+  top:var(--ar-top-strip, 64px);
+  bottom:var(--ar-bottom-strip, 92px);
   width:20vw;
   max-width:240px;
   min-width:160px;
@@ -622,6 +623,16 @@ to   { transform: scale(1.12); }
   transition:transform 180ms ease;
   display:flex;
   flex-direction:column;
+}
+
+/* Mobile AR: the drawer must be wide enough so preview images remain readable.
+   Keep desktop narrow, but allow a wider panel on phones. */
+@media (max-width: 520px) {
+  .shapePickerPanel{
+    width:56vw;
+    max-width:280px;
+    min-width:210px;
+  }
 }
 .shapePickerPanel.open{
   transform:translateX(0);
@@ -648,10 +659,10 @@ to   { transform: scale(1.12); }
   border-radius:7px;
   overflow:hidden;
   background:rgba(255,255,255,0.04);
-  /* Show 5 items in the visible drawer height (between top + bottom AR bars), others scroll */
-  height:calc((100% - (4 * 10px)) / 5);
-  min-height:96px;
-  max-height:160px;
+  /* Mobile-first: keep thumbnails large; list scrolls naturally */
+  height:auto;
+  min-height:150px;
+  max-height:none;
 }
 .shapePickerItem button{
   width:100%;
@@ -672,13 +683,15 @@ to   { transform: scale(1.12); }
   display:flex;
   align-items:center;
   justify-content:center;
-  padding:8px;
+  padding:6px;
   background:rgba(0,0,0,0.18);
   border-radius:7px;
   margin:8px 8px 0;
   /* Allow shrink inside flex column; prevent overflow clipping by the parent card */
   min-height:0;
   overflow:hidden;
+  /* Ensure the preview is big enough on mobile. Card height becomes (thumb + name). */
+  height:clamp(140px, 26vh, 240px);
 }
 .shapePickerThumb{
   width:100%;
