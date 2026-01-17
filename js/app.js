@@ -3630,7 +3630,9 @@ function buildShapePickerList() {
     const name = s.name ? s.name : s.id;
 
     btn.innerHTML = `
-      <img class="shapePickerThumb" src="${icon}" alt="" loading="lazy">
+      <div class="shapePickerThumbWrap">
+        <img class="shapePickerThumb" src="${icon}" alt="" loading="lazy">
+      </div>
       <div class="shapePickerName">${name}</div>
     `;
 
