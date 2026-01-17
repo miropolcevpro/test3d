@@ -631,14 +631,16 @@ to   { transform: scale(1.12); }
 @media (max-width: 520px) {
   .shapePickerPanel{
     /* Keep a safe cap so the panel never covers too much of the camera view */
-    max-width:78vw;
+    max-width:70vw;
   }
 }
 .shapePickerPanel.open{
   transform:translateX(0);
 }
 .shapePickerHeader{
-  padding:10px 10px 8px;
+  /* Keep the header from inflating the shrink-wrapped panel width */
+  align-self:center;
+  padding:10px 0 8px;
   font-size:12px;
   font-weight:900;
   letter-spacing:0.4px;
@@ -650,7 +652,7 @@ to   { transform: scale(1.12); }
   flex:1;
   overflow-y:auto;
   /* Slightly tighter horizontal padding so the drawer matches the preview width */
-  padding:10px 8px 12px;
+  padding:10px 0 12px;
   display:flex;
   flex-direction:column;
   gap:10px;
@@ -662,49 +664,49 @@ to   { transform: scale(1.12); }
   border-radius:7px;
   overflow:hidden;
   background:rgba(255,255,255,0.04);
-  box-shadow:0 8px 20px rgba(0,0,0,0.18);
-
-  /* Shrink-wrap the card to the preview (no extra empty fields) */
-  display:inline-block;
-  width:fit-content;
-  max-width:100%;
-  height:auto;
-  padding:6px;
+  /* Match ColorMix (StoneMix) tile sizing: behaves like the 3-up palette grid */
+  width:calc((100vw - 20px) / 3);
+  max-width:180px;
+  aspect-ratio:3 / 4;
 }
 .shapePickerItem button{
-  border:none;
+  width:100%;
+  height:100%;
+  padding:0;
+  border:0;
   background:transparent;
   color:#fff;
-  width:fit-content;
-  max-width:100%;
-  height:auto;
+  text-align:left;
   display:flex;
   flex-direction:column;
-  align-items:center;
-  justify-content:flex-start;
-  padding:0;
-  margin:0;
+  align-items:stretch;
+  min-height:0;
 }
 .shapePickerThumbWrap{
-  /* Keep the current preview size, but DO NOT stretch to full card width */
-  width:fit-content;
-  max-width:100%;
-  height:clamp(110px, 15vh, 150px);
-  border-radius:7px;
-  overflow:hidden;
-  background:rgba(255,255,255,0.03);
+  flex:1;
+  width:100%;
+  height:100%;
   display:flex;
   align-items:center;
   justify-content:center;
+  padding:0;
   margin:0;
-  flex:0 0 auto;
+  background:transparent;
+  border-radius:7px;
+  min-height:0;
+  overflow:hidden;
 }
 .shapePickerThumb{
+  width:100%;
   height:100%;
-  width:auto;
-  object-fit:contain;
+  object-fit:contain !important;
+  object-position:center;
   display:block;
   border-radius:7px;
+}
+.shapePickerName{
+  /* Names are already present inside the preview image; keep tiles identical to ColorMix */
+  display:none;
 }
 .shapePickerItem.active{
   border-color: rgba(90, 167, 255, 0.85);

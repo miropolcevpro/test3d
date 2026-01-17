@@ -3673,6 +3673,7 @@ function buildShapePickerList() {
       <div class="shapePickerThumbWrap">
         <img class="shapePickerThumb" src="${icon}" alt="" loading="lazy">
       </div>
+      <div class="shapePickerName">${name}</div>
     `;
 
     btn.addEventListener('click', async () => {
