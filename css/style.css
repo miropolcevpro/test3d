@@ -344,7 +344,7 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   backdrop-filter: blur(10px);
   display:flex;flex-direction:column;gap:10px;
 }
-.finalPatterns{display:flex;gap:10px;justify-content:center;}
+.finalPatterns{display:flex;gap:10px;justify-content:flex-start;}
 .texLoadBarWrap{
   width:100%;
   height:3px;

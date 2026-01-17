@@ -164,15 +164,11 @@
         <div class="layoutRow" id="layoutRow">
           <button class="layoutCard" data-layout="straight" type="button">
             <div class="layoutThumb" data-thumb="straight"></div>
-            <div class="layoutLbl">Концепт</div>
+            <div class="layoutLbl">Раскладка 1</div>
           </button>
           <button class="layoutCard" data-layout="diagonal" type="button">
             <div class="layoutThumb" data-thumb="diagonal"></div>
-            <div class="layoutLbl">Креатив</div>
-          </button>
-          <button class="layoutCard" data-layout="stagger" type="button">
-            <div class="layoutThumb" data-thumb="stagger"></div>
-            <div class="layoutLbl">Линеа</div>
+            <div class="layoutLbl">Раскладка 2</div>
           </button>
         </div>
 
@@ -228,9 +224,7 @@
       <!-- Нижняя панель после визуализации -->
       <div id="finalBar" class="finalBar" hidden>
         <div class="finalPatterns" id="finalPatterns">
-          <button class="patternTab" data-layout="straight" type="button">Концепт</button>
-          <button class="patternTab" data-layout="diagonal" type="button">Креатив</button>
-          <button class="patternTab" data-layout="stagger" type="button">Линеа</button>
+          <button id="btnLayoutCycle" class="patternTab" type="button">Смена укладки</button>
         </div>
         <div id="texLoadBarWrap" class="texLoadBarWrap" hidden aria-hidden="true">
           <div id="texLoadBar" class="texLoadBar"></div>
@@ -242,7 +236,6 @@
       <select id="layoutSelect" class="hidden" aria-hidden="true">
         <option value="straight">Прямая</option>
         <option value="diagonal">Диагональ 45°</option>
-        <option value="stagger">Вразбежку</option>
       </select>
 
       <label id="toggleOcclusionWrap" class="hidden" aria-hidden="true">

@@ -74,6 +74,7 @@ const UI = {
   btnDone: document.getElementById('btnDone'),
   finalBar: document.getElementById('finalBar'),
   finalPatterns: document.getElementById('finalPatterns'),
+  btnLayoutCycle: document.getElementById('btnLayoutCycle'),
   finalColors: document.getElementById('finalColors'),
 
   // AR texture load progress
@@ -237,7 +238,11 @@ const state = {
   selectedTile: null,
   shapes: [],
   selectedShape: null,
-  layout: 'straight', // straight | diagonal | stagger
+  layout: 'straight', // straight | diagonal
+
+  // AR UI: layout cycle button ("Смена укладки")
+  layoutCycleInitial: 'straight',
+  layoutCycleStep: 0, // 0 -> next straight, 1 -> next diagonal, 2 -> back to initial
 
   // internal guards
   _restartingAR: false,
@@ -866,7 +871,7 @@ function makeTileMaterial(arg = {}) {
       // tiling + layout
       uTileSize: { value: new THREE.Vector2(0.2, 0.2) },
       uUvScale: { value: new THREE.Vector2(1, 1) }, // per-texture scaling: 0.5 => texture looks 2x bigger
-      uLayoutMode: { value: 0 }, // 0 straight, 1 diagonal, 2 stagger
+      uLayoutMode: { value: 0 }, // 0 straight, 1 diagonal
 
       // lighting
       uLightDir: { value: new THREE.Vector3(1, 2, 1).normalize() },
@@ -1165,10 +1170,14 @@ function computeAreaM2() {
 }
 
 function setLayout(layout) {
+  // Only two layouts are supported in this project build.
+  // Any legacy value (e.g. "stagger") is normalized to the default.
+  if (layout !== 'straight' && layout !== 'diagonal') layout = 'straight';
+
   state.layout = layout;
   if (UI.layoutSelect) UI.layoutSelect.value = layout;
   if (tileMaterial) {
-    tileMaterial.uniforms.uLayoutMode.value = layout === 'straight' ? 0 : (layout === 'diagonal' ? 1 : 2);
+    tileMaterial.uniforms.uLayoutMode.value = layout === 'diagonal' ? 1 : 0;
   }
   // UI: pattern tabs
   UI.finalPatterns?.querySelectorAll('.patternTab').forEach(btn => {
@@ -3459,10 +3468,24 @@ UI.btnDone?.addEventListener('click', () => {
   rebuildFill();
   updateAreaUI();
 
-  // Build bottom controls
-  UI.finalPatterns?.querySelectorAll('.patternTab').forEach(btn => {
-    btn.onclick = () => setLayout(btn.dataset.layout);
-  });
+  // Build bottom controls (layout): single cycle button
+  state.layoutCycleInitial = state.layout;
+  state.layoutCycleStep = 0;
+  if (UI.btnLayoutCycle) {
+    UI.btnLayoutCycle.onclick = () => {
+      const step = state.layoutCycleStep % 3;
+      if (step === 0) {
+        setLayout('straight');
+        state.layoutCycleStep = 1;
+      } else if (step === 1) {
+        setLayout('diagonal');
+        state.layoutCycleStep = 2;
+      } else {
+        setLayout(state.layoutCycleInitial);
+        state.layoutCycleStep = 0;
+      }
+    };
+  }
   setLayout(state.layout);
 
   renderColorRow(UI.finalColors, (Array.isArray(state.currentAllowedTiles) && state.currentAllowedTiles.length ? state.currentAllowedTiles : state.tiles.slice(0, 8)));
