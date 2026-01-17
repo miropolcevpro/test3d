@@ -11,6 +11,8 @@
   --safe-bottom: env(safe-area-inset-bottom);
   /* Reserved height for AR bottom pattern strip (tabs) */
   --ar-bottom-strip: 84px;
+  /* Reserved height for AR top strip (title + reset) */
+  --ar-top-strip: 64px;
 }
 *{box-sizing:border-box;}
 html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif;height:100%;}
@@ -605,7 +607,7 @@ to   { transform: scale(1.12); }
   position:fixed;
   right:0;
   /* Keep clear of the top AR controls and align with the top edge of the bottom bar */
-  top:calc(64px + var(--safe-top));
+  top:var(--ar-top-strip);
   bottom:var(--ar-bottom-strip);
   width:20vw;
   max-width:240px;
@@ -634,6 +636,7 @@ to   { transform: scale(1.12); }
   border-bottom:1px solid rgba(255,255,255,0.10);
 }
 .shapePickerList{
+  flex:1;
   overflow-y:auto;
   padding:10px 12px 12px;
   display:flex;
@@ -645,6 +648,10 @@ to   { transform: scale(1.12); }
   border-radius:7px;
   overflow:hidden;
   background:rgba(255,255,255,0.04);
+  /* Show 5 items in the visible drawer height, others scroll */
+  height:calc((100% - 40px) / 5);
+  min-height:86px;
+  max-height:132px;
 }
 .shapePickerItem button{
   width:100%;
@@ -655,17 +662,18 @@ to   { transform: scale(1.12); }
   text-align:left;
   display:flex;
   flex-direction:column;
+  height:100%;
 }
 .shapePickerThumbWrap{
+  flex:1;
   width:100%;
-  /* Keep previews fully visible without cropping on narrow panels */
-  height: clamp(74px, 12vh, 140px);
-  background:rgba(0,0,0,0.18);
   display:flex;
   align-items:center;
   justify-content:center;
-  padding:6px;
-  box-sizing:border-box;
+  padding:8px;
+  background:rgba(0,0,0,0.18);
+  border-radius:7px;
+  margin:8px 8px 0;
 }
 .shapePickerThumb{
   width:100%;
@@ -677,12 +685,15 @@ to   { transform: scale(1.12); }
   border-radius:7px;
 }
 .shapePickerName{
-  padding:8px 10px 10px;
+  padding:6px 10px 10px;
   font-size:12px;
   line-height:1.2;
   opacity:0.95;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
 }
 .shapePickerItem.active{
-  border-color: rgba(70, 140, 255, 0.95);
-  box-shadow: 0 0 0 1px rgba(70, 140, 255, 0.55), 0 10px 18px rgba(0,0,0,0.25);
+  border-color: rgba(90, 167, 255, 0.85);
+  box-shadow: 0 0 0 2px rgba(90, 167, 255, 0.28);
 }

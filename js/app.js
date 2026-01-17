@@ -61,6 +61,7 @@ const UI = {
   // AR
   btnArBack: document.getElementById('btnArBack'),
   btnArReset: document.getElementById('btnArReset'),
+  arTop: document.querySelector('.arTop'),
   arProductTitle: document.getElementById('arProductTitle'),
   arArea: document.getElementById('arArea'),
   scanHint: document.getElementById('scanHint'),
@@ -124,6 +125,15 @@ function updateArBottomStripVar() {
     const bar = UI.finalBar;
     const h = (bar && !bar.hasAttribute('hidden')) ? bar.getBoundingClientRect().height : 0;
     document.documentElement.style.setProperty('--ar-bottom-strip', `${Math.ceil(h)}px`);
+  } catch (_) {}
+}
+
+function updateArTopStripVar() {
+  try {
+    const top = UI.arTop;
+    const h = top ? top.getBoundingClientRect().height : 0;
+    // Fallback to a sane default so the drawer never overlaps the top controls.
+    document.documentElement.style.setProperty('--ar-top-strip', `${Math.max(56, Math.ceil(h))}px`);
   } catch (_) {}
 }
 
@@ -3518,6 +3528,7 @@ UI.btnDone?.addEventListener('click', () => {
 
 window.addEventListener('resize', () => {
   if (state.xrSession) {
+    updateArTopStripVar();
     updateArBottomStripVar();
   } else {
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -3592,6 +3603,9 @@ init().catch(err => {
 function setShapePickerOpen(open) {
   if (!UI.shapePickerPanel || !UI.shapePickerBackdrop) return;
   if (open) {
+    // Ensure the drawer is always clamped between the AR top bar and the bottom controls.
+    updateArTopStripVar();
+    updateArBottomStripVar();
     UI.shapePickerBackdrop.hidden = false;
     UI.shapePickerPanel.hidden = false;
     // allow CSS transition
