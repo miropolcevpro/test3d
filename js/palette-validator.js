@@ -8,10 +8,51 @@
 
 const $ = (id) => document.getElementById(id);
 
-// Keep in sync with js/app.js
-const DEFAULT_BASE_URL = (typeof window !== 'undefined' && window.__SURFACE_PALETTE_BASE_URL__)
+// Base URL resolver for palettes.
+// Priority:
+//  1) window.__SURFACE_PALETTE_BASE_URL__ (if injected)
+//  2) backend runtime config: GET <API_BASE_URL>/config -> public.palettesBaseUrl
+//  3) fallback: YC Object Storage public URL
+const FALLBACK_BASE_URL = 'https://storage.yandexcloud.net/webar3dtexture/palettes/';
+let DEFAULT_BASE_URL = (typeof window !== 'undefined' && window.__SURFACE_PALETTE_BASE_URL__)
   ? String(window.__SURFACE_PALETTE_BASE_URL__).replace(/\/+$/, '') + '/'
-  : 'https://storage.yandexcloud.net/webar3dtexture/palettes/';
+  : FALLBACK_BASE_URL;
+
+function getApiBaseUrl() {
+  const v = (typeof window !== 'undefined' && (window.API_BASE_URL || window.__API_BASE_URL__))
+    ? String(window.API_BASE_URL || window.__API_BASE_URL__).trim()
+    : '';
+  return v ? v.replace(/\/+$/, '') : '';
+}
+
+function getAdminToken() {
+  try {
+    // keep in sync with admin/admin.js
+    return sessionStorage.getItem('admin_jwt') || '';
+  } catch {
+    return '';
+  }
+}
+
+async function apiFetchJson(path) {
+  const apiBase = getApiBaseUrl();
+  if (!apiBase) throw new Error('api_base_url_not_set');
+  const headers = new Headers();
+  headers.set('Accept', 'application/json');
+  const token = getAdminToken();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const res = await fetch(apiBase + path, { method: 'GET', headers, cache: 'no-store' });
+  const ct = res.headers.get('content-type') || '';
+  const json = ct.includes('application/json') ? await res.json().catch(() => null) : null;
+  if (!res.ok) {
+    const msg = (json && (json.message || json.error)) || `${res.status} ${res.statusText}`;
+    const e = new Error(msg);
+    e.status = res.status;
+    e.data = json;
+    throw e;
+  }
+  return json;
+}
 
 const els = {
   shape: $('shape'),
@@ -86,9 +127,41 @@ async function fetchJson(url) {
   const r = await fetch(cacheBust(url), { cache: 'no-store' });
   if (!r.ok) {
     const txt = await r.text().catch(() => '');
+    // If this is YC Object Storage XML error (NoSuchKey), show a clean message.
+    const clean = simplifyNoSuchKeyMessage(txt, url);
+    if (clean) throw new Error(clean);
     throw new Error(`Не удалось загрузить JSON: HTTP ${r.status} ${r.statusText}${txt ? `\n${txt}` : ''}`);
   }
   return r.json();
+}
+
+function simplifyNoSuchKeyMessage(txt, url) {
+  const t = String(txt || '').trim();
+  if (!t) return '';
+  // Typical S3 XML: <Code>NoSuchKey</Code><Message>...<Resource>/bucket/palettes/x.json</Resource>
+  if (!t.includes('<Code>NoSuchKey</Code>')) return '';
+  let resource = '';
+  const m = t.match(/<Resource>([^<]+)<\/Resource>/i);
+  if (m) resource = m[1];
+  const nice = resource ? `Палитра не найдена в Object Storage: ${resource}` : `Палитра не найдена: ${url}`;
+  return `${nice}.\n\nПодсказка: если palettes/<shapeId>.json ещё не создан, валидатор может загрузить палитру через Admin API (нужен вход в админку).`;
+}
+
+async function loadPaletteJson(paletteUrl, shapeId) {
+  try {
+    return { source: 'public', palette: await fetchJson(paletteUrl) };
+  } catch (e) {
+    // Fallback: Admin API can build palette from bucket even if JSON is missing.
+    const msg = String(e?.message || e);
+    const isNotFound = /не найдена/i.test(msg) || /404\s/i.test(msg) || /NoSuchKey/i.test(msg);
+    const apiBase = getApiBaseUrl();
+    if (!isNotFound || !apiBase || !shapeId) throw e;
+
+    // NOTE: /api/* requires auth; reuse admin sessionStorage token.
+    const qs = '?autocreate=1&reconcile=1';
+    const pal = await apiFetchJson(`/api/palettes/${encodeURIComponent(shapeId)}${qs}`);
+    return { source: 'api', palette: pal };
+  }
 }
 
 function isAbs(p) {
@@ -403,6 +476,7 @@ function addIssue(list, msg) {
 async function validatePalette(paletteUrl, opts) {
   const report = {
     paletteUrl,
+    paletteSource: 'public',
     itemsTotal: 0,
     itemsShown: 0,
     assetsChecked: 0,
@@ -412,7 +486,10 @@ async function validatePalette(paletteUrl, opts) {
     items: [],
   };
 
-  const data = await fetchJson(paletteUrl);
+  const shapeId = (opts && opts.shapeId) ? String(opts.shapeId) : '';
+  const loaded = await loadPaletteJson(paletteUrl, shapeId);
+  report.paletteSource = loaded.source;
+  const data = loaded.palette;
   const items = Array.isArray(data?.items) ? data.items : null;
   if (!items) throw new Error('Палитра должна содержать поле items: []');
   report.itemsTotal = items.length;
@@ -647,6 +724,23 @@ function updatePaletteUrlFromShape() {
 }
 
 async function initShapes() {
+  // Try to load runtime config from backend (preferred). This allows the validator to
+  // work across deployments without hardcoded storage URLs.
+  try {
+    const apiBase = getApiBaseUrl();
+    if (apiBase) {
+      const r = await fetch(apiBase + '/config', { cache: 'no-store' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const cfg = await r.json().catch(() => null);
+      const pbu = cfg && cfg.public && typeof cfg.public.palettesBaseUrl === 'string' ? cfg.public.palettesBaseUrl : '';
+      if (pbu) {
+        DEFAULT_BASE_URL = String(pbu).replace(/\/+$/, '') + '/';
+      }
+    }
+  } catch {
+    // ignore
+  }
+
   els.baseUrl.value = DEFAULT_BASE_URL;
 
   // Populate shapes
@@ -695,15 +789,19 @@ els.btnRun.addEventListener('click', async () => {
   setHint('Проверяю…');
 
   try {
+    const shapeId = (els.shape && els.shape.value) ? String(els.shape.value) : '';
     const report = await validatePalette(paletteUrl, {
       checkImages: !!els.optImages.checked,
       onlyIssues: !!els.optOnlyIssues.checked,
+      shapeId,
     });
 
     renderReport(report, {
       onlyIssues: !!els.optOnlyIssues.checked,
     });
-    setHint('Готово.');
+    setHint(report.paletteSource === 'api'
+      ? 'Готово. Палитра загружена через Admin API (autocreate/reconcile).'
+      : 'Готово.');
   } catch (e) {
     setHint(safeText(e?.message || e), true);
   }
