@@ -638,7 +638,7 @@ to   { transform: scale(1.12); }
   transform:translateX(0);
 }
 .shapePickerHeader{
-  padding:10px 10px 8px;
+  padding:10px 6px 8px;
   font-size:12px;
   font-weight:900;
   letter-spacing:0.4px;
@@ -679,12 +679,14 @@ to   { transform: scale(1.12); }
   text-align:left;
   display:flex;
   flex-direction:column;
+  align-items:center;
   height:100%;
   /* Critical for mobile Safari flexbox: allow inner preview to shrink instead of overflowing (which looks like "cropped") */
   min-height:0;
 }
 .shapePickerThumbWrap{
-  flex:1;
+  flex:0 0 auto;
+  align-self:center;
   /* Fit the inner container to the image width while keeping the same height */
   width:fit-content;
   max-width:100%;
@@ -713,7 +715,10 @@ to   { transform: scale(1.12); }
   border-radius:7px;
 }
 .shapePickerName{
-  padding:6px 10px 10px;
+  padding:6px 0 10px;
+  width:100%;
+  min-width:0;
+  box-sizing:border-box;
   font-size:12px;
   line-height:1.2;
   opacity:0.95;
