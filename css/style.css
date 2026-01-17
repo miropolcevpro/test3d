@@ -638,9 +638,7 @@ to   { transform: scale(1.12); }
   transform:translateX(0);
 }
 .shapePickerHeader{
-  /* Keep the header from inflating the shrink-wrapped panel width */
-  align-self:center;
-  padding:10px 0 8px;
+  padding:10px 10px 8px;
   font-size:12px;
   font-weight:900;
   letter-spacing:0.4px;
@@ -652,7 +650,7 @@ to   { transform: scale(1.12); }
   flex:1;
   overflow-y:auto;
   /* Slightly tighter horizontal padding so the drawer matches the preview width */
-  padding:10px 0 12px;
+  padding:10px 8px 12px;
   display:flex;
   flex-direction:column;
   gap:10px;
@@ -664,74 +662,49 @@ to   { transform: scale(1.12); }
   border-radius:7px;
   overflow:hidden;
   background:rgba(255,255,255,0.04);
-  /* Fit the card to the preview width (no extra empty fields) */
+  box-shadow:0 8px 20px rgba(0,0,0,0.18);
+
+  /* Shrink-wrap the card to the preview (no extra empty fields) */
+  display:inline-block;
   width:fit-content;
   max-width:100%;
-  /* Mobile-first: keep thumbnails large; list scrolls naturally */
   height:auto;
-  min-height:150px;
-  max-height:none;
+  padding:6px;
 }
 .shapePickerItem button{
-  width:fit-content;
-  padding:0;
-  border:0;
+  border:none;
   background:transparent;
   color:#fff;
-  text-align:left;
-  display:flex;
-  flex-direction:column;
-  /* Do not stretch inner blocks wider than the preview */
-  align-items:center;
-  height:100%;
-  /* Critical for mobile Safari flexbox: allow inner preview to shrink instead of overflowing (which looks like "cropped") */
-  min-height:0;
-}
-.shapePickerThumbWrap{
-  flex:1;
-  /* Fit the inner container to the image width while keeping the same height */
   width:fit-content;
   max-width:100%;
+  height:auto;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:flex-start;
+  padding:0;
+  margin:0;
+}
+.shapePickerThumbWrap{
+  /* Keep the current preview size, but DO NOT stretch to full card width */
+  width:fit-content;
+  max-width:100%;
+  height:clamp(110px, 15vh, 150px);
+  border-radius:7px;
+  overflow:hidden;
+  background:rgba(255,255,255,0.03);
   display:flex;
   align-items:center;
   justify-content:center;
-  padding:0;
-  background:transparent;
-  border-radius:7px;
-  /* No horizontal auto margins: keep wrapper tight to the image */
-  margin:8px 0 0;
-  align-self:center;
-  /* Allow shrink inside flex column; prevent overflow clipping by the parent card */
-  min-height:0;
-  overflow:hidden;
-  /* Ensure the preview is big enough on mobile. Card height becomes (thumb + name). */
-  height:clamp(140px, 26vh, 240px);
+  margin:0;
+  flex:0 0 auto;
 }
 .shapePickerThumb{
-  /* Keep the full image visible (no cropping), but let width follow aspect ratio */
-  width:auto;
   height:100%;
-  max-width:100%;
-  max-height:100%;
-  object-fit:contain !important;
-  object-position:center;
+  width:auto;
+  object-fit:contain;
   display:block;
   border-radius:7px;
-}
-.shapePickerName{
-  /* Keep the label within the preview width (no extra side padding) */
-  padding:6px 0 10px;
-  width:100%;
-  box-sizing:border-box;
-  font-size:12px;
-  line-height:1.2;
-  opacity:0.95;
-  text-align:center;
-  /* Keep layout stable: don't force the card wider than the preview */
-  max-width:100%;
-  white-space:nowrap;
-  overflow:hidden;
-  text-overflow:ellipsis;
 }
 .shapePickerItem.active{
   border-color: rgba(90, 167, 255, 0.85);
