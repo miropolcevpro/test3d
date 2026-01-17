@@ -3618,11 +3618,15 @@ function buildShapePickerList() {
   for (const s of shapes) {
     const wrap = document.createElement('div');
     wrap.className = 'shapePickerItem';
+    if (state.selectedShape && state.selectedShape.id === s.id) {
+      wrap.classList.add('active');
+    }
 
     const btn = document.createElement('button');
     btn.type = 'button';
 
-    const icon = s.icon ? s.icon : '';
+    // Prefer the same preview image as in the catalog (hero), fallback to icon.
+    const icon = (s.hero ? s.hero : (s.icon ? s.icon : ''));
     const name = s.name ? s.name : s.id;
 
     btn.innerHTML = `
