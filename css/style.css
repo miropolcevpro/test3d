@@ -629,16 +629,17 @@ to   { transform: scale(1.12); }
    Keep desktop narrow, but allow a wider panel on phones. */
 @media (max-width: 520px) {
   .shapePickerPanel{
-    width:56vw;
-    max-width:280px;
-    min-width:210px;
+    /* Mobile-first: keep panel only as wide as the previews (no extra empty space) */
+    width: fit-content;
+    max-width: 72vw;
+    min-width: 0;
   }
 }
 .shapePickerPanel.open{
   transform:translateX(0);
 }
 .shapePickerHeader{
-  padding:10px 12px 8px;
+  padding:10px 10px 8px;
   font-size:12px;
   font-weight:900;
   letter-spacing:0.4px;
@@ -649,9 +650,12 @@ to   { transform: scale(1.12); }
 .shapePickerList{
   flex:1;
   overflow-y:auto;
-  padding:10px 12px 12px;
+  /* Tight padding so panel width tracks preview width */
+  padding:10px 8px 12px;
   display:flex;
   flex-direction:column;
+  /* Allow cards to shrink-wrap to preview width (removes side empty space) */
+  align-items:center;
   gap:10px;
 }
 .shapePickerItem{
@@ -659,43 +663,47 @@ to   { transform: scale(1.12); }
   border-radius:7px;
   overflow:hidden;
   background:rgba(255,255,255,0.04);
+  display:inline-block;
+  width: fit-content;
+  max-width: 100%;
   /* Mobile-first: keep thumbnails large; list scrolls naturally */
   height:auto;
-  min-height:150px;
+  min-height:0;
   max-height:none;
 }
 .shapePickerItem button{
-  width:100%;
+  width:auto;
   padding:0;
   border:0;
   background:transparent;
   color:#fff;
-  text-align:left;
+  text-align:center;
   display:flex;
   flex-direction:column;
   height:100%;
+  align-items:center;
   /* Critical for mobile Safari flexbox: allow inner preview to shrink instead of overflowing (which looks like "cropped") */
   min-height:0;
 }
 .shapePickerThumbWrap{
   flex:1;
-  width:100%;
+  width:fit-content;
   display:flex;
   align-items:center;
   justify-content:center;
-  padding:6px;
-  background:rgba(0,0,0,0.18);
+  padding:0;
+  background:transparent;
   border-radius:7px;
-  margin:8px 8px 0;
+  margin:10px auto 0;
   /* Allow shrink inside flex column; prevent overflow clipping by the parent card */
   min-height:0;
   overflow:hidden;
   /* Ensure the preview is big enough on mobile. Card height becomes (thumb + name). */
-  height:clamp(140px, 26vh, 240px);
+  height:auto;
 }
 .shapePickerThumb{
-  width:100%;
-  height:100%;
+  width:auto;
+  height:clamp(150px, 24vh, 220px);
   max-width:100%;
   max-height:100%;
   object-fit:contain !important;
@@ -704,13 +712,16 @@ to   { transform: scale(1.12); }
   border-radius:7px;
 }
 .shapePickerName{
-  padding:6px 10px 10px;
+  padding:8px 8px 10px;
   font-size:12px;
   line-height:1.2;
   opacity:0.95;
-  white-space:nowrap;
+  text-align:center;
+  white-space:normal;
   overflow:hidden;
-  text-overflow:ellipsis;
+  display:-webkit-box;
+  -webkit-line-clamp:2;
+  -webkit-box-orient:vertical;
 }
 .shapePickerItem.active{
   border-color: rgba(90, 167, 255, 0.85);
