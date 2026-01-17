@@ -122,33 +122,61 @@ function updateArBottomStripVar() {
 // ------------------------
 // AR: texture load progress indicator (thin bar under pattern buttons)
 // ------------------------
-const _arTexProgress = { seq: 0, total: 0, done: 0, hideTimer: 0 };
+const _arTexProgress = { seq: 0, total: 0, done: 0, hideTimer: 0, showTimer: 0, shown: false, shownAt: 0 };
 
 function _arTexProgressShow(seq, total) {
   try {
     if (!UI.texLoadBarWrap || !UI.texLoadBar) return;
+
     _arTexProgress.seq = seq;
     _arTexProgress.total = Math.max(1, Number(total) || 1);
     _arTexProgress.done = 0;
+    _arTexProgress.shown = false;
+    _arTexProgress.shownAt = 0;
+
     if (_arTexProgress.hideTimer) {
       clearTimeout(_arTexProgress.hideTimer);
       _arTexProgress.hideTimer = 0;
     }
-    UI.texLoadBar.style.width = '0%';
-    UI.texLoadBarWrap.classList.add('is-visible');
-    show(UI.texLoadBarWrap, true);
-    // ensure layout-safe offset recalculation
-    updateArBottomStripVar();
+    if (_arTexProgress.showTimer) {
+      clearTimeout(_arTexProgress.showTimer);
+      _arTexProgress.showTimer = 0;
+    }
+
+    // Delay UI to avoid flicker on fast texture switches.
+    // If loading still in progress after 2s, show progress bar with current progress.
+    _arTexProgress.showTimer = setTimeout(() => {
+      try {
+        if (seq !== _arTexProgress.seq) return;
+        if (_arTexProgress.done >= _arTexProgress.total) return;
+        _arTexProgress.showTimer = 0;
+
+        // Show now
+        UI.texLoadBar.style.width = '0%';
+        UI.texLoadBarWrap.classList.add('is-visible');
+        show(UI.texLoadBarWrap, true);
+        _arTexProgress.shown = true;
+        _arTexProgress.shownAt = Date.now();
+
+        const pct = Math.max(0, Math.min(100, (_arTexProgress.done / _arTexProgress.total) * 100));
+        UI.texLoadBar.style.width = `${pct.toFixed(0)}%`;
+
+        updateArBottomStripVar();
+      } catch (_) {}
+    }, 2000);
   } catch (_) {}
 }
 
 function _arTexProgressTick(seq) {
   try {
     if (seq !== _arTexProgress.seq) return;
-    if (!UI.texLoadBar) return;
     _arTexProgress.done++;
-    const pct = Math.max(0, Math.min(100, (_arTexProgress.done / _arTexProgress.total) * 100));
-    UI.texLoadBar.style.width = `${pct.toFixed(0)}%`;
+
+    if (_arTexProgress.shown && UI.texLoadBar) {
+      const pct = Math.max(0, Math.min(100, (_arTexProgress.done / _arTexProgress.total) * 100));
+      UI.texLoadBar.style.width = `${pct.toFixed(0)}%`;
+    }
+
     if (_arTexProgress.done >= _arTexProgress.total) _arTexProgressHide(seq);
   } catch (_) {}
 }
@@ -156,15 +184,44 @@ function _arTexProgressTick(seq) {
 function _arTexProgressHide(seq) {
   try {
     if (seq !== _arTexProgress.seq) return;
+
+    // If bar hasn't been shown yet (fast load), just cancel the delayed show.
+    if (_arTexProgress.showTimer) {
+      clearTimeout(_arTexProgress.showTimer);
+      _arTexProgress.showTimer = 0;
+    }
+    if (!_arTexProgress.shown) return;
+
     if (!UI.texLoadBarWrap) return;
-    // Finish smoothly then fade out.
-    if (UI.texLoadBar) UI.texLoadBar.style.width = '100%';
-    UI.texLoadBarWrap.classList.remove('is-visible');
+
+    // Prevent flicker: once shown, keep it visible for a minimal time.
+    const MIN_VISIBLE_MS = 450;
+    const visibleFor = Date.now() - (_arTexProgress.shownAt || Date.now());
+    const wait = Math.max(0, MIN_VISIBLE_MS - visibleFor);
+
+    if (_arTexProgress.hideTimer) {
+      clearTimeout(_arTexProgress.hideTimer);
+      _arTexProgress.hideTimer = 0;
+    }
+
     _arTexProgress.hideTimer = setTimeout(() => {
-      if (seq !== _arTexProgress.seq) return;
-      show(UI.texLoadBarWrap, false);
-      updateArBottomStripVar();
-    }, 220);
+      try {
+        if (seq !== _arTexProgress.seq) return;
+
+        // Finish smoothly then fade out.
+        if (UI.texLoadBar) UI.texLoadBar.style.width = '100%';
+        UI.texLoadBarWrap.classList.remove('is-visible');
+
+        // allow CSS transition to complete
+        setTimeout(() => {
+          try {
+            if (seq !== _arTexProgress.seq) return;
+            show(UI.texLoadBarWrap, false);
+            updateArBottomStripVar();
+          } catch (_) {}
+        }, 220);
+      } catch (_) {}
+    }, wait);
   } catch (_) {}
 }
 // App state
