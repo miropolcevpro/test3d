@@ -3786,8 +3786,7 @@ function updateXR(frame) {
     }
   }
 
-  // UI measure labels
-  const xrCam = renderer.xr.getCamera(camera);
+  // UI measure labels (reuse xrCam from earlier in this function)
   updateMeasureLabels(xrCam);
 }
 
