@@ -320,6 +320,11 @@ const state = {
   reticleVisible: false,
   snapArmed: false,
 
+  // Patch 2.1: commit gating for contour points
+  canCommitPoint: false,
+  reticleMode: 'none',
+  viewAngleToPlane: 0,
+
   points: /** @type {THREE.Vector3[]} */ ([]),
   holes: /** @type {THREE.Vector3[][]} */ ([]),
   holePoints: /** @type {THREE.Vector3[]} */ ([]),
@@ -2754,6 +2759,24 @@ async function fullRestartAR() {
 // ------------------------
 // Floor lock + points
 // ------------------------
+let __contourHintOriginalText = null;
+let __contourHintTimer = 0;
+function flashContourHint(msg, ms = 1500) {
+  try {
+    const el = UI.contourHint;
+    if (!el) return;
+    if (__contourHintOriginalText == null) __contourHintOriginalText = el.textContent;
+    el.textContent = msg;
+    show(el, true);
+    if (__contourHintTimer) clearTimeout(__contourHintTimer);
+    __contourHintTimer = setTimeout(() => {
+      try {
+        if (__contourHintOriginalText != null) el.textContent = __contourHintOriginalText;
+      } catch (_) {}
+    }, ms);
+  } catch (_) {}
+}
+
 function ensureFloorLocked() {
   if (state.floorLocked) return;
   if (!reticle.visible) return;
@@ -2829,6 +2852,11 @@ function addPointFromReticle() {
   if (!state.xrSession) return;
   if (!state.floorLocked || state.phase === 'ar_scan') return;
   if (!reticle.visible) return;
+  // Patch 2.1: do NOT allow committing contour points from fallback; require a valid floor hit
+  if (!state.canCommitPoint) {
+    flashContourHint('Наклоните камеру вниз и досканируйте пол, чтобы поставить точку на полу.');
+    return;
+  }
   addPointAtWorld(reticle.position);
 }
 
@@ -3376,7 +3404,7 @@ function _arDebugUpdateOverlay() {
     const jitter = _arDebugJitter2D(jitterWin);
 
     const lines = [
-      `AR debug (Patch 2)`,
+      `AR debug (Patch 2.1)`,
       `state: ${_arDebugStateLabel()}`,
       `fps: ${_fmt(dbg.fps, 0)}`,
       `hit-test: ${hitsPerSec} hits/s`,
@@ -3387,6 +3415,7 @@ function _arDebugUpdateOverlay() {
       `viewAngle: ${viewAng == null ? '—' : _fmt(viewAng, 1)}°`,
       `normalAngle: ${ang == null ? '—' : _fmt(ang, 1)}°`,
       `freeze: ${frozen ? 'on' : 'off'}`,
+      `canCommit: ${state.canCommitPoint ? 'on' : 'off'}`,
       `mode: ${mode}`,
     ];
 
@@ -3455,64 +3484,68 @@ function updateXR(frame) {
 
   // During scanning: accumulate floor Y samples only when the camera is pitched down
   if (!state.floorLocked && state.phase === 'ar_scan' && gotHit && hitY != null) {
-    const xrCam = renderer.xr.getCamera(camera);
-    const cam = xrCam.cameras && xrCam.cameras.length ? xrCam.cameras[0] : xrCam;
-    __tmpFwd.set(0, 0, -1).applyQuaternion(cam.quaternion);
-
     if (__tmpFwd.y < -0.15) {
-      state.floorSamples.push(hitY);
-      if (state.floorSamples.length > 40) state.floorSamples.shift();
+      // Patch 2.1: sample floor height only from reliable, near-floor hits
+      // - require mostly-up surface (avoid walls/objects)
+      // - require sufficient pitch down (viewAngle)
+      // - require near distance (far hits are noisy)
+      const hitDist = __tmpHitPos.distanceTo(__tmpCamPos);
+      const sampleOk = (__tmpUp.y >= 0.90) && (viewAngleToPlane >= 12) && (hitDist <= 4.0);
+      if (sampleOk) {
+        state.floorSamples.push(hitY);
+        if (state.floorSamples.length > 40) state.floorSamples.shift();
 
-      const sorted = state.floorSamples.slice().sort((a, b) => a - b);
-      const p = (q) => {
-        if (!sorted.length) return null;
-        const pos = (sorted.length - 1) * q;
-        const lo = Math.floor(pos), hi = Math.ceil(pos);
-        const t = pos - lo;
-        return sorted[lo] * (1 - t) + sorted[hi] * t;
-      };
+        const sorted = state.floorSamples.slice().sort((a, b) => a - b);
+        const p = (q) => {
+          if (!sorted.length) return null;
+          const pos = (sorted.length - 1) * q;
+          const lo = Math.floor(pos), hi = Math.ceil(pos);
+          const t = pos - lo;
+          return sorted[lo] * (1 - t) + sorted[hi] * t;
+        };
 
-      const p20 = p(0.20);
-      const p80 = p(0.80);
-      state.floorYEstimate = p20;
+        // Use a slightly lower percentile to avoid "floating" (prefer being a hair below rather than above)
+        const p15 = p(0.15);
+        const p80 = p(0.80);
+        state.floorYEstimate = p15;
 
-      // Consider floor stable when spread is small and enough samples collected
-      const spread = (p80 != null && p20 != null) ? (p80 - p20) : 999;
-      if ((sorted.length >= 12 && spread < 0.04) || sorted.length >= 25) {
-        state.floorLocked = true;
-        state.floorStable = true;
-        state.floorY = p20;
+        // Consider floor stable when spread is small and enough samples collected
+        const spread = (p80 != null && p15 != null) ? (p80 - p15) : 999;
+        if ((sorted.length >= 12 && spread < 0.04) || sorted.length >= 25) {
+          state.floorLocked = true;
+          state.floorStable = true;
+          state.floorY = p15;
 
-        // Patch 2: initialize plane refinement reference height
-        try {
-          const pr = state.planeRefine;
-          if (pr && pr.enabled) {
-            pr.planeYRef = state.floorY;
-            pr.lastPlaneUpdateT = performance.now();
-            pr.lastRefineT = 0;
-            pr.freezeUntil = 0;
-            pr.framesT.length = 0;
-            pr.validT.length = 0;
-            pr.validHit = false;
-            pr.frozen = false;
+          // Patch 2: initialize plane refinement reference height
+          try {
+            const pr = state.planeRefine;
+            if (pr && pr.enabled) {
+              pr.planeYRef = state.floorY;
+              pr.lastPlaneUpdateT = performance.now();
+              pr.lastRefineT = 0;
+              pr.freezeUntil = 0;
+              pr.framesT.length = 0;
+              pr.validT.length = 0;
+              pr.validHit = false;
+              pr.frozen = false;
+            }
+          } catch (_) {}
+
+          // Switch to drawing phase (match app: + appears after scanning/floor lock)
+          state.phase = 'ar_draw';
+          show(UI.scanHint, false);
+          // Keep bottom menu hidden until contour is closed; show a clear hint for contour placement.
+          if (!state.hasEverClosedContour) {
+            show(UI.contourHint, true);
           }
-        } catch (_) {}
-
-        // Switch to drawing phase (match app: + appears after scanning/floor lock)
-        state.phase = 'ar_draw';
-        show(UI.scanHint, false);
-        // Keep bottom menu hidden until contour is closed; show a clear hint for contour placement.
-        if (!state.hasEverClosedContour) {
-          show(UI.contourHint, true);
+          show(UI.arBottomCenter, true);
+          show(UI.btnArAdd, true);
+          show(UI.btnArOk, false);
         }
-        show(UI.arBottomCenter, true);
-        show(UI.btnArAdd, true);
-        show(UI.btnArOk, false);
       }
     }
   }
 
-  
   // Patch 2: continuous refinement (reference plane tracking + freeze heuristics)
   let validFloorHit = false;
   let refineFrozen = false;
@@ -3526,10 +3559,10 @@ function updateXR(frame) {
       pr.framesT.push(now);
       while (pr.framesT.length && pr.framesT[0] < (now - 1000)) pr.framesT.shift();
 
-      const dy = (gotHitRaw && hitY != null) ? Math.abs(hitY - pr.planeYRef) : 999;
+      const dy = (gotHit && hitY != null) ? Math.abs(hitY - state.floorY) : 999;
       const heightTol = pr.heightTolM;
       const angleOk = viewAngleToPlane >= pr.minAngleDeg;
-      validFloorHit = !!(gotHitRaw && hitY != null && dy <= heightTol && angleOk);
+      validFloorHit = !!(gotHit && hitY != null && dy <= heightTol && angleOk);
       if (validFloorHit) pr.validT.push(now);
       while (pr.validT.length && pr.validT[0] < (now - 1000)) pr.validT.shift();
 
@@ -3545,15 +3578,27 @@ function updateXR(frame) {
         const dt = Math.max(0.016, Math.min(0.2, (now - (pr.lastPlaneUpdateT || now)) / 1000));
         pr.lastPlaneUpdateT = now;
 
-        // Simple EMA with a speed limit (~5 cm/s)
+        // Patch 2.1: EMA with asymmetric speed limits
+        // - allow correcting DOWN to the real floor faster
+        // - allow moving UP (into air) very slowly (prevents hovering)
         const alpha = 0.25;
         const target = hitY;
         const proposed = pr.planeYRef + (target - pr.planeYRef) * alpha;
-        const maxMove = 0.05 * dt;
         let move = proposed - pr.planeYRef;
-        if (move > maxMove) move = maxMove;
-        if (move < -maxMove) move = -maxMove;
+        const maxDown = 0.05 * dt; // 5 cm/s down
+        const maxUp = 0.01 * dt;   // 1 cm/s up
+        if (move > maxUp) move = maxUp;
+        if (move < -maxDown) move = -maxDown;
         pr.planeYRef = pr.planeYRef + move;
+
+        // If the user has not placed any contour points yet, keep floorY tightly aligned.
+        if (state.points.length === 0 && state.holePoints.length === 0) {
+          const proposedFloor = state.floorY + (target - state.floorY) * alpha;
+          let m2 = proposedFloor - state.floorY;
+          if (m2 > maxUp) m2 = maxUp;
+          if (m2 < -maxDown) m2 = -maxDown;
+          state.floorY = state.floorY + m2;
+        }
       }
 
       pr.viewAngleDeg = viewAngleToPlane;
@@ -3566,6 +3611,7 @@ function updateXR(frame) {
   const activeY = state.floorLocked ? state.floorY : (state.floorYEstimate != null ? state.floorYEstimate : hitY);
 
   let reticleOk = false;
+  let reticleUsedHit = false;
   if (activeY != null && __tmpFwd.y < -0.02) {
     // Prefer using the hit position (XZ) when it matches the floor height reference;
     // otherwise fall back to ray ∩ plane (Y=activeY).
@@ -3575,7 +3621,7 @@ function updateXR(frame) {
       const pr = state.planeRefine;
       const yRef = (pr && pr.enabled && isFinite(pr.planeYRef)) ? pr.planeYRef : state.floorY;
       const tol = (pr && pr.enabled) ? pr.heightTolMaxM : 0.08;
-      if (gotHitRaw && hitY != null && Math.abs(hitY - yRef) <= tol) {
+      if (gotHit && hitY != null && Math.abs(hitY - yRef) <= tol && viewAngleToPlane >= (pr?.minAngleDeg || 12)) {
         useHit = true;
       }
     }
@@ -3585,6 +3631,7 @@ function updateXR(frame) {
       reticle.quaternion.set(0, 0, 0, 1);
       reticle.visible = true;
       reticleOk = true;
+      reticleUsedHit = true;
     } else {
       const t = (activeY - __tmpCamPos.y) / __tmpFwd.y;
       if (t > 0.05 && t < 12.0) {
@@ -3614,6 +3661,11 @@ function updateXR(frame) {
     reticle.position.y = state.floorY;
   }
 
+  // Patch 2.1: store per-frame AR gating signals for point placement
+  state.viewAngleToPlane = viewAngleToPlane;
+  state.reticleMode = (reticle.visible ? (reticleUsedHit ? 'hit' : 'fallback_y_plane') : 'none');
+  state.canCommitPoint = !!(reticle.visible && reticleUsedHit && validFloorHit && viewAngleToPlane >= (state.planeRefine?.minAngleDeg || 12));
+
 
   // AR debug sample (Patch 2): record hit-test stability without changing behavior
   if (state.debugAR && state.debugAR.enabled) {
@@ -3623,7 +3675,7 @@ function updateXR(frame) {
       const dz = reticle.visible ? (reticle.position.z - __tmpCamPos.z) : 0;
       const dist = reticle.visible ? Math.sqrt(dx*dx + dy*dy + dz*dz) : NaN;
 
-      const mode = (reticle.visible ? ( (gotHitRaw && hitY != null) ? 'hit' : 'fallback_y_plane') : 'none');
+      const mode = (reticle.visible ? (reticleUsedHit ? 'hit' : 'fallback_y_plane') : 'none');
 
       _arDebugRecordSample({
         t: performance.now(),
@@ -3678,7 +3730,8 @@ function updateXR(frame) {
     state.snapArmed = d0 < SNAP_DIST_M;
   }
   if (reticle.material?.color) {
-    reticle.material.color.setHex(state.snapArmed ? 0x36d399 : 0x2f6cff);
+    const base = (!state.snapArmed && state.phase === 'ar_draw' && !state.closed && !state.canCommitPoint) ? 0x9ca3af : 0x2f6cff;
+    reticle.material.color.setHex(state.snapArmed ? 0x36d399 : base);
   }
   // "firstRing" теперь находится внутри флажка (вложенный объект)
   let firstRing = null;
@@ -3734,7 +3787,7 @@ function updateXR(frame) {
   }
 
   // UI measure labels
-  // Reuse XR camera computed at the beginning of updateXR(); do not redeclare.
+  const xrCam = renderer.xr.getCamera(camera);
   updateMeasureLabels(xrCam);
 }
 
