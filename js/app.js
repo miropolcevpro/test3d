@@ -3734,7 +3734,7 @@ function updateXR(frame) {
   }
 
   // UI measure labels
-  const xrCam = renderer.xr.getCamera(camera);
+  // Reuse XR camera computed at the beginning of updateXR(); do not redeclare.
   updateMeasureLabels(xrCam);
 }
 
