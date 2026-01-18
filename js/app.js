@@ -3404,7 +3404,7 @@ function _arDebugUpdateOverlay() {
     const jitter = _arDebugJitter2D(jitterWin);
 
     const lines = [
-      `AR debug (Patch 2.1)`,
+      `AR debug (Patch 2.2)`,
       `state: ${_arDebugStateLabel()}`,
       `fps: ${_fmt(dbg.fps, 0)}`,
       `hit-test: ${hitsPerSec} hits/s`,
@@ -3559,10 +3559,12 @@ function updateXR(frame) {
       pr.framesT.push(now);
       while (pr.framesT.length && pr.framesT[0] < (now - 1000)) pr.framesT.shift();
 
-      const dy = (gotHit && hitY != null) ? Math.abs(hitY - state.floorY) : 999;
+      const dy = (gotHitRaw && hitY != null) ? Math.abs(hitY - state.floorY) : 999;
       const heightTol = pr.heightTolM;
       const angleOk = viewAngleToPlane >= pr.minAngleDeg;
-      validFloorHit = !!(gotHit && hitY != null && dy <= heightTol && angleOk);
+      const upOk = (gotHitRaw && isFinite(__tmpUp.y)) ? (__tmpUp.y >= 0.60) : gotHit;
+      // Patch 2.2: treat floor validity primarily by view angle + surface-upness; height check is diagnostic only.
+      validFloorHit = !!(gotHitRaw && hitY != null && angleOk && upOk);
       if (validFloorHit) pr.validT.push(now);
       while (pr.validT.length && pr.validT[0] < (now - 1000)) pr.validT.shift();
 
@@ -3621,7 +3623,7 @@ function updateXR(frame) {
       const pr = state.planeRefine;
       const yRef = (pr && pr.enabled && isFinite(pr.planeYRef)) ? pr.planeYRef : state.floorY;
       const tol = (pr && pr.enabled) ? pr.heightTolMaxM : 0.08;
-      if (gotHit && hitY != null && Math.abs(hitY - yRef) <= tol && viewAngleToPlane >= (pr?.minAngleDeg || 12)) {
+      if (gotHitRaw && hitY != null && viewAngleToPlane >= (pr?.minAngleDeg || 12) && (__tmpUp.y >= 0.60)) {
         useHit = true;
       }
     }
@@ -3785,8 +3787,7 @@ function updateXR(frame) {
       }
     }
   }
-
-  // UI measure labels (reuse xrCam from earlier in this function)
+  // UI measure labels
   updateMeasureLabels(xrCam);
 }
 
