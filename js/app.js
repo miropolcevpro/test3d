@@ -53,6 +53,63 @@ const PLANE_REFINE_ENABLED = (() => {
   }
 })();
 
+// Patch 7: UX + feature flags
+// - AR hints enabled by default; disable with ?arHints=0
+// - Coverage grid enabled by default; disable with ?coverage=0
+// - Multi-sample commit enabled by default; disable with ?multiSample=0
+// - Fill lock enabled by default; disable with ?fillLock=0
+const AR_HINTS_ENABLED = (() => {
+  try {
+    const q = new URLSearchParams(window.location.search);
+    if (!q.has('arHints')) return true;
+    const v = (q.get('arHints') || '').trim().toLowerCase();
+    if (v === '' || v === '1' || v === 'true' || v === 'yes' || v === 'on') return true;
+    if (v === '0' || v === 'false' || v === 'no' || v === 'off') return false;
+    return true;
+  } catch (_) {
+    return true;
+  }
+})();
+
+const COVERAGE_ENABLED = (() => {
+  try {
+    const q = new URLSearchParams(window.location.search);
+    if (!q.has('coverage')) return true;
+    const v = (q.get('coverage') || '').trim().toLowerCase();
+    if (v === '' || v === '1' || v === 'true' || v === 'yes' || v === 'on') return true;
+    if (v === '0' || v === 'false' || v === 'no' || v === 'off') return false;
+    return true;
+  } catch (_) {
+    return true;
+  }
+})();
+
+const MULTISAMPLE_ENABLED = (() => {
+  try {
+    const q = new URLSearchParams(window.location.search);
+    if (!q.has('multiSample')) return true;
+    const v = (q.get('multiSample') || '').trim().toLowerCase();
+    if (v === '' || v === '1' || v === 'true' || v === 'yes' || v === 'on') return true;
+    if (v === '0' || v === 'false' || v === 'no' || v === 'off') return false;
+    return true;
+  } catch (_) {
+    return true;
+  }
+})();
+
+const FILL_LOCK_ENABLED = (() => {
+  try {
+    const q = new URLSearchParams(window.location.search);
+    if (!q.has('fillLock')) return true;
+    const v = (q.get('fillLock') || '').trim().toLowerCase();
+    if (v === '' || v === '1' || v === 'true' || v === 'yes' || v === 'on') return true;
+    if (v === '0' || v === 'false' || v === 'no' || v === 'off') return false;
+    return true;
+  } catch (_) {
+    return true;
+  }
+})();
+
 // ------------------------
 // UI
 // ------------------------
@@ -117,6 +174,7 @@ const UI = {
   // Hidden tech
   layoutSelect: document.getElementById('layoutSelect'),
   toggleOcclusion: document.getElementById('toggleOcclusion'),
+
 };
 
 function show(el, on = true) {
@@ -334,16 +392,20 @@ const state = {
     lastHitOkUntil: 0,
     history: [],
     maxHistoryMs: 350,
-    emaNear: 0.60,
-    emaFar: 0.55,
+    emaNear: 0.35,
+    emaFar: 0.18,
     jumpRejectNearM: 0.25,
     jumpRejectFarM: 0.60,
-    // Speed limit (m/s) for reticle follow. Prevents teleports without "slow-motion" lag.
-    maxSpeedNear: 60,
-    maxSpeedFar: 220,
-    _lastT: 0,
-    holdOnModeChangeMs: 0,
+    holdOnModeChangeMs: 140,
     hitLatchMs: 180,
+  },
+
+  // Patch 7: AR hint throttling (uses existing contourHint UI)
+  arHints: {
+    enabled: AR_HINTS_ENABLED,
+    shownAfterLock: false,
+    lastFlashT: 0,
+    cooldownMs: 900,
   },
 
   points: /** @type {THREE.Vector3[]} */ ([]),
@@ -393,14 +455,156 @@ const state = {
     framesT: [],
     validT: [],
 
+    // Drift control (Patch 5)
+    lastValidHitT: 0,
+    degraded: false,
+    degradeAfterMs: 800,
+    degradeHoldMs: 500,
+
+    // Plane Y velocity limits (cm/s)
+    maxDownCms: 5.0,
+    maxUpCms: 1.0,
+
     // Status (useful for debug overlay)
     viewAngleDeg: NaN,
     validHit: false,
     frozen: false,
   },
 
+
+// Coverage / confidence grid (Patch 3): tracks scanned floor areas to make far placement predictable
+coverageGrid: {
+  enabled: COVERAGE_ENABLED,
+  // grid parameters
+  cellSizeM: 0.65,
+  radiusM: 15.0,
+
+  // decay / freshness
+  halfLifeMs: 10000,
+  staleMs: 20000,
+
+  // sampling cadence
+  sampleIntervalMs: 100,
+  lastSampleT: 0,
+
+  // origin of the grid (set at floor lock)
+  originX: 0,
+  originZ: 0,
+  lockedT: 0,
+  warmupMs: 900,
+
+  // storage: key -> {c,lastT}
+  cells: new Map(),
+
+  // last evaluation (debug)
+  last: { zone: 'none', score: 0, c: 0, ageMs: 0, reqRed: 0, reqGreen: 0 },
+},
+
+// Current confidence zone for committing points: none|red|yellow|green
+commitZone: 'none',
+
 };
 
+
+
+// ------------------------
+// Coverage / confidence grid helpers (Patch 3)
+// ------------------------
+function _covResetAt(x, z) {
+  try {
+    const cg = state.coverageGrid;
+    if (!cg || !cg.enabled) return;
+    cg.cells = new Map();
+    cg.originX = isFinite(x) ? x : 0;
+    cg.originZ = isFinite(z) ? z : 0;
+    cg.lastSampleT = 0;
+    cg.lockedT = performance.now();
+    cg.last = { zone: 'none', score: 0, c: 0, ageMs: 0, reqRed: 0, reqGreen: 0 };
+    state.commitZone = 'none';
+  } catch (_) {}
+}
+
+function _covKey(ix, iz) {
+  return ix + ',' + iz;
+}
+
+function _covAddSample(x, z, nowT) {
+  try {
+    const cg = state.coverageGrid;
+    if (!cg || !cg.enabled) return;
+    if (!isFinite(x) || !isFinite(z)) return;
+    const interval = cg.sampleIntervalMs || 100;
+    if (nowT - (cg.lastSampleT || 0) < interval) return;
+    cg.lastSampleT = nowT;
+
+    const cs = cg.cellSizeM || 0.65;
+    const dx = x - (cg.originX || 0);
+    const dz = z - (cg.originZ || 0);
+    const r = Math.hypot(dx, dz);
+    if (r > (cg.radiusM || 15)) return;
+
+    const ix = Math.floor(dx / cs);
+    const iz = Math.floor(dz / cs);
+    const key = _covKey(ix, iz);
+    let cell = cg.cells.get(key);
+    if (!cell) {
+      cell = { c: 0, lastT: nowT };
+      cg.cells.set(key, cell);
+    }
+
+    const half = cg.halfLifeMs || 10000;
+    const age = Math.max(0, nowT - (cell.lastT || nowT));
+    if (age > 0 && isFinite(half) && half > 0) {
+      const decay = Math.exp(-age / half);
+      cell.c = cell.c * decay;
+    }
+
+    cell.c = (cell.c || 0) + 1;
+    cell.lastT = nowT;
+  } catch (_) {}
+}
+
+function _covEvalZone(x, z, nowT, distM) {
+  const cg = state.coverageGrid;
+  if (!cg || !cg.enabled) return { zone: 'none', score: 0, c: 0, ageMs: 0, reqRed: 0, reqGreen: 0 };
+  if (!isFinite(x) || !isFinite(z)) return { zone: 'none', score: 0, c: 0, ageMs: 0, reqRed: 0, reqGreen: 0 };
+
+  const cs = cg.cellSizeM || 0.65;
+  const dx = x - (cg.originX || 0);
+  const dz = z - (cg.originZ || 0);
+  const r = Math.hypot(dx, dz);
+  if (r > (cg.radiusM || 15)) return { zone: 'red', score: 0, c: 0, ageMs: 1e9, reqRed: 0, reqGreen: 0 };
+
+  const ix = Math.floor(dx / cs);
+  const iz = Math.floor(dz / cs);
+  const key = _covKey(ix, iz);
+  const cell = cg.cells.get(key);
+  const c = cell ? (cell.c || 0) : 0;
+  const ageMs = cell ? Math.max(0, nowT - (cell.lastT || nowT)) : 1e9;
+
+  const staleMs = cg.staleMs || 20000;
+  const freshness = (ageMs >= staleMs) ? 0 : Math.max(0, 1 - (ageMs / staleMs));
+
+  // Distance-based requirements (near -> far)
+  const d = isFinite(distM) ? distM : 0;
+  const t = d <= 3 ? 0 : (d >= 10 ? 1 : (d - 3) / 7);
+  const reqRed = 1 + 2 * t;    // 1 .. 3
+  const reqGreen = 3 + 5 * t;  // 3 .. 8
+
+  const norm = (reqGreen > 0) ? Math.min(1, c / reqGreen) : 0;
+  const score = norm * freshness;
+
+  let zone = 'red';
+  if (score >= 0.70 && c >= reqGreen) {
+    zone = 'green';
+  } else if (score >= 0.33 && c >= reqRed) {
+    zone = 'yellow';
+  } else {
+    zone = 'red';
+  }
+
+  return { zone, score, c, ageMs, reqRed, reqGreen };
+}
 
 // ------------------------
 // Texture loading limiter (prevents spikes when user rapidly switches textures)
@@ -904,6 +1108,32 @@ const pointsGroup = new THREE.Group();
 anchorGroup.add(pointsGroup);
 let line = null;
 let fillMesh = null;
+
+// Patch 6: lock filled mesh transform after final fill (prevents perceived drift from any later plane updates)
+let __fillLocked = false;
+let __fillLockedMatrix = null;
+
+function lockFillMeshTransform() {
+  if (!fillMesh) { __fillLocked = false; __fillLockedMatrix = null; return; }
+  if (__fillLocked) return;
+  try {
+    fillMesh.updateMatrix();
+    fillMesh.matrixAutoUpdate = false;
+    fillMesh.matrixWorldNeedsUpdate = true;
+    __fillLockedMatrix = fillMesh.matrix.clone();
+    __fillLocked = true;
+  } catch (_) {}
+}
+
+function unlockFillMeshTransform() {
+  if (!fillMesh) { __fillLocked = false; __fillLockedMatrix = null; return; }
+  if (!__fillLocked) return;
+  try {
+    fillMesh.matrixAutoUpdate = true;
+  } catch (_) {}
+  __fillLocked = false;
+  __fillLockedMatrix = null;
+}
 
 // Materials
 let tileMaterial = null;
@@ -2804,6 +3034,9 @@ function ensureFloorLocked() {
   state.floorLocked = true;
   state.floorY = reticle.position.y;
 
+  // Patch 3: initialize coverage grid origin at floor lock
+  try { _covResetAt(reticle.position.x, reticle.position.z); } catch (_) {}
+
   // lock scanning grid to the floor (and then hide it — it is only for scanning)
   scanGrid.position.set(reticle.position.x, state.floorY + 0.001, reticle.position.z);
   scanGrid.visible = false;
@@ -2818,6 +3051,16 @@ function ensureFloorLocked() {
     show(UI.contourHint, true);
   }
   state.phase = 'ar_draw';
+
+  // Patch 7: subtle onboarding hint about "doscanning" for дальние точки (one-time)
+  try {
+    const h = state.arHints;
+    if (h && h.enabled && !h.shownAfterLock) {
+      h.shownAfterLock = true;
+      h.lastFlashT = performance.now();
+      flashContourHint('Чтобы ставить точки дальше — досканируйте область, плавно ведя камерой по полу.', 2600);
+    }
+  } catch (_) {}
 }
 
 function addPointAtWorld(worldPos) {
@@ -2875,34 +3118,103 @@ function addPointFromReticle() {
   if (!reticle.visible) return;
   // Require stable aiming (hit or short latch) and sufficient view angle.
   if (!state.canCommitPoint) {
-    flashContourHint('Наклоните камеру вниз и досканируйте пол, чтобы поставить точку на полу.');
+    // Patch 7: avoid hint spam (especially when user taps repeatedly)
+    try {
+      const h = state.arHints;
+      const nowT = performance.now();
+      if (h && h.enabled) {
+        const cd = h.cooldownMs || 900;
+        if ((nowT - (h.lastFlashT || 0)) < cd) return;
+        h.lastFlashT = nowT;
+      }
+    } catch (_) {}
+    const minA = (state.planeRefine?.minAngleDeg || 12);
+    if ((state.viewAngleToPlane || 0) < minA) {
+      flashContourHint('Наклоните камеру вниз, чтобы прицелиться в пол.');
+    } else if (state.commitZone === 'red') {
+      flashContourHint('Досканируйте участок пола: медленно проведите камерой по полу в зоне, где хотите поставить точку.');
+    } else {
+      flashContourHint('Досканируйте пол, чтобы поставить точку стабильно на поверхности.');
+    }
     return;
   }
 
-  // Patch 2.2.1: commit by median of recent reticle samples to reduce sudden jumps.
-  try {
+  // Patch 4: multi-sample commit (distance + zone aware) to reduce jitter/outliers.
+  // We reuse the per-frame reticle history (already filtered/latched) to avoid extra hit-test load.
+  if (MULTISAMPLE_ENABLED) try {
     const rs = state.reticleStab;
     if (rs && rs.history && rs.history.length) {
       const nowT = performance.now();
       const minA = (state.planeRefine?.minAngleDeg || 12);
-      const win = 260; // ms
+      const last = rs.history[rs.history.length - 1];
+      const distXZ = (last && isFinite(last.distXZ)) ? last.distXZ : 0;
+
+      // Distance-adaptive window + minimum sample count.
+      // 0-5m: faster commit; 5-10m: more samples for stability.
+      const tD = (distXZ <= 5) ? 0 : (distXZ >= 10 ? 1 : (distXZ - 5) / 5);
+      let win = 200 + 140 * tD;     // 200 .. 340 ms
+      let minN = Math.round(7 + 6 * tD); // 7 .. 13
+      if (state.commitZone === 'yellow') { win += 60; minN += 3; }
+      if (state.commitZone === 'green') { /* default */ }
+
       const xs = [];
       const zs = [];
+      const pts = [];
+      const latchedOk = (rs.lastHitOkUntil || 0) > nowT;
+
       for (let k = rs.history.length - 1; k >= 0; k--) {
         const h = rs.history[k];
-        if (!h || (nowT - h.t) > win) break;
+        if (!h) continue;
+        const age = nowT - h.t;
+        if (age > win) break;
         if (!(h.viewAngle >= minA)) continue;
-        // Accept samples that were hit-based, or within latch window.
-        if (!(h.usedHit || (rs.lastHitOkUntil || 0) > nowT)) continue;
+        // Prefer true hit-based samples. Latch allows a short grace window right after a valid hit.
+        if (!(h.usedHit || latchedOk)) continue;
+        // If we have validity info, prefer valid samples.
+        if (h.usedHit && h.validHit === false) continue;
+        pts.push(h);
         xs.push(h.x);
         zs.push(h.z);
       }
+
+      const median = (arr) => {
+        const a = arr.slice().sort((p,q)=>p-q);
+        const m = (a.length / 2) | 0;
+        return a[m];
+      };
+
       if (xs.length >= 5) {
-        xs.sort((a,b)=>a-b);
-        zs.sort((a,b)=>a-b);
-        const mid = (xs.length/2) | 0;
-        const mx = xs[mid];
-        const mz = zs[mid];
+        let mx = median(xs);
+        let mz = median(zs);
+
+        // Outlier reject around the median (robust). Keeps commit responsive but prevents rare teleports.
+        const dists = pts.map(p => Math.hypot(p.x - mx, p.z - mz)).sort((a,b)=>a-b);
+        const mad = dists[(dists.length / 2) | 0] || 0;
+        // Threshold grows slightly with distance; never too small.
+        const baseThr = 0.06 + 0.20 * tD; // 6cm .. 26cm
+        const thr = Math.max(baseThr, 2.5 * mad);
+        const fxs = [];
+        const fzs = [];
+        for (let i = 0; i < pts.length; i++) {
+          const p = pts[i];
+          if (Math.hypot(p.x - mx, p.z - mz) <= thr) {
+            fxs.push(p.x);
+            fzs.push(p.z);
+          }
+        }
+        if (fxs.length >= 5) {
+          mx = median(fxs);
+          mz = median(fzs);
+        }
+
+        // If we don't have enough samples, still commit using the best estimate we have.
+        // But when we do have enough, commit becomes very stable.
+        if (xs.length >= minN || fxs.length >= minN) {
+          __tmpCommitPos.set(mx, reticle.position.y, mz);
+          addPointAtWorld(__tmpCommitPos);
+          return;
+        }
+        // Not enough samples yet: commit to median anyway (keeps UX snappy).
         __tmpCommitPos.set(mx, reticle.position.y, mz);
         addPointAtWorld(__tmpCommitPos);
         return;
@@ -3228,6 +3540,9 @@ function rebuildFill() {
     fillMesh = null;
   }
 
+  __fillLocked = false;
+  __fillLockedMatrix = null;
+
   const isClosed = state.closed && state.points.length >= 3;
   if (!isClosed) return;
 
@@ -3263,6 +3578,13 @@ function rebuildFill() {
   fillMesh = new THREE.Mesh(geom, mat);
   fillMesh.renderOrder = 2;
   anchorGroup.add(fillMesh);
+
+  // Patch 6 (flagged in Patch 7): lock transform in final phase so later plane refinement cannot visually move the filled area
+  if (state.phase === 'ar_final' && FILL_LOCK_ENABLED) {
+    lockFillMeshTransform();
+  } else {
+    unlockFillMeshTransform();
+  }
 }
 
 // ------------------------
@@ -3457,7 +3779,7 @@ function _arDebugUpdateOverlay() {
     const jitter = _arDebugJitter2D(jitterWin);
 
     const lines = [
-      `AR debug (Patch 2.2.2)`,
+      `AR debug (Patch 7)`,
       `state: ${_arDebugStateLabel()}`,
       `fps: ${_fmt(dbg.fps, 0)}`,
       `hit-test: ${hitsPerSec} hits/s`,
@@ -3469,6 +3791,8 @@ function _arDebugUpdateOverlay() {
       `normalAngle: ${ang == null ? '—' : _fmt(ang, 1)}°`,
       `freeze: ${frozen ? 'on' : 'off'}`,
       `canCommit: ${state.canCommitPoint ? 'on' : 'off'}`,
+      `zone: ${state.commitZone || 'none'}`,
+      `cov: ${state.coverageGrid && state.coverageGrid.last ? _fmt(state.coverageGrid.last.score, 2) : '—'} (c=${state.coverageGrid && state.coverageGrid.last ? _fmt(state.coverageGrid.last.c, 1) : '—'})`,
       `mode: ${mode}`,
     ];
 
@@ -3571,6 +3895,9 @@ function updateXR(frame) {
           state.floorStable = true;
           state.floorY = p15;
 
+          // Patch 3: initialize coverage grid origin at floor lock
+          try { _covResetAt(reticle.position.x, reticle.position.z); } catch (_) {}
+
           // Patch 2: initialize plane refinement reference height
           try {
             const pr = state.planeRefine;
@@ -3620,7 +3947,19 @@ function updateXR(frame) {
       const upOk = (gotHitRaw && isFinite(__tmpUp.y)) ? (__tmpUp.y >= 0.60) : gotHit;
       // Patch 2.2: treat floor validity primarily by view angle + surface-upness; height check is diagnostic only.
       validFloorHit = !!(gotHitRaw && hitY != null && angleOk && upOk);
-      if (validFloorHit) pr.validT.push(now);
+      if (validFloorHit) {
+        pr.validT.push(now);
+        pr.lastValidHitT = now;
+        pr.degraded = false;
+      } else {
+        const lastOk = pr.lastValidHitT || 0;
+        if (lastOk && (now - lastOk) > (pr.degradeAfterMs || 800)) {
+          pr.degraded = true;
+          pr.freezeUntil = Math.max(pr.freezeUntil || 0, now + (pr.degradeHoldMs || 500));
+        }
+      }
+
+
       while (pr.validT.length && pr.validT[0] < (now - 1000)) pr.validT.shift();
 
       const framesN = pr.framesT.length;
@@ -3640,13 +3979,19 @@ function updateXR(frame) {
         // - allow moving UP (into air) very slowly (prevents hovering)
         const alpha = 0.25;
         const target = hitY;
-        const proposed = pr.planeYRef + (target - pr.planeYRef) * alpha;
-        let move = proposed - pr.planeYRef;
-        const maxDown = 0.05 * dt; // 5 cm/s down
-        const maxUp = 0.01 * dt;   // 1 cm/s up
-        if (move > maxUp) move = maxUp;
-        if (move < -maxDown) move = -maxDown;
-        pr.planeYRef = pr.planeYRef + move;
+
+        // Patch 5: drift control + outlier reject for height updates (prevents sudden drift when we briefly hit non-floor geometry)
+        const maxDown = (pr.maxDownCms || 5.0) * 0.01 * dt; // m per dt
+        const maxUp = (pr.maxUpCms || 1.0) * 0.01 * dt;
+        const dAbs = Math.abs(target - pr.planeYRef);
+        const maxDelta = Math.max(pr.heightTolMaxM || 0.08, 0.12) * 3; // ~0.36m
+        if (dAbs <= maxDelta) {
+          const proposed = pr.planeYRef + (target - pr.planeYRef) * alpha;
+          let move = proposed - pr.planeYRef;
+          if (move > maxUp) move = maxUp;
+          if (move < -maxDown) move = -maxDown;
+          pr.planeYRef = pr.planeYRef + move;
+        }
 
         // If the user has not placed any contour points yet, keep floorY tightly aligned.
         if (state.points.length === 0 && state.holePoints.length === 0) {
@@ -3719,23 +4064,12 @@ function updateXR(frame) {
       const dz = targetZ - rs.pos.z;
       const jump = Math.hypot(dx, dz);
 
-      // Speed-limited smoothing: prevents teleports without adding large follow lag.
-      const dt = rs._lastT ? Math.max(0.008, Math.min(0.05, (nowT - rs._lastT) / 1000)) : 0.016;
-      rs._lastT = nowT;
+      let a = alpha;
+      if (nowT < rs.modeHoldUntil) a = Math.min(a, 0.05);     // soften mode flips (hit <-> fallback)
+      if (jump > jumpThresh) a = Math.min(a, 0.06);           // reject outliers (prevents "teleport" jumps)
 
-      const maxSpeed = (rs.maxSpeedNear || 10) + ((rs.maxSpeedFar || 30) - (rs.maxSpeedNear || 10)) * tD; // m/s
-      const maxStep = maxSpeed * dt;
-
-      if (jump > maxStep && jump > 1e-6) {
-        const k = maxStep / jump;
-        rs.pos.x = rs.pos.x + dx * k;
-        rs.pos.z = rs.pos.z + dz * k;
-      } else {
-        // If the target jump exceeds the typical reject threshold, follow faster (avoid "slow-motion").
-        const a = (jump > jumpThresh) ? Math.max(alpha, 0.45) : alpha;
-        rs.pos.x = rs.pos.x + dx * a;
-        rs.pos.z = rs.pos.z + dz * a;
-      }
+      rs.pos.x = rs.pos.x + dx * a;
+      rs.pos.z = rs.pos.z + dz * a;
       rs.pos.y = targetY;
 
       reticle.position.copy(rs.pos);
@@ -3749,12 +4083,31 @@ function updateXR(frame) {
 
     // History for stable commit (median of last window)
     if (rs) {
-      rs.history.push({ t: nowT, x: reticle.position.x, z: reticle.position.z, usedHit: reticleUsedHit, validHit: !!validFloorHit, viewAngle: viewAngleToPlane, mode });
+      // Keep a short history of reticle poses for stable multi-sample commit.
+      // distXZ is used to adapt sampling window based on distance.
+      rs.history.push({
+        t: nowT,
+        x: reticle.position.x,
+        z: reticle.position.z,
+        distXZ: Math.hypot(reticle.position.x - __tmpCamPos.x, reticle.position.z - __tmpCamPos.z),
+        usedHit: reticleUsedHit,
+        validHit: !!validFloorHit,
+        viewAngle: viewAngleToPlane,
+        mode
+      });
       const cut = nowT - (rs.maxHistoryMs || 350);
       while (rs.history.length && rs.history[0].t < cut) rs.history.shift();
       if (reticleUsedHit && validFloorHit && viewAngleToPlane >= (state.planeRefine?.minAngleDeg || 12)) {
         rs.lastHitOkUntil = nowT + (rs.hitLatchMs || 180);
       }
+
+      // Patch 3: update coverage grid only from valid hit-based floor samples
+      try {
+        if (reticleUsedHit && validFloorHit && viewAngleToPlane >= (state.planeRefine?.minAngleDeg || 12)) {
+          _covAddSample(reticle.position.x, reticle.position.z, nowT);
+        }
+      } catch (_) {}
+
     }
   } else {
     reticle.visible = false;
@@ -3779,10 +4132,36 @@ function updateXR(frame) {
 // Patch 2.1: store per-frame AR gating signals for point placement
   state.viewAngleToPlane = viewAngleToPlane;
   state.reticleMode = (reticle.visible ? (reticleUsedHit ? 'hit' : 'fallback_y_plane') : 'none');
-  const __minA = (state.planeRefine?.minAngleDeg || 12);
-  const __rs = state.reticleStab;
-  const __latched = !!(__rs && (__rs.lastHitOkUntil || 0) > performance.now());
-  state.canCommitPoint = !!(reticle.visible && viewAngleToPlane >= __minA && ((reticleUsedHit && validFloorHit) || __latched));
+
+const __minA = (state.planeRefine?.minAngleDeg || 12);
+const __rs = state.reticleStab;
+const __nowT = performance.now();
+const __latched = !!(__rs && ((__rs.lastHitOkUntil || 0) > __nowT));
+
+// Patch 3: coverage/confidence gating for predictable far placement
+try {
+  if (state.floorLocked && reticle.visible && state.coverageGrid && state.coverageGrid.enabled) {
+    const distM = Math.hypot(reticle.position.x - __tmpCamPos.x, reticle.position.z - __tmpCamPos.z);
+    let info = _covEvalZone(reticle.position.x, reticle.position.z, __nowT, distM);
+    // Warmup grace right after lock: allow near placements while grid is filling
+    const warm = state.coverageGrid.warmupMs || 0;
+    if (info.zone === 'red' && warm > 0 && (__nowT - (state.coverageGrid.lockedT || 0)) < warm && distM <= 4.0 && (reticleUsedHit && validFloorHit)) {
+      // Patch 7: avoid per-frame allocations in warmup path
+      info.zone = 'yellow';
+    }
+    state.coverageGrid.last = info;
+    state.commitZone = info.zone;
+  } else {
+    state.commitZone = 'none';
+    if (state.coverageGrid) state.coverageGrid.last = { zone: 'none', score: 0, c: 0, ageMs: 0, reqRed: 0, reqGreen: 0 };
+  }
+} catch (_) {
+  state.commitZone = 'none';
+}
+
+const __baseOk = !!(reticle.visible && viewAngleToPlane >= __minA && ((reticleUsedHit && validFloorHit) || __latched));
+const __zoneOk = (state.commitZone !== 'red');
+state.canCommitPoint = !!(__baseOk && __zoneOk);
 
 
   // AR debug sample (Patch 2): record hit-test stability without changing behavior
@@ -3847,10 +4226,19 @@ function updateXR(frame) {
     const d0 = distXZ(state.points[0], loc);
     state.snapArmed = d0 < SNAP_DIST_M;
   }
-  if (reticle.material?.color) {
-    const base = (!state.snapArmed && state.phase === 'ar_draw' && !state.closed && !state.canCommitPoint) ? 0x9ca3af : 0x2f6cff;
-    reticle.material.color.setHex(state.snapArmed ? 0x36d399 : base);
+  
+if (reticle.material?.color) {
+  let base = 0x2f6cff;
+  const inPlace = (state.phase === 'ar_draw' || state.phase === 'ar_cut') && !state.closed && state.floorLocked;
+  if (inPlace) {
+    if (state.commitZone === 'green') base = 0x36d399;
+    else if (state.commitZone === 'yellow') base = 0xfbbf24;
+    else if (state.commitZone === 'red') base = 0x9ca3af;
+    else if (!state.canCommitPoint) base = 0x9ca3af;
   }
+  reticle.material.color.setHex(state.snapArmed ? 0x36d399 : base);
+}
+
   // "firstRing" теперь находится внутри флажка (вложенный объект)
   let firstRing = null;
   pointsGroup.traverse((o) => {
