@@ -27,6 +27,18 @@ const ENABLE_PALETTE_SETTINGS = (typeof window !== 'undefined' && window.__ENABL
 const API_BASE_URL = (typeof window !== 'undefined' && window.__API_BASE_URL__)
   ? String(window.__API_BASE_URL__).replace(/\/+$/, '') + '/'
   : '';
+// Debug overlay flag: enable with ?debugAR=1 (or any truthy value)
+const DEBUG_AR_ENABLED = (() => {
+  try {
+    const q = new URLSearchParams(window.location.search);
+    if (!q.has('debugAR')) return false;
+    const v = q.get('debugAR');
+    return v == null || v === '' || v === '1' || v.toLowerCase() === 'true';
+  } catch (_) {
+    return false;
+  }
+})();
+
 // ------------------------
 // UI
 // ------------------------
@@ -66,6 +78,7 @@ const UI = {
   arArea: document.getElementById('arArea'),
   scanHint: document.getElementById('scanHint'),
   contourHint: document.getElementById('contourHint'),
+  arDebugOverlay: document.getElementById('arDebugOverlay'),
   measureLayer: document.getElementById('measureLayer'),
   arBottomCenter: document.getElementById('arBottomCenter'),
   btnArAdd: document.getElementById('btnArAdd'),
@@ -300,6 +313,17 @@ const state = {
 
   // UI gating: show bottom pattern/menu only after the user closes the contour at least once.
   hasEverClosedContour: false,
+
+  // Debug overlay (Patch 1): metrics for hit-test stability/distance
+  debugAR: {
+    enabled: DEBUG_AR_ENABLED,
+    fps: 0,
+    _fpsFrames: 0,
+    _fpsT0: 0,
+    // recent samples: {t, gotHit, reticleOk, mode, x,y,z, dist, normalAngle}
+    samples: [],
+    maxSamples: 120,
+  },
 };
 
 
@@ -3198,6 +3222,123 @@ function updateAreaUI() {
 }
 
 // ------------------------
+// AR debug overlay (Patch 1)
+// ------------------------
+function _fmt(n, digits = 2) {
+  try {
+    if (!isFinite(n)) return '—';
+    return Number(n).toFixed(digits);
+  } catch (_) {
+    return '—';
+  }
+}
+
+function _arDebugStateLabel() {
+  // Keep it simple and robust: map internal phases
+  const ph = state.phase || '';
+  if (ph === 'ar_scan') return 'scanning';
+  if (ph === 'ar_draw' || ph === 'ar_cut' || ph === 'ar_mask') return 'placingPoints';
+  if (ph === 'ar_final') return 'filled';
+  return ph || '—';
+}
+
+function _arDebugRecordSample(sample) {
+  try {
+    const dbg = state.debugAR;
+    if (!dbg || !dbg.enabled) return;
+    const arr = dbg.samples;
+    arr.push(sample);
+    const maxN = dbg.maxSamples || 120;
+    if (arr.length > maxN) arr.splice(0, arr.length - maxN);
+  } catch (_) {}
+}
+
+function _arDebugComputeWindow(ms) {
+  const dbg = state.debugAR;
+  if (!dbg || !dbg.enabled) return { total: 0, hits: 0, samples: [] };
+  const now = performance.now();
+  const out = [];
+  let hits = 0;
+  for (let i = dbg.samples.length - 1; i >= 0; i--) {
+    const s = dbg.samples[i];
+    if (!s) continue;
+    if ((now - s.t) > ms) break;
+    out.push(s);
+    if (s.gotHit) hits++;
+  }
+  return { total: out.length, hits, samples: out };
+}
+
+function _arDebugJitter2D(samples) {
+  // Jitter in horizontal plane (XZ), in cm.
+  const pts = samples.filter(s => s && s.reticleOk && isFinite(s.x) && isFinite(s.z));
+  const n = pts.length;
+  if (n < 3) return null;
+  let mx = 0, mz = 0;
+  for (const p of pts) { mx += p.x; mz += p.z; }
+  mx /= n; mz /= n;
+  let vx = 0, vz = 0;
+  for (const p of pts) {
+    const dx = p.x - mx;
+    const dz = p.z - mz;
+    vx += dx * dx;
+    vz += dz * dz;
+  }
+  vx /= (n - 1);
+  vz /= (n - 1);
+  const std = Math.sqrt(vx + vz);
+  return std * 100;
+}
+
+function _arDebugUpdateOverlay() {
+  try {
+    const dbg = state.debugAR;
+    if (!dbg || !dbg.enabled || !UI.arDebugOverlay) return;
+
+    // FPS
+    const now = performance.now();
+    if (!dbg._fpsT0) dbg._fpsT0 = now;
+    dbg._fpsFrames++;
+    const dt = now - dbg._fpsT0;
+    if (dt >= 500) {
+      dbg.fps = (dbg._fpsFrames / dt) * 1000;
+      dbg._fpsFrames = 0;
+      dbg._fpsT0 = now;
+    }
+
+    const w1 = _arDebugComputeWindow(1000);
+    const w2 = _arDebugComputeWindow(2000);
+
+    const hitsPerSec = w1.hits;
+    const hitPct2s = w2.total ? (w2.hits / w2.total) * 100 : 0;
+
+    // Use last sample for distance / normal / mode
+    const last = dbg.samples.length ? dbg.samples[dbg.samples.length - 1] : null;
+    const dist = last && isFinite(last.dist) ? last.dist : null;
+    const ang = last && isFinite(last.normalAngle) ? last.normalAngle : null;
+    const mode = last ? last.mode : '—';
+
+    const jitterWin = dbg.samples.slice(-20);
+    const jitter = _arDebugJitter2D(jitterWin);
+
+    const lines = [
+      `AR debug (Patch 1)`,
+      `state: ${_arDebugStateLabel()}`,
+      `fps: ${_fmt(dbg.fps, 0)}`,
+      `hit-test: ${hitsPerSec} hits/s`,
+      `hit success (2s): ${_fmt(hitPct2s, 0)}%`,
+      `distance: ${dist == null ? '—' : _fmt(dist, 2)} m`,
+      `jitter (XZ, ~20f): ${jitter == null ? '—' : _fmt(jitter, 1)} cm`,
+      `normalAngle: ${ang == null ? '—' : _fmt(ang, 1)}°`,
+      `mode: ${mode}`,
+    ];
+
+    UI.arDebugOverlay.textContent = lines.join('\n');
+    show(UI.arDebugOverlay, true);
+  } catch (_) {}
+}
+
+// ------------------------
 // XR frame update
 // ------------------------
 const __tmpUp = new THREE.Vector3();
@@ -3208,6 +3349,7 @@ function updateXR(frame) {
   // Center hit test (used mainly to estimate floor height while scanning)
   let gotHit = false;
   let hitY = null;
+  let hitNormalAngle = NaN;
 
   if (state.hitTestSource && state.referenceSpace) {
     const hits = frame.getHitTestResults(state.hitTestSource);
@@ -3219,6 +3361,11 @@ function updateXR(frame) {
 
         // Filter out obviously non-horizontal hits using the reported orientation
         __tmpUp.set(0, 1, 0).applyQuaternion(reticle.quaternion);
+        // Angle between hit surface normal (pose up) and world up, in degrees
+        try {
+          const dot = Math.max(-1, Math.min(1, __tmpUp.y));
+          hitNormalAngle = Math.acos(dot) * 180 / Math.PI;
+        } catch (_) { hitNormalAngle = NaN; }
         if (__tmpUp.y >= 0.75) {
           gotHit = true;
           hitY = reticle.position.y;
@@ -3308,6 +3455,37 @@ function updateXR(frame) {
   // If floor is locked, clamp reticle exactly to floorY (extra safety)
   if (state.floorLocked && reticle.visible) {
     reticle.position.y = state.floorY;
+  }
+
+
+  // AR debug sample (Patch 1): record hit-test stability without changing behavior
+  if (state.debugAR && state.debugAR.enabled) {
+    try {
+      // Camera position already computed in __tmpCamPos above
+      const dx = reticle.visible ? (reticle.position.x - __tmpCamPos.x) : 0;
+      const dy = reticle.visible ? (reticle.position.y - __tmpCamPos.y) : 0;
+      const dz = reticle.visible ? (reticle.position.z - __tmpCamPos.z) : 0;
+      const dist = reticle.visible ? Math.sqrt(dx*dx + dy*dy + dz*dz) : NaN;
+
+      // normal angle from last hit orientation when available (reticle.quaternion is set from hit when gotHit=true; otherwise flat)
+      let normalAngle = gotHit ? hitNormalAngle : NaN;
+
+      const mode = gotHit ? 'hit' : (reticle.visible ? 'fallback_y_plane' : 'none');
+
+      _arDebugRecordSample({
+        t: performance.now(),
+        gotHit: !!gotHit,
+        reticleOk: !!reticle.visible,
+        mode,
+        x: reticle.visible ? reticle.position.x : NaN,
+        y: reticle.visible ? reticle.position.y : NaN,
+        z: reticle.visible ? reticle.position.z : NaN,
+        dist,
+        normalAngle,
+      });
+
+      _arDebugUpdateOverlay();
+    } catch (_) {}
   }
 
 

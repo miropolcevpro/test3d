@@ -306,6 +306,25 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   text-align:center;
 }
 
+.arDebugOverlay{
+  position:absolute;
+  left:10px;
+  top:calc(var(--ar-top-strip) + 8px);
+  max-width:calc(100vw - 20px);
+  padding:10px 12px;
+  border-radius:14px;
+  background:rgba(0,0,0,0.55);
+  border:1px solid rgba(255,255,255,0.14);
+  color:rgba(255,255,255,0.92);
+  font-size:12px;
+  line-height:1.25;
+  font-weight:700;
+  white-space:pre-line;
+  z-index:50;
+  pointer-events:none;
+  backdrop-filter: blur(10px);
+}
+
 .arBottomCenter{
   position:absolute;left:0;right:0;
   /* Keep main buttons above the bottom pattern strip */
