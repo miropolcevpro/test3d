@@ -392,12 +392,21 @@ const state = {
     lastHitOkUntil: 0,
     history: [],
     maxHistoryMs: 350,
-    emaNear: 0.35,
-    emaFar: 0.18,
+    emaNearSlow: 0.30,
+    emaFarSlow: 0.16,
     jumpRejectNearM: 0.25,
     jumpRejectFarM: 0.60,
-    holdOnModeChangeMs: 140,
+    holdOnModeChangeMs: 90,
     hitLatchMs: 180,
+    // Adaptive responsiveness: reduce lag while keeping outlier protection
+    emaNearFast: 0.70,
+    emaFarFast: 0.50,
+    outlierAlpha: 0.08,
+    modeHoldAlphaMin: 0.18,
+    motionScoreMin: 0.08,
+    motionScoreMax: 0.90,
+    motionAngleWeight: 0.015, // adds ~0.9 to score at ~60 deg/s
+    jumpBoostMax: 6.0,
   },
 
   // Patch 7: AR hint throttling (uses existing contourHint UI)
@@ -3779,7 +3788,7 @@ function _arDebugUpdateOverlay() {
     const jitter = _arDebugJitter2D(jitterWin);
 
     const lines = [
-      `AR debug (Patch 7.1)`,
+      `AR debug (Patch 7.2)`,
       `state: ${_arDebugStateLabel()}`,
       `fps: ${_fmt(dbg.fps, 0)}`,
       `hit-test: ${hitsPerSec} hits/s`,
@@ -3806,7 +3815,7 @@ function _arDebugUpdateOverlay() {
 
 
 // ------------------------
-// Adaptive gating helpers (Patch 7.1): reduces false 'red' and makes thresholds device-friendly
+// Adaptive gating helpers (Patch 7.2): reduces false 'red' and makes thresholds device-friendly
 // ------------------------
 function _clamp(v, a, b) {
   return Math.min(b, Math.max(a, v));
@@ -3963,7 +3972,7 @@ function updateXR(frame) {
   }
 
   // Patch 2: continuous refinement (reference plane tracking + freeze heuristics)
-  // Patch 7.1: adaptive gating thresholds to reduce false negatives ("grey" zone)
+  // Patch 7.2: adaptive gating thresholds to reduce false negatives ("grey" zone)
   let __minAFrame = (state.planeRefine?.minAngleDeg || 12);
   let __upThrFrame = 0.60;
   let __inWarmupFrame = false;
@@ -4104,16 +4113,61 @@ function updateXR(frame) {
       // Distance-based smoothing parameters (XZ only; Y clamped separately)
       const distXZ = Math.hypot(targetX - __tmpCamPos.x, targetZ - __tmpCamPos.z);
       const tD = (distXZ <= 3) ? 0 : (distXZ >= 8 ? 1 : (distXZ - 3) / 5);
-      const alpha = rs.emaNear + (rs.emaFar - rs.emaNear) * tD;
-      const jumpThresh = rs.jumpRejectNearM + (rs.jumpRejectFarM - rs.jumpRejectNearM) * tD;
+
+      // Adaptive responsiveness: follow camera motion quickly without lag, while still
+      // smoothing and rejecting outliers when the phone is steady.
+      if (!rs._prevCamPos) { rs._prevCamPos = new THREE.Vector3(__tmpCamPos.x, __tmpCamPos.y, __tmpCamPos.z); }
+      if (!rs._prevFwd) { rs._prevFwd = new THREE.Vector3(__tmpFwd.x, __tmpFwd.y, __tmpFwd.z); }
+      const prevT = rs._prevT || nowT;
+      const dtS = Math.max(0.001, (nowT - prevT) / 1000);
+      const dCam = Math.hypot(
+        __tmpCamPos.x - rs._prevCamPos.x,
+        __tmpCamPos.y - rs._prevCamPos.y,
+        __tmpCamPos.z - rs._prevCamPos.z
+      );
+      const linSpeed = dCam / dtS;
+      let dot = rs._prevFwd.x * __tmpFwd.x + rs._prevFwd.y * __tmpFwd.y + rs._prevFwd.z * __tmpFwd.z;
+      if (dot > 1) dot = 1;
+      if (dot < -1) dot = -1;
+      const angDegS = (Math.acos(dot) * 57.29577951308232) / dtS;
+      const score = linSpeed + (rs.motionAngleWeight || 0.015) * angDegS;
+      const sMin = rs.motionScoreMin || 0.08;
+      const sMax = rs.motionScoreMax || 0.90;
+      const motion = Math.max(0, Math.min(1, (score - sMin) / Math.max(0.001, (sMax - sMin))));
+
+      const emaNearSlow = (rs.emaNearSlow != null ? rs.emaNearSlow : 0.30);
+      const emaFarSlow  = (rs.emaFarSlow  != null ? rs.emaFarSlow  : 0.16);
+      const emaNearFast = (rs.emaNearFast != null ? rs.emaNearFast : 0.70);
+      const emaFarFast  = (rs.emaFarFast  != null ? rs.emaFarFast  : 0.50);
+
+      const alphaSlow = emaNearSlow + (emaFarSlow - emaNearSlow) * tD;
+      const alphaFast = emaNearFast + (emaFarFast - emaNearFast) * tD;
+      let alpha = alphaSlow + (alphaFast - alphaSlow) * motion;
+
+      const baseJump = (rs.jumpRejectNearM || 0.25) + ((rs.jumpRejectFarM || 0.60) - (rs.jumpRejectNearM || 0.25)) * tD;
+      const jumpBoost = 1 + motion * (rs.jumpBoostMax || 6.0);
+      const jumpThresh = baseJump * jumpBoost;
 
       const dx = targetX - rs.pos.x;
       const dz = targetZ - rs.pos.z;
       const jump = Math.hypot(dx, dz);
 
+      // Soften mode flips only when the phone is mostly steady; avoid slow-motion lag.
+      if (nowT < rs.modeHoldUntil && motion < 0.25) {
+        alpha = Math.min(alpha, (rs.modeHoldAlphaMin || 0.18));
+      }
+
+      // Outlier rejection only when the phone is steady; large deltas are expected when moving.
+      if (jump > jumpThresh && motion < 0.22) {
+        alpha = Math.min(alpha, (rs.outlierAlpha || 0.08));
+      }
+
       let a = alpha;
-      if (nowT < rs.modeHoldUntil) a = Math.min(a, 0.05);     // soften mode flips (hit <-> fallback)
-      if (jump > jumpThresh) a = Math.min(a, 0.06);           // reject outliers (prevents "teleport" jumps)
+
+      // Store camera motion signals for next frame
+      rs._prevCamPos.set(__tmpCamPos.x, __tmpCamPos.y, __tmpCamPos.z);
+      rs._prevFwd.set(__tmpFwd.x, __tmpFwd.y, __tmpFwd.z);
+      rs._prevT = nowT;
 
       rs.pos.x = rs.pos.x + dx * a;
       rs.pos.z = rs.pos.z + dz * a;
@@ -4216,7 +4270,7 @@ const __baseOk = !!(reticle.visible && viewAngleToPlane >= __minACommit && ((ret
 const __zoneOk = (state.commitZone !== 'red');
 state.canCommitPoint = !!(__baseOk && __zoneOk);
 
-// Patch 7.1: explicit block reason (debug + tuning). Values: angle|noHit|redZone|degraded|noReticle|ok
+// Patch 7.2: explicit block reason (debug + tuning). Values: angle|noHit|redZone|degraded|noReticle|ok
 try {
   let reason = 'ok';
   if (!reticle.visible) reason = 'noReticle';
