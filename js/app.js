@@ -491,7 +491,7 @@ coverageGrid: {
   originX: 0,
   originZ: 0,
   lockedT: 0,
-  warmupMs: 900,
+  warmupMs: 1200,
 
   // storage: key -> {c,lastT}
   cells: new Map(),
@@ -3779,7 +3779,7 @@ function _arDebugUpdateOverlay() {
     const jitter = _arDebugJitter2D(jitterWin);
 
     const lines = [
-      `AR debug (Patch 7)`,
+      `AR debug (Patch 7.1)`,
       `state: ${_arDebugStateLabel()}`,
       `fps: ${_fmt(dbg.fps, 0)}`,
       `hit-test: ${hitsPerSec} hits/s`,
@@ -3790,7 +3790,10 @@ function _arDebugUpdateOverlay() {
       `viewAngle: ${viewAng == null ? '—' : _fmt(viewAng, 1)}°`,
       `normalAngle: ${ang == null ? '—' : _fmt(ang, 1)}°`,
       `freeze: ${frozen ? 'on' : 'off'}`,
-      `canCommit: ${state.canCommitPoint ? 'on' : 'off'}`,
+      `canCommit: ${state.canCommitPoint ? 'on' : 'off'}` ,
+      `blockReason: ${state.commitBlockReason || '—'}`,
+      `minAngleUsed: ${state._minAngleCommitUsed != null ? _fmt(state._minAngleCommitUsed, 1) : '—'}°`,
+      `floorUpThr: ${state._upThrUsed != null ? _fmt(state._upThrUsed, 2) : '—'}`,
       `zone: ${state.commitZone || 'none'}`,
       `cov: ${state.coverageGrid && state.coverageGrid.last ? _fmt(state.coverageGrid.last.score, 2) : '—'} (c=${state.coverageGrid && state.coverageGrid.last ? _fmt(state.coverageGrid.last.c, 1) : '—'})`,
       `mode: ${mode}`,
@@ -3799,6 +3802,37 @@ function _arDebugUpdateOverlay() {
     UI.arDebugOverlay.textContent = lines.join('\n');
     show(UI.arDebugOverlay, true);
   } catch (_) {}
+}
+
+
+// ------------------------
+// Adaptive gating helpers (Patch 7.1): reduces false 'red' and makes thresholds device-friendly
+// ------------------------
+function _clamp(v, a, b) {
+  return Math.min(b, Math.max(a, v));
+}
+
+function _arAdaptiveMinAngle(baseDeg, distM, inWarmup) {
+  const base = (typeof baseDeg === 'number' && isFinite(baseDeg)) ? baseDeg : 12;
+  const d = (typeof distM === 'number' && isFinite(distM)) ? distM : 0;
+  let a = base;
+  // Warmup: allow slightly lower angle so the user can place initial points without feeling blocked.
+  if (inWarmup) a -= 2;
+  // Near: slightly more permissive. Far: slightly stricter to avoid wall/air commits.
+  if (d <= 3) a -= 1;
+  else if (d >= 8) a += 1;
+  return _clamp(a, 9, 14);
+}
+
+function _arAdaptiveUpThreshold(distM, inWarmup) {
+  const d = (typeof distM === 'number' && isFinite(distM)) ? distM : 0;
+  // Default floor-like threshold used in Patch 2.2
+  let thr = 0.60;
+  // Warmup/near: be more permissive to reduce false negatives on common phones.
+  if (inWarmup || d <= 3) thr = 0.55;
+  else if (d >= 8) thr = 0.70;
+  else if (d >= 6) thr = 0.65;
+  return thr;
 }
 
 // ------------------------
@@ -3929,6 +3963,11 @@ function updateXR(frame) {
   }
 
   // Patch 2: continuous refinement (reference plane tracking + freeze heuristics)
+  // Patch 7.1: adaptive gating thresholds to reduce false negatives ("grey" zone)
+  let __minAFrame = (state.planeRefine?.minAngleDeg || 12);
+  let __upThrFrame = 0.60;
+  let __inWarmupFrame = false;
+
   let validFloorHit = false;
   let refineFrozen = false;
   try {
@@ -3943,8 +3982,16 @@ function updateXR(frame) {
 
       const dy = (gotHitRaw && hitY != null) ? Math.abs(hitY - state.floorY) : 999;
       const heightTol = pr.heightTolM;
-      const angleOk = viewAngleToPlane >= pr.minAngleDeg;
-      const upOk = (gotHitRaw && isFinite(__tmpUp.y)) ? (__tmpUp.y >= 0.60) : gotHit;
+      const gateDist = (gotHitRaw && hitX != null && hitZ != null) ? Math.hypot(hitX - __tmpCamPos.x, hitZ - __tmpCamPos.z) : 0;
+      const cg = state.coverageGrid;
+      const warmMs = (cg && cg.enabled) ? (cg.warmupMs || 0) : 0;
+      __inWarmupFrame = !!(warmMs > 0 && (now - (cg.lockedT || 0)) < warmMs);
+      __minAFrame = _arAdaptiveMinAngle(pr.minAngleDeg || 12, gateDist, __inWarmupFrame);
+      __upThrFrame = _arAdaptiveUpThreshold(gateDist, __inWarmupFrame);
+      state._minAngleUsed = __minAFrame;
+      state._upThrUsed = __upThrFrame;
+      const angleOk = viewAngleToPlane >= __minAFrame;
+      const upOk = (gotHitRaw && isFinite(__tmpUp.y)) ? (__tmpUp.y >= __upThrFrame) : gotHit;
       // Patch 2.2: treat floor validity primarily by view angle + surface-upness; height check is diagnostic only.
       validFloorHit = !!(gotHitRaw && hitY != null && angleOk && upOk);
       if (validFloorHit) {
@@ -4021,7 +4068,7 @@ function updateXR(frame) {
     let useHit = false;
     if (state.floorLocked) {
       const pr = state.planeRefine;
-      if (gotHitRaw && hitY != null && viewAngleToPlane >= (pr?.minAngleDeg || 12) && (__tmpUp.y >= 0.60)) {
+      if (gotHitRaw && hitY != null && viewAngleToPlane >= __minAFrame && (__tmpUp.y >= __upThrFrame)) {
         useHit = true;
       }
     }
@@ -4097,13 +4144,13 @@ function updateXR(frame) {
       });
       const cut = nowT - (rs.maxHistoryMs || 350);
       while (rs.history.length && rs.history[0].t < cut) rs.history.shift();
-      if (reticleUsedHit && validFloorHit && viewAngleToPlane >= (state.planeRefine?.minAngleDeg || 12)) {
+      if (reticleUsedHit && validFloorHit && viewAngleToPlane >= __minAFrame) {
         rs.lastHitOkUntil = nowT + (rs.hitLatchMs || 180);
       }
 
       // Patch 3: update coverage grid only from valid hit-based floor samples
       try {
-        if (reticleUsedHit && validFloorHit && viewAngleToPlane >= (state.planeRefine?.minAngleDeg || 12)) {
+        if (reticleUsedHit && validFloorHit && viewAngleToPlane >= __minAFrame) {
           _covAddSample(reticle.position.x, reticle.position.z, nowT);
         }
       } catch (_) {}
@@ -4133,7 +4180,10 @@ function updateXR(frame) {
   state.viewAngleToPlane = viewAngleToPlane;
   state.reticleMode = (reticle.visible ? (reticleUsedHit ? 'hit' : 'fallback_y_plane') : 'none');
 
-const __minA = (state.planeRefine?.minAngleDeg || 12);
+const __baseMinA = (state.planeRefine?.minAngleDeg || 12);
+const __minA = (state._minAngleUsed || __baseMinA);
+let __minACommit = __minA;
+
 const __rs = state.reticleStab;
 const __nowT = performance.now();
 const __latched = !!(__rs && ((__rs.lastHitOkUntil || 0) > __nowT));
@@ -4145,7 +4195,10 @@ try {
     let info = _covEvalZone(reticle.position.x, reticle.position.z, __nowT, distM);
     // Warmup grace right after lock: allow near placements while grid is filling
     const warm = state.coverageGrid.warmupMs || 0;
-    if (info.zone === 'red' && warm > 0 && (__nowT - (state.coverageGrid.lockedT || 0)) < warm && distM <= 4.0 && (reticleUsedHit && validFloorHit)) {
+    const __inWarm = (warm > 0 && (__nowT - (state.coverageGrid.lockedT || 0)) < warm);
+    __minACommit = _arAdaptiveMinAngle(__baseMinA, distM, __inWarm);
+    state._minAngleCommitUsed = __minACommit;
+    if (info.zone === 'red' && warm > 0 && (__nowT - (state.coverageGrid.lockedT || 0)) < warm && distM <= 4.0 && ((reticleUsedHit && validFloorHit) || __latched)) {
       // Patch 7: avoid per-frame allocations in warmup path
       info.zone = 'yellow';
     }
@@ -4159,9 +4212,21 @@ try {
   state.commitZone = 'none';
 }
 
-const __baseOk = !!(reticle.visible && viewAngleToPlane >= __minA && ((reticleUsedHit && validFloorHit) || __latched));
+const __baseOk = !!(reticle.visible && viewAngleToPlane >= __minACommit && ((reticleUsedHit && validFloorHit) || __latched));
 const __zoneOk = (state.commitZone !== 'red');
 state.canCommitPoint = !!(__baseOk && __zoneOk);
+
+// Patch 7.1: explicit block reason (debug + tuning). Values: angle|noHit|redZone|degraded|noReticle|ok
+try {
+  let reason = 'ok';
+  if (!reticle.visible) reason = 'noReticle';
+  else if (state.planeRefine && state.planeRefine.degraded) reason = 'degraded';
+  else if (viewAngleToPlane < __minACommit) reason = 'angle';
+  else if (!((reticleUsedHit && validFloorHit) || __latched)) reason = 'noHit';
+  else if (state.commitZone === 'red') reason = 'redZone';
+  state.commitBlockReason = reason;
+} catch (_) { state.commitBlockReason = '—'; }
+
 
 
   // AR debug sample (Patch 2): record hit-test stability without changing behavior
