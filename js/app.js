@@ -66,6 +66,7 @@ const UI = {
   arArea: document.getElementById('arArea'),
   scanHint: document.getElementById('scanHint'),
   measureLayer: document.getElementById('measureLayer'),
+  contourHint: document.getElementById('arContourHint'),
   arBottomCenter: document.getElementById('arBottomCenter'),
   btnArAdd: document.getElementById('btnArAdd'),
   btnArOk: document.getElementById('btnArOk'),
@@ -2545,8 +2546,11 @@ async function startAR() {
   previewGrid.visible = false;
 
   // Show bottom pattern strip in AR (like in the native app)
-  show(UI.finalBar, true);
+  // IMPORTANT: bottom menu should appear only after the user closes the contour
+  // and the fill is applied. While scanning / placing points, keep it hidden.
+  show(UI.finalBar, false);
   show(UI.finalColors, false);
+  show(UI.contourHint, false);
   updateArBottomStripVar();
   // main add button area visible at start
   show(UI.arBottomCenter, false);
@@ -2785,6 +2789,10 @@ function closeContour() {
   show(UI.btnArOk, false);
   show(UI.arBottomCenter, false);
   show(UI.postCloseBar, true);
+  // After closing the contour, enable the full bottom menu (layouts + shape picker + palette)
+  show(UI.finalBar, true);
+  // Hide contour placement hint
+  show(UI.contourHint, false);
   show(UI.finalColors, false);
   updateArBottomStripVar();
 } 
@@ -2831,12 +2839,14 @@ function resetAll(keepFloor = false) {
 
   // UI
   show(UI.postCloseBar, false);
-  // Bottom strip: keep patterns available in AR; colors appear only after "Готово"
+  // Bottom strip: show only after contour is closed and fill applied.
   if (state.xrSession) {
-    show(UI.finalBar, true);
+    show(UI.finalBar, !!state.closed);
     show(UI.finalColors, false);
+    show(UI.contourHint, (state.phase === 'ar_draw' && state.floorLocked && !state.closed));
   } else {
     show(UI.finalBar, false);
+    show(UI.contourHint, false);
   }
 
   const inScan = (state.phase === 'ar_scan' && !state.floorLocked);
@@ -3669,26 +3679,12 @@ function buildShapePickerList() {
     const icon = (s.hero ? s.hero : (s.icon ? s.icon : ''));
     const name = s.name ? s.name : s.id;
 
-    // Build a catalog-like card (same aspect ratio and typography as the main screen).
-    // Do not change any navigation/AR logic — this is purely UI.
-    const card = document.createElement('div');
-    card.className = 'shapePickerCard';
-
-    const bg = document.createElement('div');
-    bg.className = 'shapePickerCardBg';
-    if (icon) bg.style.backgroundImage = `url("${icon}")`;
-
-    const shade = document.createElement('div');
-    shade.className = 'shapePickerCardShade';
-
-    const title = document.createElement('div');
-    title.className = 'shapePickerCardTitle';
-    title.textContent = name;
-
-    card.appendChild(bg);
-    card.appendChild(shade);
-    card.appendChild(title);
-    btn.replaceChildren(card);
+    btn.innerHTML = `
+      <div class="shapePickerThumbWrap">
+        <img class="shapePickerThumb" src="${icon}" alt="" loading="lazy">
+      </div>
+      <div class="shapePickerName">${name}</div>
+    `;
 
     btn.addEventListener('click', async () => {
       setShapePickerOpen(false);
