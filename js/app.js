@@ -39,6 +39,20 @@ const DEBUG_AR_ENABLED = (() => {
   }
 })();
 
+// Plane refinement flag: enable with ?planeRefine=1, disable with ?planeRefine=0. Default: enabled.
+const PLANE_REFINE_ENABLED = (() => {
+  try {
+    const q = new URLSearchParams(window.location.search);
+    if (!q.has('planeRefine')) return true;
+    const v = (q.get('planeRefine') || '').trim().toLowerCase();
+    if (v === '' || v === '1' || v === 'true' || v === 'yes' || v === 'on') return true;
+    if (v === '0' || v === 'false' || v === 'no' || v === 'off') return false;
+    return true;
+  } catch (_) {
+    return true;
+  }
+})();
+
 // ------------------------
 // UI
 // ------------------------
@@ -324,6 +338,41 @@ const state = {
     samples: [],
     maxSamples: 120,
   },
+
+  // Plane refinement (Patch 2): reference plane tracking + freeze heuristics
+  // Enabled by default; disable with ?planeRefine=0
+  planeRefine: {
+    enabled: PLANE_REFINE_ENABLED,
+
+    // Reference plane height used for filtering (does NOT move geometry in Patch 2).
+    planeYRef: null,
+    lastPlaneUpdateT: 0,
+
+    // Refinement cadence
+    refineIntervalMs: 80, // ~12.5 Hz
+    lastRefineT: 0,
+
+    // Filters
+    heightTolM: 0.05,
+    heightTolMaxM: 0.08,
+    minAngleDeg: 12,
+
+    // Freeze logic
+    freezeAngleDeg: 12,
+    minValidRatio: 0.20,
+    freezeHoldMs: 450,
+    freezeUntil: 0,
+
+    // Rolling window for valid ratio (timestamps in ms)
+    framesT: [],
+    validT: [],
+
+    // Status (useful for debug overlay)
+    viewAngleDeg: NaN,
+    validHit: false,
+    frozen: false,
+  },
+
 };
 
 
@@ -3255,18 +3304,20 @@ function _arDebugRecordSample(sample) {
 
 function _arDebugComputeWindow(ms) {
   const dbg = state.debugAR;
-  if (!dbg || !dbg.enabled) return { total: 0, hits: 0, samples: [] };
+  if (!dbg || !dbg.enabled) return { total: 0, hits: 0, validHits: 0, samples: [] };
   const now = performance.now();
   const out = [];
   let hits = 0;
+  let validHits = 0;
   for (let i = dbg.samples.length - 1; i >= 0; i--) {
     const s = dbg.samples[i];
     if (!s) continue;
     if ((now - s.t) > ms) break;
     out.push(s);
     if (s.gotHit) hits++;
+    if (s.validHit) validHits++;
   }
-  return { total: out.length, hits, samples: out };
+  return { total: out.length, hits, validHits, samples: out };
 }
 
 function _arDebugJitter2D(samples) {
@@ -3311,25 +3362,31 @@ function _arDebugUpdateOverlay() {
 
     const hitsPerSec = w1.hits;
     const hitPct2s = w2.total ? (w2.hits / w2.total) * 100 : 0;
+    const validPct2s = w2.total ? (w2.validHits / w2.total) * 100 : 0;
 
     // Use last sample for distance / normal / mode
     const last = dbg.samples.length ? dbg.samples[dbg.samples.length - 1] : null;
     const dist = last && isFinite(last.dist) ? last.dist : null;
     const ang = last && isFinite(last.normalAngle) ? last.normalAngle : null;
+    const viewAng = last && isFinite(last.viewAngleDeg) ? last.viewAngleDeg : null;
+    const frozen = !!(last && last.frozen);
     const mode = last ? last.mode : '—';
 
     const jitterWin = dbg.samples.slice(-20);
     const jitter = _arDebugJitter2D(jitterWin);
 
     const lines = [
-      `AR debug (Patch 1)`,
+      `AR debug (Patch 2)`,
       `state: ${_arDebugStateLabel()}`,
       `fps: ${_fmt(dbg.fps, 0)}`,
       `hit-test: ${hitsPerSec} hits/s`,
       `hit success (2s): ${_fmt(hitPct2s, 0)}%`,
+      `valid floor (2s): ${_fmt(validPct2s, 0)}%`,
       `distance: ${dist == null ? '—' : _fmt(dist, 2)} m`,
       `jitter (XZ, ~20f): ${jitter == null ? '—' : _fmt(jitter, 1)} cm`,
+      `viewAngle: ${viewAng == null ? '—' : _fmt(viewAng, 1)}°`,
       `normalAngle: ${ang == null ? '—' : _fmt(ang, 1)}°`,
+      `freeze: ${frozen ? 'on' : 'off'}`,
       `mode: ${mode}`,
     ];
 
@@ -3344,33 +3401,53 @@ function _arDebugUpdateOverlay() {
 const __tmpUp = new THREE.Vector3();
 const __tmpCamPos = new THREE.Vector3();
 const __tmpFwd = new THREE.Vector3();
+const __tmpHitPos = new THREE.Vector3();
+const __tmpHitQuat = new THREE.Quaternion();
 
 function updateXR(frame) {
-  // Center hit test (used mainly to estimate floor height while scanning)
-  let gotHit = false;
+  // Center hit test (used to estimate floor height and validate floor hits)
+  let gotHit = false;      // floor-like (for scanning)
+  let gotHitRaw = false;   // any hit (for diagnostics)
   let hitY = null;
   let hitNormalAngle = NaN;
+  let hitX = null;
+  let hitZ = null;
+
+  // XR camera vectors (for view angle / fallback projection)
+  const xrCam = renderer.xr.getCamera(camera);
+  const cam = xrCam.cameras && xrCam.cameras.length ? xrCam.cameras[0] : xrCam;
+  __tmpCamPos.setFromMatrixPosition(cam.matrixWorld);
+  __tmpFwd.set(0, 0, -1).applyQuaternion(cam.quaternion);
+
+  // Angle between view ray and plane (0° = parallel to floor, 90° = straight down)
+  let viewAngleToPlane = 0;
+  try {
+    const s = Math.max(0, Math.min(1, Math.abs(__tmpFwd.y)));
+    viewAngleToPlane = Math.asin(s) * 180 / Math.PI;
+  } catch (_) { viewAngleToPlane = 0; }
 
   if (state.hitTestSource && state.referenceSpace) {
     const hits = frame.getHitTestResults(state.hitTestSource);
     if (hits.length) {
       const pose = hits[0].getPose(state.referenceSpace);
       if (pose) {
-        reticle.matrix.fromArray(pose.transform.matrix);
-        reticle.matrix.decompose(reticle.position, reticle.quaternion, reticle.scale);
+        gotHitRaw = true;
+        __tmpHitPos.set(pose.transform.position.x, pose.transform.position.y, pose.transform.position.z);
+        __tmpHitQuat.set(pose.transform.orientation.x, pose.transform.orientation.y, pose.transform.orientation.z, pose.transform.orientation.w);
+        hitX = __tmpHitPos.x;
+        hitY = __tmpHitPos.y;
+        hitZ = __tmpHitPos.z;
 
-        // Filter out obviously non-horizontal hits using the reported orientation
-        __tmpUp.set(0, 1, 0).applyQuaternion(reticle.quaternion);
-        // Angle between hit surface normal (pose up) and world up, in degrees
+        // Diagnostic normal angle (do NOT rely on this as the only floor gate)
+        __tmpUp.set(0, 1, 0).applyQuaternion(__tmpHitQuat);
         try {
           const dot = Math.max(-1, Math.min(1, __tmpUp.y));
           hitNormalAngle = Math.acos(dot) * 180 / Math.PI;
         } catch (_) { hitNormalAngle = NaN; }
+
+        // For the scanning phase, keep a conservative horizontal preference to avoid locking to walls.
         if (__tmpUp.y >= 0.75) {
           gotHit = true;
-          hitY = reticle.position.y;
-        } else {
-          gotHit = false;
         }
       }
     }
@@ -3406,6 +3483,21 @@ function updateXR(frame) {
         state.floorStable = true;
         state.floorY = p20;
 
+        // Patch 2: initialize plane refinement reference height
+        try {
+          const pr = state.planeRefine;
+          if (pr && pr.enabled) {
+            pr.planeYRef = state.floorY;
+            pr.lastPlaneUpdateT = performance.now();
+            pr.lastRefineT = 0;
+            pr.freezeUntil = 0;
+            pr.framesT.length = 0;
+            pr.validT.length = 0;
+            pr.validHit = false;
+            pr.frozen = false;
+          }
+        } catch (_) {}
+
         // Switch to drawing phase (match app: + appears after scanning/floor lock)
         state.phase = 'ar_draw';
         show(UI.scanHint, false);
@@ -3420,23 +3512,88 @@ function updateXR(frame) {
     }
   }
 
-  // Reticle placement: ALWAYS project to the active floor plane (prevents "sticking" to walls)
-  const activeY = state.floorLocked ? state.floorY : (state.floorYEstimate != null ? state.floorYEstimate : hitY);
-  const xrCam2 = renderer.xr.getCamera(camera);
-  const cam2 = xrCam2.cameras && xrCam2.cameras.length ? xrCam2.cameras[0] : xrCam2;
+  
+  // Patch 2: continuous refinement (reference plane tracking + freeze heuristics)
+  let validFloorHit = false;
+  let refineFrozen = false;
+  try {
+    const pr = state.planeRefine;
+    if (state.floorLocked && pr && pr.enabled) {
+      const now = performance.now();
+      if (pr.planeYRef == null || !isFinite(pr.planeYRef)) pr.planeYRef = state.floorY;
 
-  __tmpCamPos.setFromMatrixPosition(cam2.matrixWorld);
-  __tmpFwd.set(0, 0, -1).applyQuaternion(cam2.quaternion);
+      // Maintain rolling window of frame timestamps (for valid ratio)
+      pr.framesT.push(now);
+      while (pr.framesT.length && pr.framesT[0] < (now - 1000)) pr.framesT.shift();
+
+      const dy = (gotHitRaw && hitY != null) ? Math.abs(hitY - pr.planeYRef) : 999;
+      const heightTol = pr.heightTolM;
+      const angleOk = viewAngleToPlane >= pr.minAngleDeg;
+      validFloorHit = !!(gotHitRaw && hitY != null && dy <= heightTol && angleOk);
+      if (validFloorHit) pr.validT.push(now);
+      while (pr.validT.length && pr.validT[0] < (now - 1000)) pr.validT.shift();
+
+      const framesN = pr.framesT.length;
+      const ratio = (framesN >= 10) ? (pr.validT.length / Math.max(1, framesN)) : 1;
+      const needFreeze = (viewAngleToPlane < pr.freezeAngleDeg) || ((framesN >= 10) && (ratio < pr.minValidRatio));
+      if (needFreeze) pr.freezeUntil = Math.max(pr.freezeUntil || 0, now + pr.freezeHoldMs);
+      refineFrozen = now < (pr.freezeUntil || 0);
+
+      // Update reference height slowly (does not move geometry in Patch 2)
+      if (!refineFrozen && validFloorHit && (now - (pr.lastRefineT || 0)) >= pr.refineIntervalMs) {
+        pr.lastRefineT = now;
+        const dt = Math.max(0.016, Math.min(0.2, (now - (pr.lastPlaneUpdateT || now)) / 1000));
+        pr.lastPlaneUpdateT = now;
+
+        // Simple EMA with a speed limit (~5 cm/s)
+        const alpha = 0.25;
+        const target = hitY;
+        const proposed = pr.planeYRef + (target - pr.planeYRef) * alpha;
+        const maxMove = 0.05 * dt;
+        let move = proposed - pr.planeYRef;
+        if (move > maxMove) move = maxMove;
+        if (move < -maxMove) move = -maxMove;
+        pr.planeYRef = pr.planeYRef + move;
+      }
+
+      pr.viewAngleDeg = viewAngleToPlane;
+      pr.validHit = validFloorHit;
+      pr.frozen = refineFrozen;
+    }
+  } catch (_) {}
+
+// Reticle placement: project to the active floor plane (prevents sticking to walls)
+  const activeY = state.floorLocked ? state.floorY : (state.floorYEstimate != null ? state.floorYEstimate : hitY);
 
   let reticleOk = false;
   if (activeY != null && __tmpFwd.y < -0.02) {
-    const t = (activeY - __tmpCamPos.y) / __tmpFwd.y;
-    if (t > 0.05 && t < 12.0) {
-      reticle.position.copy(__tmpCamPos).addScaledVector(__tmpFwd, t);
-      reticle.position.y = activeY;
-      reticle.quaternion.set(0, 0, 0, 1); // keep flat
+    // Prefer using the hit position (XZ) when it matches the floor height reference;
+    // otherwise fall back to ray ∩ plane (Y=activeY).
+    let useHit = false;
+    if (state.floorLocked) {
+      // Use refined reference height for matching, but keep geometry anchored to state.floorY.
+      const pr = state.planeRefine;
+      const yRef = (pr && pr.enabled && isFinite(pr.planeYRef)) ? pr.planeYRef : state.floorY;
+      const tol = (pr && pr.enabled) ? pr.heightTolMaxM : 0.08;
+      if (gotHitRaw && hitY != null && Math.abs(hitY - yRef) <= tol) {
+        useHit = true;
+      }
+    }
+
+    if (useHit && hitX != null && hitZ != null) {
+      reticle.position.set(hitX, activeY, hitZ);
+      reticle.quaternion.set(0, 0, 0, 1);
       reticle.visible = true;
       reticleOk = true;
+    } else {
+      const t = (activeY - __tmpCamPos.y) / __tmpFwd.y;
+      if (t > 0.05 && t < 12.0) {
+        reticle.position.copy(__tmpCamPos).addScaledVector(__tmpFwd, t);
+        reticle.position.y = activeY;
+        reticle.quaternion.set(0, 0, 0, 1);
+        reticle.visible = true;
+        reticleOk = true;
+      }
     }
   }
   if (!reticleOk) reticle.visible = false;
@@ -3458,30 +3615,29 @@ function updateXR(frame) {
   }
 
 
-  // AR debug sample (Patch 1): record hit-test stability without changing behavior
+  // AR debug sample (Patch 2): record hit-test stability without changing behavior
   if (state.debugAR && state.debugAR.enabled) {
     try {
-      // Camera position already computed in __tmpCamPos above
       const dx = reticle.visible ? (reticle.position.x - __tmpCamPos.x) : 0;
       const dy = reticle.visible ? (reticle.position.y - __tmpCamPos.y) : 0;
       const dz = reticle.visible ? (reticle.position.z - __tmpCamPos.z) : 0;
       const dist = reticle.visible ? Math.sqrt(dx*dx + dy*dy + dz*dz) : NaN;
 
-      // normal angle from last hit orientation when available (reticle.quaternion is set from hit when gotHit=true; otherwise flat)
-      let normalAngle = gotHit ? hitNormalAngle : NaN;
-
-      const mode = gotHit ? 'hit' : (reticle.visible ? 'fallback_y_plane' : 'none');
+      const mode = (reticle.visible ? ( (gotHitRaw && hitY != null) ? 'hit' : 'fallback_y_plane') : 'none');
 
       _arDebugRecordSample({
         t: performance.now(),
-        gotHit: !!gotHit,
+        gotHit: !!gotHitRaw,
+        validHit: !!validFloorHit,
+        frozen: !!refineFrozen,
+        viewAngleDeg: viewAngleToPlane,
         reticleOk: !!reticle.visible,
         mode,
         x: reticle.visible ? reticle.position.x : NaN,
         y: reticle.visible ? reticle.position.y : NaN,
         z: reticle.visible ? reticle.position.z : NaN,
         dist,
-        normalAngle,
+        normalAngle: (isFinite(hitNormalAngle) ? hitNormalAngle : NaN),
       });
 
       _arDebugUpdateOverlay();
@@ -3533,15 +3689,8 @@ function updateXR(frame) {
     firstRing.material.color.setHex(state.snapArmed ? 0x36d399 : 0x2f6cff);
   }
 
-  state.reticleVisible = gotHit;
-  if (!gotHit) reticle.visible = false;
-
-  // Keep scan grid only when we have a valid floor hit before the floor is locked
-  if (!state.floorLocked) {
-    scanGrid.visible = !!gotHit;
-  } else {
-    scanGrid.visible = false;
-  }
+  // Patch 2: keep reticle visibility based on projected placement (hit or fallback), not raw hit-test.
+  state.reticleVisible = !!reticle.visible;
 
   // depth (best-effort)
   if (state.xrSession && state.depthSupported) {
