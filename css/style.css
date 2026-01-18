@@ -597,28 +597,38 @@ to   { transform: scale(1.12); }
 
 
 /* --- AR Shape Picker --- */
+:root{
+  /* Reuse ColorMix tile sizing so Shape cards are IDENTICAL to ColorMix tiles */
+  --cm-gap: 10px;
+  --cm-tile-w: calc((100vw - (2 * var(--cm-gap))) / 3); /* same as .colormixPaletteItem */
+  --cm-tile-ratio-w: 3;
+  --cm-tile-ratio-h: 4;
+}
+
 .shapePickerBackdrop{
   position:fixed;
   inset:0;
   background:rgba(0,0,0,0.0);
   z-index:9998;
 }
+
 .shapePickerPanel{
   position:fixed;
   right:0;
   /* Keep clear of the top AR controls and align with the top edge of the bottom bar */
-  /* Provide safe fallbacks in case JS didn't set the variables yet */
   top:var(--ar-top-strip, 64px);
   bottom:var(--ar-bottom-strip, 92px);
-  /* Shrink-wrap to the preview cards (removes empty right-panel space on mobile). */
+
+  /* Drawer width is driven by the card width (shrink-wrap) */
   width:fit-content;
-  max-width:70vw;
-  min-width:0;
+  max-width:80vw;
+
   /* Match the bottom AR bar style */
   background:rgba(0,0,0,0.40);
   backdrop-filter: blur(10px);
   border-left:1px solid rgba(255,255,255,0.10);
   border-radius:7px 0 0 0;
+
   z-index:9999;
   transform:translateX(100%);
   transition:transform 180ms ease;
@@ -626,21 +636,11 @@ to   { transform: scale(1.12); }
   flex-direction:column;
 }
 
-/* Mobile AR: the drawer must be wide enough so preview images remain readable.
-   Keep desktop narrow, but allow a wider panel on phones. */
-@media (max-width: 520px) {
-  .shapePickerPanel{
-    /* Keep a safe cap so the panel never covers too much of the camera view */
-    max-width:70vw;
-  }
-}
-.shapePickerPanel.open{
-  transform:translateX(0);
-}
+.shapePickerPanel.open{ transform:translateX(0); }
+
 .shapePickerHeader{
-  /* Keep the header from inflating the shrink-wrapped panel width */
-  align-self:center;
-  padding:10px 0 8px;
+  align-self:stretch;
+  padding:10px 12px 8px;
   font-size:12px;
   font-weight:900;
   letter-spacing:0.4px;
@@ -648,27 +648,29 @@ to   { transform: scale(1.12); }
   opacity:0.9;
   border-bottom:1px solid rgba(255,255,255,0.10);
 }
+
 .shapePickerList{
   flex:1;
   overflow-y:auto;
-  /* Slightly tighter horizontal padding so the drawer matches the preview width */
-  padding:10px 0 12px;
+  padding:10px 12px 12px;
   display:flex;
   flex-direction:column;
-  gap:10px;
-  /* Do not stretch cards to full width — let them take the preview width */
+  gap:var(--cm-gap);
   align-items:center;
 }
+
+/* Card sizing: identical to ColorMix tiles (3/4 aspect, width = (100% - 2 gaps)/3).
+   This naturally yields ~3 visible cards vertically on common mobile heights between the AR top strip and bottom bar. */
 .shapePickerItem{
-  border:1px solid rgba(255,255,255,0.12);
+  width:var(--cm-tile-w);
+  aspect-ratio: var(--cm-tile-ratio-w) / var(--cm-tile-ratio-h);
   border-radius:7px;
-  overflow:hidden;
+  border:1px solid rgba(255,255,255,0.12);
   background:rgba(255,255,255,0.04);
-  /* Match ColorMix (StoneMix) tile sizing: behaves like the 3-up palette grid */
-  width:calc((100vw - 20px) / 3);
-  max-width:180px;
-  aspect-ratio:3 / 4;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+  overflow:hidden;
 }
+
 .shapePickerItem button{
   width:100%;
   height:100%;
@@ -676,14 +678,11 @@ to   { transform: scale(1.12); }
   border:0;
   background:transparent;
   color:#fff;
-  text-align:left;
-  display:flex;
-  flex-direction:column;
-  align-items:stretch;
-  min-height:0;
+  display:block;
 }
+
+/* Make the preview fill the tile while keeping the full image visible (no cropping). */
 .shapePickerThumbWrap{
-  flex:1;
   width:100%;
   height:100%;
   display:flex;
@@ -691,24 +690,21 @@ to   { transform: scale(1.12); }
   justify-content:center;
   padding:0;
   margin:0;
-  background:transparent;
-  border-radius:7px;
-  min-height:0;
-  overflow:hidden;
 }
+
 .shapePickerThumb{
   width:100%;
   height:100%;
-  object-fit:contain !important;
+  object-fit:contain;
   object-position:center;
   display:block;
   border-radius:7px;
 }
-.shapePickerName{
-  /* Names are already present inside the preview image; keep tiles identical to ColorMix */
-  display:none;
-}
+
+/* The name is already inside the preview image; hide the duplicate label in the drawer. */
+.shapePickerName{ display:none; }
+
 .shapePickerItem.active{
   border-color: rgba(90, 167, 255, 0.85);
-  box-shadow: 0 0 0 2px rgba(90, 167, 255, 0.28);
+  box-shadow: 0 0 0 2px rgba(90, 167, 255, 0.28), 0 6px 18px rgba(0,0,0,0.12);
 }
