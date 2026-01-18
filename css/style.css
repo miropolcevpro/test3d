@@ -27,6 +27,8 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
 .overlayRoot{position:fixed;inset:0;pointer-events:none;}
 .screen{position:absolute;inset:0;display:flex;flex-direction:column;pointer-events:auto;}
 .screen[hidden]{display:none !important;}
+/* Ensure native [hidden] attribute always wins over layout rules (e.g. .finalBar{display:flex}) */
+[hidden]{display:none !important;}
 .screen--active{display:flex;}
 
 /* Main (catalog) screen background */

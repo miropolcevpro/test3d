@@ -2693,6 +2693,9 @@ function ensureFloorLocked() {
 
   // hide scan hint
   show(UI.scanHint, false);
+  // While the user is placing contour points, the main bottom menu must be hidden
+  // so it doesn't overlap the "+" control.
+  show(UI.finalBar, false);
   // Show contour placement guidance (only before the first successful close)
   if (!state.hasEverClosedContour) {
     show(UI.contourHint, true);
@@ -2875,8 +2878,10 @@ function resetAll(keepFloor = false) {
   show(UI.postCloseBar, false);
   // Bottom strip: keep patterns available in AR; colors appear only after "Готово"
   if (state.xrSession) {
-    // Show the bottom menu only after the user successfully closed the contour.
-    show(UI.finalBar, !!state.hasEverClosedContour);
+    // Hide the main bottom menu while scanning / placing points so it doesn't overlap the "+" button.
+    // Show it again after the contour is closed and the fill is visible.
+    const hideMainMenu = (state.phase === 'ar_scan') || (state.phase === 'ar_draw') || (state.phase === 'ar_cut');
+    show(UI.finalBar, !hideMainMenu);
     show(UI.finalColors, false);
   } else {
     show(UI.finalBar, false);
@@ -3471,6 +3476,8 @@ UI.btnEditShape?.addEventListener('click', () => {
   show(UI.finalColors, false);
   // Do not re-show the initial contour hint: the user is already in the flow.
   show(UI.contourHint, false);
+  // While placing points, hide the main bottom menu so it doesn't overlap the "+" button.
+  show(UI.finalBar, false);
   if (typeof updateArBottomStripVar === 'function') updateArBottomStripVar();
 
   state.closed = false;
@@ -3499,6 +3506,8 @@ UI.btnCutout?.addEventListener('click', () => {
   // cutout mode
   show(UI.finalColors, false);
   show(UI.contourHint, false);
+  // While placing points, hide the main bottom menu so it doesn't overlap the "+" button.
+  show(UI.finalBar, false);
   if (typeof updateArBottomStripVar === 'function') updateArBottomStripVar();
 
   state.phase = 'ar_cut';
