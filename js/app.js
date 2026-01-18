@@ -378,6 +378,29 @@ const state = {
     frozen: false,
   },
 
+  // Plane fit (Patch 2.3): best-fit tilted floor plane during scanning.
+  // Goal: reduce "floating" artifacts at distance by aligning the contour plane to the detected floor.
+  // NOTE: Once the floor is locked, the plane is frozen to avoid moving already placed points.
+  planeFit: {
+    enabled: PLANE_REFINE_ENABLED,
+    maxPoints: 70,
+    minPoints: 18,
+    fitIntervalMs: 100, // ~10 Hz
+    maxTiltDeg: 6,
+    points: [], // {x,y,z,t}
+    a: 0,
+    b: 0,
+    c: 0,
+    // plane normal (unit) and d for n·p = d
+    n: new THREE.Vector3(0, 1, 0),
+    d: 0,
+    ready: false,
+    frozen: false,
+    lastFitT: 0,
+    // diagnostics
+    tiltDeg: 0,
+  },
+
 };
 
 
@@ -2617,6 +2640,8 @@ async function startAR() {
   state.floorSamples = [];
   state.floorYEstimate = null;
   state.floorStable = false;
+  // Patch 2.3: reset plane fit accumulation at the start of AR.
+  try { _planeFitReset(); } catch (_) {}
   state._onXRSelect = null;
 
   // anchors
@@ -2687,6 +2712,12 @@ function cleanupXR() {
   state.floorY = 0;
   state.floorSamples = [];
   state.floorYEstimate = null;
+  // Patch 2.3: reset plane model + anchor transform.
+  try { _planeFitReset(); } catch (_) {}
+  try {
+    anchorGroup.position.set(0, 0, 0);
+    anchorGroup.quaternion.set(0, 0, 0, 1);
+  } catch (_) {}
 
 
   reticle.visible = false;
@@ -2783,6 +2814,30 @@ function ensureFloorLocked() {
   state.floorLocked = true;
   state.floorY = reticle.position.y;
 
+  // Patch 2.3: freeze the best-fit plane at the moment the floor is locked,
+  // then align the anchor group to that plane. This makes the contour + fill
+  // live in the detected floor plane instead of a fixed world-Y plane.
+  try {
+    const pf = state.planeFit;
+    if (pf && pf.enabled) {
+      // If we didn't accumulate enough scan points, fall back to a horizontal plane.
+      if (!pf.ready) {
+        pf.a = 0; pf.b = 0; pf.c = state.floorY;
+        pf.n.set(0, 1, 0);
+        pf.d = state.floorY;
+        pf.tiltDeg = 0;
+        pf.ready = true;
+      }
+      pf.frozen = true;
+
+      // Align anchor group up-axis to the plane normal.
+      anchorGroup.quaternion.setFromUnitVectors(__planeUp, pf.n);
+      // Place the anchor on the plane (project reticle to the plane to be safe).
+      _projectPointToPlane(reticle.position, __tmpHitPos);
+      anchorGroup.position.copy(__tmpHitPos);
+    }
+  } catch (_) {}
+
   // lock scanning grid to the floor (and then hide it — it is only for scanning)
   scanGrid.position.set(reticle.position.x, state.floorY + 0.001, reticle.position.z);
   scanGrid.visible = false;
@@ -2806,12 +2861,13 @@ function addPointAtWorld(worldPos) {
   ensureFloorLocked();
   if (!state.floorLocked) return;
 
-  // Clamp on floor
-  const hitWorld = worldPos.clone();
-  hitWorld.y = state.floorY;
+  // Patch 2.3: project the hit onto the frozen floor plane (not a constant world-Y).
+  // This keeps points "glued" to the floor even at distance.
+  const hitWorld = _projectPointToPlane(worldPos, __tmpHitPos).clone();
 
-  // Convert to local space (anchorGroup)
+  // Convert to local space (anchorGroup). In the anchor space, the floor plane is Y=0.
   const local = anchorGroup.worldToLocal(hitWorld);
+  local.y = 0;
 
   // If cutting a hole
   if (state.phase === 'ar_cut') {
@@ -2949,6 +3005,13 @@ function resetAll(keepFloor = false) {
     if ('floorSamples' in state) state.floorSamples = [];
     if ('floorYEstimate' in state) state.floorYEstimate = null;
     if ('floorStable' in state) state.floorStable = false;
+
+    // Patch 2.3: reset plane model and anchor transform when restarting scanning.
+    try { _planeFitReset(); } catch (_) {}
+    try {
+      anchorGroup.position.set(0, 0, 0);
+      anchorGroup.quaternion.set(0, 0, 0, 1);
+    } catch (_) {}
 
     state.phase = 'ar_scan';
     show(UI.scanHint, true);
@@ -3404,7 +3467,7 @@ function _arDebugUpdateOverlay() {
     const jitter = _arDebugJitter2D(jitterWin);
 
     const lines = [
-      `AR debug (Patch 2.2)`,
+      `AR debug (Patch 2.3)`,
       `state: ${_arDebugStateLabel()}`,
       `fps: ${_fmt(dbg.fps, 0)}`,
       `hit-test: ${hitsPerSec} hits/s`,
@@ -3432,6 +3495,165 @@ const __tmpCamPos = new THREE.Vector3();
 const __tmpFwd = new THREE.Vector3();
 const __tmpHitPos = new THREE.Vector3();
 const __tmpHitQuat = new THREE.Quaternion();
+const __planeUp = new THREE.Vector3(0, 1, 0);
+
+// ------------------------
+// Plane fit helpers (Patch 2.3)
+// ------------------------
+function _planeFitReset() {
+  try {
+    const pf = state.planeFit;
+    if (!pf) return;
+    pf.points = [];
+    pf.a = 0; pf.b = 0; pf.c = 0;
+    pf.n.set(0, 1, 0);
+    pf.d = 0;
+    pf.ready = false;
+    pf.frozen = false;
+    pf.lastFitT = 0;
+    pf.tiltDeg = 0;
+  } catch (_) {}
+}
+
+function _planeFitAddPoint(x, y, z) {
+  try {
+    const pf = state.planeFit;
+    if (!pf || !pf.enabled || pf.frozen) return;
+    const t = performance.now();
+    pf.points.push({ x, y, z, t });
+    const maxN = pf.maxPoints || 70;
+    if (pf.points.length > maxN) pf.points.splice(0, pf.points.length - maxN);
+  } catch (_) {}
+}
+
+function _solve3x3(A, b) {
+  // Gaussian elimination, A is 3x3 array, b is length-3.
+  const m = [
+    [A[0][0], A[0][1], A[0][2], b[0]],
+    [A[1][0], A[1][1], A[1][2], b[1]],
+    [A[2][0], A[2][1], A[2][2], b[2]],
+  ];
+  for (let col = 0; col < 3; col++) {
+    // pivot
+    let piv = col;
+    for (let r = col + 1; r < 3; r++) if (Math.abs(m[r][col]) > Math.abs(m[piv][col])) piv = r;
+    if (Math.abs(m[piv][col]) < 1e-9) return null;
+    if (piv !== col) {
+      const tmp = m[col];
+      m[col] = m[piv];
+      m[piv] = tmp;
+    }
+    // normalize
+    const div = m[col][col];
+    for (let c = col; c < 4; c++) m[col][c] /= div;
+    // eliminate
+    for (let r = 0; r < 3; r++) {
+      if (r === col) continue;
+      const f = m[r][col];
+      for (let c = col; c < 4; c++) m[r][c] -= f * m[col][c];
+    }
+  }
+  return [m[0][3], m[1][3], m[2][3]];
+}
+
+function _planeFitRecompute() {
+  try {
+    const pf = state.planeFit;
+    if (!pf || !pf.enabled || pf.frozen) return;
+    const pts = pf.points;
+    const n = pts.length;
+    if (n < (pf.minPoints || 18)) {
+      pf.ready = false;
+      return;
+    }
+
+    // Fit y = a*x + b*z + c (plane close to horizontal) via normal equations.
+    let sx = 0, sz = 0, sy = 0;
+    let sxx = 0, szz = 0, sxz = 0;
+    let sxy = 0, szy = 0;
+    for (const p of pts) {
+      const x = p.x, z = p.z, y = p.y;
+      sx += x; sz += z; sy += y;
+      sxx += x * x; szz += z * z; sxz += x * z;
+      sxy += x * y; szy += z * y;
+    }
+    const A = [
+      [sxx, sxz, sx],
+      [sxz, szz, sz],
+      [sx,  sz,  n ],
+    ];
+    const B = [sxy, szy, sy];
+
+    // Regularize slightly to avoid singularities (e.g., little motion during scan).
+    const lam = 1e-6 * (sxx + szz + 1);
+    A[0][0] += lam;
+    A[1][1] += lam;
+    A[2][2] += lam;
+
+    const sol = _solve3x3(A, B);
+    if (!sol) {
+      pf.ready = false;
+      return;
+    }
+
+    let a = sol[0], b = sol[1], c = sol[2];
+
+    // Clamp tilt.
+    const g = Math.sqrt(a * a + b * b);
+    const maxTilt = (pf.maxTiltDeg || 6) * Math.PI / 180;
+    const gMax = Math.tan(maxTilt);
+    if (g > gMax && g > 1e-9) {
+      const s = gMax / g;
+      a *= s;
+      b *= s;
+      // Recompute c using means.
+      const mx = sx / n, mz = sz / n, my = sy / n;
+      c = my - a * mx - b * mz;
+    }
+
+    pf.a = a; pf.b = b; pf.c = c;
+    // Normal for y = a x + b z + c: (-a, 1, -b)
+    pf.n.set(-a, 1, -b).normalize();
+    pf.d = pf.n.x * 0 + pf.n.y * c + pf.n.z * 0; // equivalent to n·(0,c,0)
+    // Better: compute d using a point on plane (0, c, 0)
+    pf.d = pf.n.dot(new THREE.Vector3(0, c, 0));
+    pf.tiltDeg = Math.atan(Math.sqrt(a * a + b * b)) * 180 / Math.PI;
+    pf.ready = true;
+  } catch (_) {}
+}
+
+function _planeYAtXZ(x, z) {
+  const pf = state.planeFit;
+  if (pf && pf.enabled && pf.ready) return pf.a * x + pf.b * z + pf.c;
+  return state.floorY;
+}
+
+function _rayIntersectPlane(origin, dir, out) {
+  // Plane in Hessian form: n·p = d
+  const pf = state.planeFit;
+  const n = (pf && pf.enabled && pf.ready) ? pf.n : __planeUp;
+  const d = (pf && pf.enabled && pf.ready) ? pf.d : state.floorY;
+  const denom = n.dot(dir);
+  if (Math.abs(denom) < 1e-4) return false;
+  const t = (d - n.dot(origin)) / denom;
+  if (!(t > 0.05 && t < 20.0)) return false;
+  out.copy(origin).addScaledVector(dir, t);
+  return true;
+}
+
+function _projectPointToPlane(p, out) {
+  const pf = state.planeFit;
+  if (!(pf && pf.enabled && pf.ready)) {
+    out.copy(p);
+    out.y = state.floorY;
+    return out;
+  }
+  // out = p - n*(n·p - d)
+  const n = pf.n;
+  const dist = n.dot(p) - pf.d;
+  out.copy(p).addScaledVector(n, -dist);
+  return out;
+}
 
 function updateXR(frame) {
   // Center hit test (used to estimate floor height and validate floor hits)
@@ -3492,6 +3714,21 @@ function updateXR(frame) {
       const hitDist = __tmpHitPos.distanceTo(__tmpCamPos);
       const sampleOk = (__tmpUp.y >= 0.90) && (viewAngleToPlane >= 12) && (hitDist <= 4.0);
       if (sampleOk) {
+        // Patch 2.3: collect points for a best-fit (slightly tilted) floor plane.
+        // This runs only during scanning; once the floor is locked we freeze the plane
+        // to avoid moving already placed points.
+        _planeFitAddPoint(hitX, hitY, hitZ);
+        try {
+          const pf = state.planeFit;
+          if (pf && pf.enabled && !state.floorLocked) {
+            const nowT = performance.now();
+            if (!pf.lastFitT || (nowT - pf.lastFitT) >= (pf.fitIntervalMs || 100)) {
+              pf.lastFitT = nowT;
+              _planeFitRecompute();
+            }
+          }
+        } catch (_) {}
+
         state.floorSamples.push(hitY);
         if (state.floorSamples.length > 40) state.floorSamples.shift();
 
@@ -3594,7 +3831,8 @@ function updateXR(frame) {
         pr.planeYRef = pr.planeYRef + move;
 
         // If the user has not placed any contour points yet, keep floorY tightly aligned.
-        if (state.points.length === 0 && state.holePoints.length === 0) {
+        // Patch 2.3: once a plane-fit model is in use, do not adjust floorY behind it.
+        if (!(state.planeFit && state.planeFit.enabled && state.planeFit.ready) && state.points.length === 0 && state.holePoints.length === 0) {
           const proposedFloor = state.floorY + (target - state.floorY) * alpha;
           let m2 = proposedFloor - state.floorY;
           if (m2 > maxUp) m2 = maxUp;
@@ -3609,43 +3847,56 @@ function updateXR(frame) {
     }
   } catch (_) {}
 
-// Reticle placement: project to the active floor plane (prevents sticking to walls)
-  const activeY = state.floorLocked ? state.floorY : (state.floorYEstimate != null ? state.floorYEstimate : hitY);
+  // Reticle placement (Patch 2.3): use a frozen best-fit plane when available.
+  // - If a valid floor hit exists, we use its XZ and snap Y to the plane.
+  // - If hit-test fails temporarily, we fall back to ray ∩ plane (stable aiming).
+  const activeY = (!state.floorLocked)
+    ? (state.floorYEstimate != null ? state.floorYEstimate : hitY)
+    : state.floorY;
 
   let reticleOk = false;
   let reticleUsedHit = false;
-  if (activeY != null && __tmpFwd.y < -0.02) {
-    // Prefer using the hit position (XZ) when it matches the floor height reference;
-    // otherwise fall back to ray ∩ plane (Y=activeY).
-    let useHit = false;
-    if (state.floorLocked) {
-      // Use refined reference height for matching, but keep geometry anchored to state.floorY.
-      const pr = state.planeRefine;
-      const yRef = (pr && pr.enabled && isFinite(pr.planeYRef)) ? pr.planeYRef : state.floorY;
-      const tol = (pr && pr.enabled) ? pr.heightTolMaxM : 0.08;
-      if (gotHitRaw && hitY != null && viewAngleToPlane >= (pr?.minAngleDeg || 12) && (__tmpUp.y >= 0.60)) {
-        useHit = true;
-      }
-    }
+  const pf = state.planeFit;
+  const usePlaneFit = !!(state.floorLocked && pf && pf.enabled && pf.ready);
+  const minAngle = (state.planeRefine?.minAngleDeg || 12);
 
-    if (useHit && hitX != null && hitZ != null) {
-      reticle.position.set(hitX, activeY, hitZ);
-      reticle.quaternion.set(0, 0, 0, 1);
-      reticle.visible = true;
-      reticleOk = true;
+  if ((activeY != null) && (__tmpFwd.y < -0.02)) {
+    // Decide whether the current hit looks like floor.
+    const floorLikeHit = !!(gotHitRaw && hitY != null && viewAngleToPlane >= minAngle && (__tmpUp.y >= 0.60));
+
+    if (floorLikeHit && (hitX != null) && (hitZ != null)) {
+      // Snap the hit to our plane model.
+      const yOnPlane = usePlaneFit ? _planeYAtXZ(hitX, hitZ) : activeY;
+      reticle.position.set(hitX, yOnPlane, hitZ);
       reticleUsedHit = true;
+      reticleOk = true;
     } else {
-      const t = (activeY - __tmpCamPos.y) / __tmpFwd.y;
-      if (t > 0.05 && t < 12.0) {
-        reticle.position.copy(__tmpCamPos).addScaledVector(__tmpFwd, t);
-        reticle.position.y = activeY;
-        reticle.quaternion.set(0, 0, 0, 1);
-        reticle.visible = true;
-        reticleOk = true;
+      // Fallback aiming.
+      if (usePlaneFit) {
+        if (_rayIntersectPlane(__tmpCamPos, __tmpFwd, __tmpHitPos)) {
+          reticle.position.copy(__tmpHitPos);
+          reticleOk = true;
+        }
+      } else {
+        const t = (activeY - __tmpCamPos.y) / __tmpFwd.y;
+        if (t > 0.05 && t < 12.0) {
+          reticle.position.copy(__tmpCamPos).addScaledVector(__tmpFwd, t);
+          reticle.position.y = activeY;
+          reticleOk = true;
+        }
       }
     }
   }
-  if (!reticleOk) reticle.visible = false;
+
+  reticle.visible = !!reticleOk;
+  if (reticle.visible) {
+    // Visual alignment: make the ring lie on the floor plane when available.
+    if (usePlaneFit) {
+      reticle.quaternion.setFromUnitVectors(__planeUp, pf.n);
+    } else {
+      reticle.quaternion.set(0, 0, 0, 1);
+    }
+  }
 
   // Scan grid: show only while scanning AND only when we have a valid projected reticle
   if (!state.floorLocked && state.phase === 'ar_scan') {
@@ -3658,15 +3909,17 @@ function updateXR(frame) {
     scanGrid.visible = false;
   }
 
-  // If floor is locked, clamp reticle exactly to floorY (extra safety)
-  if (state.floorLocked && reticle.visible) {
-    reticle.position.y = state.floorY;
-  }
-
-  // Patch 2.1: store per-frame AR gating signals for point placement
+  // Patch 2.1+: store per-frame AR gating signals for point placement
   state.viewAngleToPlane = viewAngleToPlane;
-  state.reticleMode = (reticle.visible ? (reticleUsedHit ? 'hit' : 'fallback_y_plane') : 'none');
-  state.canCommitPoint = !!(reticle.visible && reticleUsedHit && validFloorHit && viewAngleToPlane >= (state.planeRefine?.minAngleDeg || 12));
+  state.reticleMode = (reticle.visible
+    ? (reticleUsedHit ? 'hit' : (usePlaneFit ? 'fallback_plane' : 'fallback_y_plane'))
+    : 'none');
+  // Commit is allowed when:
+  // - we are in AR draw/cut modes (floor locked)
+  // - the reticle is visible
+  // - the camera is pitched enough (avoids walls)
+  // - either we have a valid floor hit, OR we have a frozen plane model for fallback aiming
+  state.canCommitPoint = !!(state.floorLocked && reticle.visible && viewAngleToPlane >= minAngle && (reticleUsedHit || usePlaneFit));
 
 
   // AR debug sample (Patch 2): record hit-test stability without changing behavior
@@ -3677,7 +3930,7 @@ function updateXR(frame) {
       const dz = reticle.visible ? (reticle.position.z - __tmpCamPos.z) : 0;
       const dist = reticle.visible ? Math.sqrt(dx*dx + dy*dy + dz*dz) : NaN;
 
-      const mode = (reticle.visible ? (reticleUsedHit ? 'hit' : 'fallback_y_plane') : 'none');
+      const mode = state.reticleMode || (reticle.visible ? (reticleUsedHit ? 'hit' : (usePlaneFit ? 'fallback_plane' : 'fallback_y_plane')) : 'none');
 
       _arDebugRecordSample({
         t: performance.now(),
@@ -3726,7 +3979,7 @@ function updateXR(frame) {
   // magnet highlight
   state.snapArmed = false;
   if (state.floorLocked && !state.closed && state.phase === 'ar_draw' && state.points.length >= 3 && reticle.visible) {
-    const wpos = reticle.position.clone(); wpos.y = state.floorY;
+    const wpos = _projectPointToPlane(reticle.position, __tmpHitPos).clone();
     const loc = anchorGroup.worldToLocal(wpos);
     const d0 = distXZ(state.points[0], loc);
     state.snapArmed = d0 < SNAP_DIST_M;
