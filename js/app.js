@@ -407,6 +407,14 @@ const state = {
     motionScoreMax: 0.90,
     motionAngleWeight: 0.015, // adds ~0.9 to score at ~60 deg/s
     jumpBoostMax: 6.0,
+
+    // Patch 7.3: One Euro filter for reticle (low jitter, minimal lag)
+    oneEuroEnabled: true,
+    oneEuroMinCutoffNear: 2.4,
+    oneEuroMinCutoffFar: 1.7,
+    oneEuroBetaNear: 0.02,
+    oneEuroBetaFar: 0.06,
+    oneEuroDCutoff: 1.0,
   },
 
   // Patch 7: AR hint throttling (uses existing contourHint UI)
@@ -3788,7 +3796,7 @@ function _arDebugUpdateOverlay() {
     const jitter = _arDebugJitter2D(jitterWin);
 
     const lines = [
-      `AR debug (Patch 7.2)`,
+      `AR debug (Patch 7.3)`,
       `state: ${_arDebugStateLabel()}`,
       `fps: ${_fmt(dbg.fps, 0)}`,
       `hit-test: ${hitsPerSec} hits/s`,
@@ -4110,14 +4118,13 @@ function updateXR(frame) {
         rs.modeHoldUntil = nowT + rs.holdOnModeChangeMs;
       }
 
-      // Distance-based smoothing parameters (XZ only; Y clamped separately)
+      // Distance-based parameters (XZ only; Y clamped separately)
       const distXZ = Math.hypot(targetX - __tmpCamPos.x, targetZ - __tmpCamPos.z);
       const tD = (distXZ <= 3) ? 0 : (distXZ >= 8 ? 1 : (distXZ - 3) / 5);
 
-      // Adaptive responsiveness: follow camera motion quickly without lag, while still
-      // smoothing and rejecting outliers when the phone is steady.
-      if (!rs._prevCamPos) { rs._prevCamPos = new THREE.Vector3(__tmpCamPos.x, __tmpCamPos.y, __tmpCamPos.z); }
-      if (!rs._prevFwd) { rs._prevFwd = new THREE.Vector3(__tmpFwd.x, __tmpFwd.y, __tmpFwd.z); }
+      // Camera motion score: used only to detect "steady" vs "moving".
+      if (!rs._prevCamPos) rs._prevCamPos = new THREE.Vector3(__tmpCamPos.x, __tmpCamPos.y, __tmpCamPos.z);
+      if (!rs._prevFwd) rs._prevFwd = new THREE.Vector3(__tmpFwd.x, __tmpFwd.y, __tmpFwd.z);
       const prevT = rs._prevT || nowT;
       const dtS = Math.max(0.001, (nowT - prevT) / 1000);
       const dCam = Math.hypot(
@@ -4135,42 +4142,62 @@ function updateXR(frame) {
       const sMax = rs.motionScoreMax || 0.90;
       const motion = Math.max(0, Math.min(1, (score - sMin) / Math.max(0.001, (sMax - sMin))));
 
-      const emaNearSlow = (rs.emaNearSlow != null ? rs.emaNearSlow : 0.30);
-      const emaFarSlow  = (rs.emaFarSlow  != null ? rs.emaFarSlow  : 0.16);
-      const emaNearFast = (rs.emaNearFast != null ? rs.emaNearFast : 0.70);
-      const emaFarFast  = (rs.emaFarFast  != null ? rs.emaFarFast  : 0.50);
+      // Patch 7.3: One Euro filter (fast response when moving, smooth when steady).
+      const minCutNear = (rs.oneEuroMinCutoffNear != null ? rs.oneEuroMinCutoffNear : 2.4);
+      const minCutFar  = (rs.oneEuroMinCutoffFar  != null ? rs.oneEuroMinCutoffFar  : 1.7);
+      const betaNear   = (rs.oneEuroBetaNear     != null ? rs.oneEuroBetaNear     : 0.02);
+      const betaFar    = (rs.oneEuroBetaFar      != null ? rs.oneEuroBetaFar      : 0.06);
+      const dCutoff    = (rs.oneEuroDCutoff      != null ? rs.oneEuroDCutoff      : 1.0);
 
-      const alphaSlow = emaNearSlow + (emaFarSlow - emaNearSlow) * tD;
-      const alphaFast = emaNearFast + (emaFarFast - emaNearFast) * tD;
-      let alpha = alphaSlow + (alphaFast - alphaSlow) * motion;
+      const minCutoff = minCutNear + (minCutFar - minCutNear) * tD;
+      const beta = betaNear + (betaFar - betaNear) * tD;
 
+      // Optional outlier clamp when phone is steady (prevents rare teleports without adding lag).
+      const dx0 = targetX - rs.pos.x;
+      const dz0 = targetZ - rs.pos.z;
+      const jump = Math.hypot(dx0, dz0);
       const baseJump = (rs.jumpRejectNearM || 0.25) + ((rs.jumpRejectFarM || 0.60) - (rs.jumpRejectNearM || 0.25)) * tD;
-      const jumpBoost = 1 + motion * (rs.jumpBoostMax || 6.0);
-      const jumpThresh = baseJump * jumpBoost;
-
-      const dx = targetX - rs.pos.x;
-      const dz = targetZ - rs.pos.z;
-      const jump = Math.hypot(dx, dz);
-
-      // Soften mode flips only when the phone is mostly steady; avoid slow-motion lag.
-      if (nowT < rs.modeHoldUntil && motion < 0.25) {
-        alpha = Math.min(alpha, (rs.modeHoldAlphaMin || 0.18));
+      if (motion < 0.18 && jump > baseJump * 2.2) {
+        const k = (baseJump * 2.2) / Math.max(0.00001, jump);
+        targetX = rs.pos.x + dx0 * k;
+        targetZ = rs.pos.z + dz0 * k;
       }
 
-      // Outlier rejection only when the phone is steady; large deltas are expected when moving.
-      if (jump > jumpThresh && motion < 0.22) {
-        alpha = Math.min(alpha, (rs.outlierAlpha || 0.08));
+      // One Euro helper
+      const _alpha = (cutoff, dt) => {
+        const tau = 1.0 / (2.0 * Math.PI * Math.max(0.0001, cutoff));
+        return 1.0 / (1.0 + tau / Math.max(0.001, dt));
+      };
+
+      if (!rs._oe) {
+        rs._oe = { x: targetX, z: targetZ, dx: 0, dz: 0, t: nowT };
       }
 
-      let a = alpha;
+      const dt = Math.max(0.001, (nowT - (rs._oe.t || nowT)) / 1000);
+      rs._oe.t = nowT;
+
+      // Derivative (velocity) low-pass
+      const dx = (targetX - rs._oe.x) / dt;
+      const dz = (targetZ - rs._oe.z) / dt;
+      const aD = _alpha(dCutoff, dt);
+      rs._oe.dx = rs._oe.dx + (dx - rs._oe.dx) * aD;
+      rs._oe.dz = rs._oe.dz + (dz - rs._oe.dz) * aD;
+
+      const cutoffX = minCutoff + beta * Math.abs(rs._oe.dx);
+      const cutoffZ = minCutoff + beta * Math.abs(rs._oe.dz);
+      const aX = _alpha(cutoffX, dt);
+      const aZ = _alpha(cutoffZ, dt);
+
+      rs._oe.x = rs._oe.x + (targetX - rs._oe.x) * aX;
+      rs._oe.z = rs._oe.z + (targetZ - rs._oe.z) * aZ;
 
       // Store camera motion signals for next frame
       rs._prevCamPos.set(__tmpCamPos.x, __tmpCamPos.y, __tmpCamPos.z);
       rs._prevFwd.set(__tmpFwd.x, __tmpFwd.y, __tmpFwd.z);
       rs._prevT = nowT;
 
-      rs.pos.x = rs.pos.x + dx * a;
-      rs.pos.z = rs.pos.z + dz * a;
+      rs.pos.x = rs._oe.x;
+      rs.pos.z = rs._oe.z;
       rs.pos.y = targetY;
 
       reticle.position.copy(rs.pos);
