@@ -286,6 +286,24 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
 .scanTitle{font-weight:1000;font-size:24px;letter-spacing:1px;text-align:center;margin-bottom:10px;}
 .scanText{font-size:14px;line-height:1.35;color:rgba(255,255,255,0.86);text-align:center;}
 
+.contourHint{
+  position:absolute;left:12px;right:12px;
+  /* Above the main + button (and above the bottom strip, if present) */
+  bottom:calc(var(--ar-bottom-strip) + 124px + var(--safe-bottom));
+  padding:12px 14px;
+  border-radius:18px;
+  background:rgba(0,0,0,0.35);
+  border:1px solid rgba(255,255,255,0.10);
+  backdrop-filter: blur(10px);
+}
+.contourHintText{
+  font-size:14px;
+  font-weight:900;
+  line-height:1.25;
+  color:rgba(255,255,255,0.92);
+  text-align:center;
+}
+
 .arBottomCenter{
   position:absolute;left:0;right:0;
   /* Keep main buttons above the bottom pattern strip */

@@ -65,6 +65,7 @@ const UI = {
   arProductTitle: document.getElementById('arProductTitle'),
   arArea: document.getElementById('arArea'),
   scanHint: document.getElementById('scanHint'),
+  contourHint: document.getElementById('contourHint'),
   measureLayer: document.getElementById('measureLayer'),
   arBottomCenter: document.getElementById('arBottomCenter'),
   btnArAdd: document.getElementById('btnArAdd'),
@@ -296,6 +297,9 @@ const state = {
   holes: /** @type {THREE.Vector3[][]} */ ([]),
   holePoints: /** @type {THREE.Vector3[]} */ ([]),
   closed: false,
+
+  // UI gating: show bottom pattern/menu only after the user closes the contour at least once.
+  hasEverClosedContour: false,
 };
 
 
@@ -2555,9 +2559,13 @@ async function startAR() {
   // enter AR UI
   setActiveScreen('ar');
   state.phase = 'ar_scan';
+  state.hasEverClosedContour = false;
   resetAll(false); // всегда начинаем с нового сканирования
   UI.scanHint.classList.remove('hidden');
   show(UI.scanHint, true);
+
+  // Hide contour guidance at start (will appear after floor is locked)
+  show(UI.contourHint, false);
 
   // grid visible while scanning
   scanGrid.visible = true;
@@ -2566,8 +2574,8 @@ async function startAR() {
   previewPlane.visible = false;
   previewGrid.visible = false;
 
-  // Show bottom pattern strip in AR (like in the native app)
-  show(UI.finalBar, true);
+  // Do NOT show bottom menu until the contour is closed (per product UX)
+  show(UI.finalBar, false);
   show(UI.finalColors, false);
   updateArBottomStripVar();
   // main add button area visible at start
@@ -2685,6 +2693,10 @@ function ensureFloorLocked() {
 
   // hide scan hint
   show(UI.scanHint, false);
+  // Show contour placement guidance (only before the first successful close)
+  if (!state.hasEverClosedContour) {
+    show(UI.contourHint, true);
+  }
   state.phase = 'ar_draw';
 }
 
@@ -2797,12 +2809,16 @@ function closeContour() {
   if (state.points.length < 3) return;
   state.closed = true;
   state.phase = 'ar_mask';
+  state.hasEverClosedContour = true;
 
   rebuildMarkersAndLine(true);
   rebuildFill();
   updateAreaUI();
 
   // UI
+  // Once the contour is closed and the fill is built, enable the bottom menu.
+  show(UI.contourHint, false);
+  show(UI.finalBar, true);
   show(UI.btnArAdd, false);
   show(UI.btnArOk, false);
   show(UI.arBottomCenter, false);
@@ -2817,6 +2833,10 @@ function resetAll(keepFloor = false) {
   state.holes = [];
   state.holePoints = [];
   state.closed = false;
+
+  if (!keepFloor) {
+    state.hasEverClosedContour = false;
+  }
 
   if (!keepFloor) {
     state.floorLocked = false;
@@ -2855,11 +2875,15 @@ function resetAll(keepFloor = false) {
   show(UI.postCloseBar, false);
   // Bottom strip: keep patterns available in AR; colors appear only after "Готово"
   if (state.xrSession) {
-    show(UI.finalBar, true);
+    // Show the bottom menu only after the user successfully closed the contour.
+    show(UI.finalBar, !!state.hasEverClosedContour);
     show(UI.finalColors, false);
   } else {
     show(UI.finalBar, false);
   }
+
+  // Contour hint is shown only in early drawing mode before the first close.
+  show(UI.contourHint, false);
 
   const inScan = (state.phase === 'ar_scan' && !state.floorLocked);
   show(UI.arBottomCenter, !inScan);
@@ -3233,6 +3257,10 @@ function updateXR(frame) {
         // Switch to drawing phase (match app: + appears after scanning/floor lock)
         state.phase = 'ar_draw';
         show(UI.scanHint, false);
+        // Keep bottom menu hidden until contour is closed; show a clear hint for contour placement.
+        if (!state.hasEverClosedContour) {
+          show(UI.contourHint, true);
+        }
         show(UI.arBottomCenter, true);
         show(UI.btnArAdd, true);
         show(UI.btnArOk, false);
@@ -3441,6 +3469,8 @@ UI.btnArOk?.addEventListener('click', () => {
 UI.btnEditShape?.addEventListener('click', () => {
   // return to drawing mode, keep points
   show(UI.finalColors, false);
+  // Do not re-show the initial contour hint: the user is already in the flow.
+  show(UI.contourHint, false);
   if (typeof updateArBottomStripVar === 'function') updateArBottomStripVar();
 
   state.closed = false;
@@ -3468,6 +3498,7 @@ UI.btnEditShape?.addEventListener('click', () => {
 UI.btnCutout?.addEventListener('click', () => {
   // cutout mode
   show(UI.finalColors, false);
+  show(UI.contourHint, false);
   if (typeof updateArBottomStripVar === 'function') updateArBottomStripVar();
 
   state.phase = 'ar_cut';
@@ -3492,6 +3523,7 @@ UI.btnCutout?.addEventListener('click', () => {
 
 UI.btnDone?.addEventListener('click', () => {
   state.phase = 'ar_final';
+  show(UI.contourHint, false);
   show(UI.postCloseBar, false);
   show(UI.arBottomCenter, false);
   show(UI.finalBar, true);
