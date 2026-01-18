@@ -66,7 +66,6 @@ const UI = {
   arArea: document.getElementById('arArea'),
   scanHint: document.getElementById('scanHint'),
   measureLayer: document.getElementById('measureLayer'),
-  contourHint: document.getElementById('arContourHint'),
   arBottomCenter: document.getElementById('arBottomCenter'),
   btnArAdd: document.getElementById('btnArAdd'),
   btnArOk: document.getElementById('btnArOk'),
@@ -812,12 +811,32 @@ const maskMaterial = new THREE.MeshBasicMaterial({
   depthWrite: false,
 });
 
+// Texture color management (critical for correct PBR shading).
+// Rule:
+// - Albedo/baseColor: sRGB (color texture)
+// - Normal/Roughness/AO/Height: linear (data textures)
+// Notes:
+// - Normal maps are typically stored as RGB images, but must be treated as *linear* data.
+// - We set both `colorSpace` (newer Three.js) and `encoding` (older Three.js) for compatibility.
 function prepMapTex(tex, isColor = false) {
   if (!tex) return null;
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.anisotropy = 4;
-  if (isColor) tex.colorSpace = THREE.SRGBColorSpace;
-  else tex.colorSpace = THREE.NoColorSpace;
+
+  // Newer Three.js (r152+): colorSpace API
+  try {
+    if ('colorSpace' in tex) {
+      tex.colorSpace = isColor ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+    }
+  } catch (_) {}
+
+  // Older Three.js: encoding API
+  try {
+    if ('encoding' in tex) {
+      tex.encoding = isColor ? THREE.sRGBEncoding : THREE.LinearEncoding;
+    }
+  } catch (_) {}
+
   return tex;
 }
 
@@ -828,7 +847,9 @@ function getFallbackWhiteTex() {
   const tex = new THREE.DataTexture(data, 1, 1, THREE.RGBAFormat);
   tex.needsUpdate = true;
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.colorSpace = THREE.SRGBColorSpace;
+  // This texture is used as a fallback *albedo* map, so it should be sRGB.
+  try { if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace; } catch (_) {}
+  try { if ('encoding' in tex) tex.encoding = THREE.sRGBEncoding; } catch (_) {}
   __fallbackWhiteTex = tex;
   return tex;
 }
@@ -2546,11 +2567,8 @@ async function startAR() {
   previewGrid.visible = false;
 
   // Show bottom pattern strip in AR (like in the native app)
-  // IMPORTANT: bottom menu should appear only after the user closes the contour
-  // and the fill is applied. While scanning / placing points, keep it hidden.
-  show(UI.finalBar, false);
+  show(UI.finalBar, true);
   show(UI.finalColors, false);
-  show(UI.contourHint, false);
   updateArBottomStripVar();
   // main add button area visible at start
   show(UI.arBottomCenter, false);
@@ -2789,10 +2807,6 @@ function closeContour() {
   show(UI.btnArOk, false);
   show(UI.arBottomCenter, false);
   show(UI.postCloseBar, true);
-  // After closing the contour, enable the full bottom menu (layouts + shape picker + palette)
-  show(UI.finalBar, true);
-  // Hide contour placement hint
-  show(UI.contourHint, false);
   show(UI.finalColors, false);
   updateArBottomStripVar();
 } 
@@ -2839,14 +2853,12 @@ function resetAll(keepFloor = false) {
 
   // UI
   show(UI.postCloseBar, false);
-  // Bottom strip: show only after contour is closed and fill applied.
+  // Bottom strip: keep patterns available in AR; colors appear only after "Готово"
   if (state.xrSession) {
-    show(UI.finalBar, !!state.closed);
+    show(UI.finalBar, true);
     show(UI.finalColors, false);
-    show(UI.contourHint, (state.phase === 'ar_draw' && state.floorLocked && !state.closed));
   } else {
     show(UI.finalBar, false);
-    show(UI.contourHint, false);
   }
 
   const inScan = (state.phase === 'ar_scan' && !state.floorLocked);

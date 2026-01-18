@@ -286,23 +286,6 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
 .scanTitle{font-weight:1000;font-size:24px;letter-spacing:1px;text-align:center;margin-bottom:10px;}
 .scanText{font-size:14px;line-height:1.35;color:rgba(255,255,255,0.86);text-align:center;}
 
-/* Подсказка для шага выставления контура (показывается после фиксации плоскости) */
-.arContourHint{
-  position:absolute;left:12px;right:12px;
-  /* Above AR point buttons; bottom menu is hidden at this step */
-  bottom:calc(var(--ar-bottom-strip) + 120px + var(--safe-bottom));
-  padding:12px 14px;
-  border-radius:18px;
-  background:rgba(0,0,0,0.40);
-  border:1px solid rgba(255,255,255,0.10);
-  backdrop-filter: blur(10px);
-  color:rgba(255,255,255,0.92);
-  font-size:14px;
-  line-height:1.3;
-  text-align:center;
-  pointer-events:none;
-}
-
 .arBottomCenter{
   position:absolute;left:0;right:0;
   /* Keep main buttons above the bottom pattern strip */
