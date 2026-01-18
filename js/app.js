@@ -334,11 +334,15 @@ const state = {
     lastHitOkUntil: 0,
     history: [],
     maxHistoryMs: 350,
-    emaNear: 0.35,
-    emaFar: 0.18,
+    emaNear: 0.60,
+    emaFar: 0.55,
     jumpRejectNearM: 0.25,
     jumpRejectFarM: 0.60,
-    holdOnModeChangeMs: 140,
+    // Speed limit (m/s) for reticle follow. Prevents teleports without "slow-motion" lag.
+    maxSpeedNear: 60,
+    maxSpeedFar: 220,
+    _lastT: 0,
+    holdOnModeChangeMs: 0,
     hitLatchMs: 180,
   },
 
@@ -3453,7 +3457,7 @@ function _arDebugUpdateOverlay() {
     const jitter = _arDebugJitter2D(jitterWin);
 
     const lines = [
-      `AR debug (Patch 2.2.1)`,
+      `AR debug (Patch 2.2.2)`,
       `state: ${_arDebugStateLabel()}`,
       `fps: ${_fmt(dbg.fps, 0)}`,
       `hit-test: ${hitsPerSec} hits/s`,
@@ -3715,12 +3719,23 @@ function updateXR(frame) {
       const dz = targetZ - rs.pos.z;
       const jump = Math.hypot(dx, dz);
 
-      let a = alpha;
-      if (nowT < rs.modeHoldUntil) a = Math.min(a, 0.05);     // soften mode flips (hit <-> fallback)
-      if (jump > jumpThresh) a = Math.min(a, 0.06);           // reject outliers (prevents "teleport" jumps)
+      // Speed-limited smoothing: prevents teleports without adding large follow lag.
+      const dt = rs._lastT ? Math.max(0.008, Math.min(0.05, (nowT - rs._lastT) / 1000)) : 0.016;
+      rs._lastT = nowT;
 
-      rs.pos.x = rs.pos.x + dx * a;
-      rs.pos.z = rs.pos.z + dz * a;
+      const maxSpeed = (rs.maxSpeedNear || 10) + ((rs.maxSpeedFar || 30) - (rs.maxSpeedNear || 10)) * tD; // m/s
+      const maxStep = maxSpeed * dt;
+
+      if (jump > maxStep && jump > 1e-6) {
+        const k = maxStep / jump;
+        rs.pos.x = rs.pos.x + dx * k;
+        rs.pos.z = rs.pos.z + dz * k;
+      } else {
+        // If the target jump exceeds the typical reject threshold, follow faster (avoid "slow-motion").
+        const a = (jump > jumpThresh) ? Math.max(alpha, 0.45) : alpha;
+        rs.pos.x = rs.pos.x + dx * a;
+        rs.pos.z = rs.pos.z + dz * a;
+      }
       rs.pos.y = targetY;
 
       reticle.position.copy(rs.pos);
