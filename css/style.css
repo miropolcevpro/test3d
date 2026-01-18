@@ -610,10 +610,13 @@ to   { transform: scale(1.12); }
   /* Provide safe fallbacks in case JS didn't set the variables yet */
   top:var(--ar-top-strip, 64px);
   bottom:var(--ar-bottom-strip, 92px);
-  /* Shrink-wrap to the preview cards (removes empty right-panel space on mobile). */
-  width:fit-content;
-  max-width:70vw;
-  min-width:0;
+  /* Card size must match the main catalog cards (3 columns, 4:5). */
+  --sp-card-w: calc((100vw - 28px - 24px) / 3);
+  --sp-card-h: calc(var(--sp-card-w) * 1.25);
+  /* Drawer width follows the card width (narrow, mobile-friendly). */
+  width: calc(var(--sp-card-w) + 20px);
+  max-width: 72vw;
+  min-width: 0;
   /* Match the bottom AR bar style */
   background:rgba(0,0,0,0.40);
   backdrop-filter: blur(10px);
@@ -626,13 +629,9 @@ to   { transform: scale(1.12); }
   flex-direction:column;
 }
 
-/* Mobile AR: the drawer must be wide enough so preview images remain readable.
-   Keep desktop narrow, but allow a wider panel on phones. */
+/* Keep a safe cap so the drawer never covers too much of the camera view */
 @media (max-width: 520px) {
-  .shapePickerPanel{
-    /* Keep a safe cap so the panel never covers too much of the camera view */
-    max-width:78vw;
-  }
+  .shapePickerPanel{ max-width: 78vw; }
 }
 .shapePickerPanel.open{
   transform:translateX(0);
@@ -651,87 +650,59 @@ to   { transform: scale(1.12); }
 .shapePickerList{
   flex:1;
   overflow-y:auto;
-  /* Slightly tighter horizontal padding so the drawer matches the preview width */
-  padding:10px 0 12px;
+  padding:10px;
   display:flex;
   flex-direction:column;
-  gap:10px;
-  /* Do not stretch cards to full width — let them take the preview width */
+  gap:12px;
   align-items:center;
 }
 .shapePickerItem{
+  width: var(--sp-card-w);
   border:1px solid rgba(255,255,255,0.12);
-  border-radius:7px;
+  border-radius:5px;
   overflow:hidden;
   background:rgba(255,255,255,0.04);
-  /* Fit the card to the preview width (no extra empty fields) */
-  width:fit-content;
-  max-width:100%;
-  /* Mobile-first: keep thumbnails large; list scrolls naturally */
-  height:auto;
-  min-height:150px;
-  max-height:none;
 }
 .shapePickerItem button{
-  width:fit-content;
+  width:100%;
   padding:0;
   border:0;
   background:transparent;
   color:#fff;
   text-align:left;
-  display:flex;
-  flex-direction:column;
-  /* Do not stretch inner blocks wider than the preview */
-  align-items:center;
-  height:100%;
-  /* Critical for mobile Safari flexbox: allow inner preview to shrink instead of overflowing (which looks like "cropped") */
-  min-height:0;
-}
-.shapePickerThumbWrap{
-  flex:1;
-  /* Fit the inner container to the image width while keeping the same height */
-  width:fit-content;
-  max-width:100%;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  padding:0;
-  background:transparent;
-  border-radius:7px;
-  /* No horizontal auto margins: keep wrapper tight to the image */
-  margin:8px 0 0;
-  align-self:center;
-  /* Allow shrink inside flex column; prevent overflow clipping by the parent card */
-  min-height:0;
-  overflow:hidden;
-  /* Ensure the preview is big enough on mobile. Card height becomes (thumb + name). */
-  height:clamp(140px, 26vh, 240px);
-}
-.shapePickerThumb{
-  /* Keep the full image visible (no cropping), but let width follow aspect ratio */
-  width:auto;
-  height:100%;
-  max-width:100%;
-  max-height:100%;
-  object-fit:contain !important;
-  object-position:center;
   display:block;
-  border-radius:7px;
 }
-.shapePickerName{
-  /* Keep the label within the preview width (no extra side padding) */
-  padding:6px 0 10px;
+.shapePickerCard{
+  position:relative;
   width:100%;
-  box-sizing:border-box;
-  font-size:12px;
-  line-height:1.2;
-  opacity:0.95;
-  text-align:center;
-  /* Keep layout stable: don't force the card wider than the preview */
-  max-width:100%;
-  white-space:nowrap;
+  height:0;
+  padding-bottom:125%; /* 4:5 like .catalogCard */
+  border-radius:5px;
   overflow:hidden;
-  text-overflow:ellipsis;
+  background:#2a2a2a;
+}
+.shapePickerCardBg{
+  position:absolute;
+  top:0;left:0;right:0;bottom:0;
+  background-position:center;
+  background-repeat:no-repeat;
+  background-size:cover;
+}
+.shapePickerCardShade{
+  position:absolute;
+  top:0;left:0;right:0;bottom:0;
+  background:rgba(42,42,42,0.40);
+}
+.shapePickerCardTitle{
+  position:absolute;
+  left:0;right:0;bottom:0;
+  text-align:center;
+  font-size:12px;
+  font-weight:900;
+  letter-spacing:0.6px;
+  text-transform:uppercase;
+  padding:12px 10px;
+  background:rgba(24,24,24,0.80);
 }
 .shapePickerItem.active{
   border-color: rgba(90, 167, 255, 0.85);

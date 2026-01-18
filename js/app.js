@@ -3669,12 +3669,26 @@ function buildShapePickerList() {
     const icon = (s.hero ? s.hero : (s.icon ? s.icon : ''));
     const name = s.name ? s.name : s.id;
 
-    btn.innerHTML = `
-      <div class="shapePickerThumbWrap">
-        <img class="shapePickerThumb" src="${icon}" alt="" loading="lazy">
-      </div>
-      <div class="shapePickerName">${name}</div>
-    `;
+    // Build a catalog-like card (same aspect ratio and typography as the main screen).
+    // Do not change any navigation/AR logic — this is purely UI.
+    const card = document.createElement('div');
+    card.className = 'shapePickerCard';
+
+    const bg = document.createElement('div');
+    bg.className = 'shapePickerCardBg';
+    if (icon) bg.style.backgroundImage = `url("${icon}")`;
+
+    const shade = document.createElement('div');
+    shade.className = 'shapePickerCardShade';
+
+    const title = document.createElement('div');
+    title.className = 'shapePickerCardTitle';
+    title.textContent = name;
+
+    card.appendChild(bg);
+    card.appendChild(shade);
+    card.appendChild(title);
+    btn.replaceChildren(card);
 
     btn.addEventListener('click', async () => {
       setShapePickerOpen(false);
