@@ -1,16 +1,16 @@
-<!doctype html>
+<!DOCTYPE html>
+
 <html lang="ru">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <meta name="theme-color" content="#0a0c10" />
-  <title>Визуализатор плитки (WebAR)</title>
-  <link rel="icon" href="./favicon.ico" />
-  <link rel="stylesheet" href="css/style.css" />
-  <link rel="stylesheet" href="css/colormix_palette/colormix_palette.css" />
-  <link rel="stylesheet" href="css/monotone_palette/monotone_palette.css" />
-
-  <script type="importmap">
+<meta charset="utf-8"/>
+<meta content="width=device-width,initial-scale=1,viewport-fit=cover" name="viewport"/>
+<meta content="#0a0c10" name="theme-color"/>
+<title>Визуализатор плитки (WebAR)</title>
+<link href="./favicon.ico" rel="icon"/>
+<link href="css/style.css" rel="stylesheet"/>
+<link href="css/colormix_palette/colormix_palette.css" rel="stylesheet"/>
+<link href="css/monotone_palette/monotone_palette.css" rel="stylesheet"/>
+<script type="importmap">
     {
       "imports": {
         "three": "https://unpkg.com/three@0.174.0/build/three.module.js",
@@ -18,251 +18,227 @@
       }
     }
   </script>
-
-
-  <script>
+<script>
     // Optional: point the app to your Admin API Gateway so it can reconcile palettes (remove ghost textures).
     // Example:
     // window.__API_BASE_URL__ = 'https://<your_api_gw_id>.apigw.yandexcloud.net';
   </script>
 </head>
 <body class="splash-active">
-  <div id="splashScreen" aria-hidden="true"></div>
-  <canvas id="xrCanvas"></canvas>
-
-  <!-- DOM Overlay root (используется в WebXR immersive-ar) -->
-  <div id="overlay" class="overlayRoot">
-
-    <!-- Экран 1: Каталог (как в приложении) -->
-    <section id="screenCatalog" class="screen screen--active" aria-label="Каталог">
-      <header class="appHeader">
-        <button id="btnCatalogBack" class="iconCircle hidden" aria-label="Назад">←</button>
-        <div class="headerTitle headerTitle--withLogo">ФОРМЫ АКТИВ ГРУПП <img class="headerTitleLogo" src="assets/ui/active_group_logo.png" alt="" /></div>
-        <!-- removed: non-functional UI icon (requested) -->
-      </header>
-
-      <div class="catalogWrap">
-        <input id="catalogSearch" class="search" type="search" placeholder="Поиск…" />
-        <div id="catalogCards" class="catalogCards"></div>
-      </div>
-
-      <nav class="bottomNav" aria-label="Навигация">
-        <button class="navItem navItem--active" type="button">
-          <span class="navIcon">▦</span>
-          <span class="navLabel">Формы</span>
-        </button>
-        <button class="navItem" type="button" id="btnNav3D">
-          <span class="navIcon">⬚</span>
-          <span class="navLabel">3D</span>
-        </button>
-        <a class="navItem" href="admin/" rel="noopener">
-          <span class="navIcon">⚙</span>
-          <span class="navLabel">Админка</span>
-        </a>
-      </nav>
-    </section>
-
-    <!-- Экран 2: Детали позиции -->
-    <section id="screenDetail" class="screen" aria-label="Детали" hidden>
-      <div class="detailScroll">
-      <header class="detailTop">
-        <button id="btnDetailBack" class="backText" aria-label="Назад">«</button>
-        <div class="detailTopTitle" id="detailTitle">—</div>
-      </header>
-
-      <div class="detailHero" id="detailHero"></div>
-
-      <div class="detailBody">
-        <div class="detailRow">
-          <div class="detailName" id="detailName">—</div>
-          <div class="detailSub" id="detailSub">—</div>
-        </div>
-
-        
-        <div class="card" id="detailTechCard">
-          <div class="cardTitle techHeader">
-            <div class="techTitle">Технические параметры</div>
-            <button id="btnTechToggle" class="btnSmall" type="button">Показать</button>
-          </div>
-          <div class="techBody" id="techBody" hidden>
-            <button id="btnTechClose" class="techClose" type="button" aria-label="Закрыть">✕</button>
-            <div class="kv" id="detailTech"></div>
-          </div>
-        </div>
-
-        <div class="sectionTitle">Доступно в технологиях</div>
-        <div class="colorTechGrid">
-          <img class="colorTechImg" src="assets/color_tech/1_stonemix.png" alt="StoneMix" loading="lazy" />
-        <!-- StoneMix palette gallery -->
-        <div class="stonemixPaletteBlock">
-          <div class="stonemixPaletteTitle">Цветовая гамма Стоунмикс</div>
-          <div class="stonemixPaletteScroll" aria-label="Цветовая гамма Стоунмикс (листайте)">
-          <div class="stonemixPaletteItem" role="img" aria-label="Старый Крым" style="background-image:url('assets/stonemix_palette/stonemix_palette_01.webp')"></div>
-          <div class="stonemixPaletteItem" role="img" aria-label="Старый Крым чёрный" style="background-image:url('assets/stonemix_palette/stonemix_palette_02.webp')"></div>
-          <div class="stonemixPaletteItem" role="img" aria-label="Казантип" style="background-image:url('assets/stonemix_palette/stonemix_palette_03.webp')"></div>
-          <div class="stonemixPaletteItem" role="img" aria-label="Новый свет" style="background-image:url('assets/stonemix_palette/stonemix_palette_04.webp')"></div>
-          <div class="stonemixPaletteItem" role="img" aria-label="Старый Крым чёрно-белый" style="background-image:url('assets/stonemix_palette/stonemix_palette_05.webp')"></div>
-          <div class="stonemixPaletteItem" role="img" aria-label="Беляус" style="background-image:url('assets/stonemix_palette/stonemix_palette_06.webp')"></div>
-          <div class="stonemixPaletteItem" role="img" aria-label="Старый Крым чёрный (вариант)" style="background-image:url('assets/stonemix_palette/stonemix_palette_07.webp')"></div>
-          <div class="stonemixPaletteItem" role="img" aria-label="Херсонес" style="background-image:url('assets/stonemix_palette/stonemix_palette_08.webp')"></div>
-          <div class="stonemixPaletteItem" role="img" aria-label="Каламит" style="background-image:url('assets/stonemix_palette/stonemix_palette_09.webp')"></div>
-          <div class="stonemixPaletteItem" role="img" aria-label="Терракот" style="background-image:url('assets/stonemix_palette/stonemix_palette_10.webp')"></div>
-          <div class="stonemixPaletteItem" role="img" aria-label="Неаполь" style="background-image:url('assets/stonemix_palette/stonemix_palette_11.webp')"></div>
-          <div class="stonemixPaletteItem" role="img" aria-label="Старый Крым графит" style="background-image:url('assets/stonemix_palette/stonemix_palette_12.webp')"></div>
-          <div class="stonemixPaletteItem" role="img" aria-label="Кара-Даг" style="background-image:url('assets/stonemix_palette/stonemix_palette_13.webp')"></div>
-          <div class="stonemixPaletteItem" role="img" aria-label="Ласпи" style="background-image:url('assets/stonemix_palette/stonemix_palette_14.webp')"></div>
-          <div class="stonemixPaletteItem" role="img" aria-label="Старый Крым белый" style="background-image:url('assets/stonemix_palette/stonemix_palette_15.webp')"></div>
-          <div class="stonemixPaletteItem" role="img" aria-label="Коктебель" style="background-image:url('assets/stonemix_palette/stonemix_palette_16.webp')"></div>
-          </div>
-        </div>
-
-          <img class="colorTechImg" src="assets/color_tech/2_colormix.png" alt="ColorMix" loading="lazy" />
-        <!-- ColorMix palette gallery -->
-        <div class="colormixPaletteBlock">
-          <div class="colormixPaletteTitle">Цветовая гамма Колормикс</div>
-          <div class="colormixPaletteScroll" aria-label="Цветовая гамма Колормикс (листайте)">
-          <div class="colormixPaletteItem" role="img" aria-label="Неаполь" style="background-image:url('assets/colormix_palette/colormix_palette_01.webp')"></div>
-          <div class="colormixPaletteItem" role="img" aria-label="Коктебель" style="background-image:url('assets/colormix_palette/colormix_palette_02.webp')"></div>
-          <div class="colormixPaletteItem" role="img" aria-label="Кара-Даг" style="background-image:url('assets/colormix_palette/colormix_palette_03.webp')"></div>
-          <div class="colormixPaletteItem" role="img" aria-label="Ай-Петри" style="background-image:url('assets/colormix_palette/colormix_palette_04.webp')"></div>
-          <div class="colormixPaletteItem" role="img" aria-label="Новый свет" style="background-image:url('assets/colormix_palette/colormix_palette_05.webp')"></div>
-          <div class="colormixPaletteItem" role="img" aria-label="Солнечная долина" style="background-image:url('assets/colormix_palette/colormix_palette_06.webp')"></div>
-          <div class="colormixPaletteItem" role="img" aria-label="Беляус" style="background-image:url('assets/colormix_palette/colormix_palette_07.webp')"></div>
-          <div class="colormixPaletteItem" role="img" aria-label="Золотые ворота" style="background-image:url('assets/colormix_palette/colormix_palette_08.webp')"></div>
-          <div class="colormixPaletteItem" role="img" aria-label="Форос" style="background-image:url('assets/colormix_palette/colormix_palette_09.webp')"></div>
-          <div class="colormixPaletteItem" role="img" aria-label="Гурзуф" style="background-image:url('assets/colormix_palette/colormix_palette_10.webp')"></div>
-          <div class="colormixPaletteItem" role="img" aria-label="Аю-Даг" style="background-image:url('assets/colormix_palette/colormix_palette_11.webp')"></div>
-          <div class="colormixPaletteItem" role="img" aria-label="Херсонес" style="background-image:url('assets/colormix_palette/colormix_palette_12.webp')"></div>
-          </div>
-        </div>
-          <img class="colorTechImg" src="assets/color_tech/3_monotone.png" alt="Однотонная" loading="lazy" />
-
-        <!-- Monotone palette gallery -->
-        <div class="monotonePaletteBlock">
-          <div class="monotonePaletteTitle">Цветовая гамма Однотонная</div>
-          <div class="monotonePaletteScroll" aria-label="Цветовая гамма Однотонная (листайте)">
-          <div class="monotonePaletteItem" role="img" aria-label="Терракот" style="background-image:url('assets/monotone_palette/monotone_palette_01.webp')"></div>
-          <div class="monotonePaletteItem" role="img" aria-label="Красный" style="background-image:url('assets/monotone_palette/monotone_palette_02.webp')"></div>
-          <div class="monotonePaletteItem" role="img" aria-label="Коричневый" style="background-image:url('assets/monotone_palette/monotone_palette_03.webp')"></div>
-          <div class="monotonePaletteItem" role="img" aria-label="Жёлтый-яркий" style="background-image:url('assets/monotone_palette/monotone_palette_04.webp')"></div>
-          <div class="monotonePaletteItem" role="img" aria-label="Светло-коричневый" style="background-image:url('assets/monotone_palette/monotone_palette_05.webp')"></div>
-          <div class="monotonePaletteItem" role="img" aria-label="Белый" style="background-image:url('assets/monotone_palette/monotone_palette_06.webp')"></div>
-          <div class="monotonePaletteItem" role="img" aria-label="Светло-серый" style="background-image:url('assets/monotone_palette/monotone_palette_07.webp')"></div>
-          <div class="monotonePaletteItem" role="img" aria-label="Графит" style="background-image:url('assets/monotone_palette/monotone_palette_08.webp')"></div>
-          <div class="monotonePaletteItem" role="img" aria-label="Жёлтый (горчичный)" style="background-image:url('assets/monotone_palette/monotone_palette_09.webp')"></div>
-          <div class="monotonePaletteItem" role="img" aria-label="Черный" style="background-image:url('assets/monotone_palette/monotone_palette_10.webp')"></div>
-          <div class="monotonePaletteItem" role="img" aria-label="Серые оттенки" style="background-image:url('assets/monotone_palette/monotone_palette_11.webp')"></div>
-          <div class="monotonePaletteItem" role="img" aria-label="Красный яркий" style="background-image:url('assets/monotone_palette/monotone_palette_12.webp')"></div>
-
-
-          </div>
-        </div>
-
-        </div>
-
-        <div class="sectionTitle">Схемы укладки</div>
-        <div class="layoutRow" id="layoutRow">
-          <button class="layoutCard" data-layout="straight" type="button">
-            <div class="layoutThumb" data-thumb="straight"></div>
-            <div class="layoutLbl">Раскладка 1</div>
-          </button>
-          <button class="layoutCard" data-layout="diagonal" type="button">
-            <div class="layoutThumb" data-thumb="diagonal"></div>
-            <div class="layoutLbl">Раскладка 2</div>
-          </button>
-        </div>
-
-        <div class="sectionTitle">Выберите цвет и жмите на кнопку</div>
-        <div class="swatchRow" id="colorRow"></div>
-      </div>
-      </div>
-
-      <footer class="detailCta">
-        <button id="btnViewAR" class="btnPrimary" type="button"><span class="btnPrimaryText">Магия Актив Групп</span><img class="btnPrimaryLogo" src="assets/ui/active_group_logo.png" alt="Актив Групп" /></button>
-      </footer>
-    </section>
-
-    <!-- Экран 3: AR -->
-    <section id="screenAR" class="screen" aria-label="AR" hidden>
-      <header class="arTop">
-        <button id="btnArBack" class="backText" aria-label="Назад">«</button>
-        <div class="arTopText">
-          <div id="arProductTitle" class="arTitle">—</div>
-          <div id="arArea" class="arArea">—</div>
-        </div>
-        <button id="btnArReset" class="iconCircle" aria-label="Сброс">↻</button>
-      </header>
-
-      <!-- Подсказка сканирования -->
-      <div id="scanHint" class="scanHint">
-        <div class="scanTitle">СКАНИРУЙТЕ ПОВЕРХНОСТЬ</div>
-        <div class="scanText">
+<div aria-hidden="true" id="splashScreen"></div>
+<canvas id="xrCanvas"></canvas>
+<!-- DOM Overlay root (используется в WebXR immersive-ar) -->
+<div class="overlayRoot" id="overlay">
+<!-- Экран 1: Каталог (как в приложении) -->
+<section aria-label="Каталог" class="screen screen--active" id="screenCatalog">
+<header class="appHeader">
+<button aria-label="Назад" class="iconCircle hidden" id="btnCatalogBack">←</button>
+<div class="headerTitle headerTitle--withLogo">ФОРМЫ АКТИВ ГРУПП <img alt="" class="headerTitleLogo" src="assets/ui/active_group_logo.png"/></div>
+<!-- removed: non-functional UI icon (requested) -->
+</header>
+<div class="catalogWrap">
+<input class="search" id="catalogSearch" placeholder="Поиск…" type="search"/>
+<div class="catalogCards" id="catalogCards"></div>
+</div>
+<nav aria-label="Навигация" class="bottomNav">
+<button class="navItem navItem--active" type="button">
+<span class="navIcon">▦</span>
+<span class="navLabel">Формы</span>
+</button>
+<button class="navItem" id="btnNav3D" type="button">
+<span class="navIcon">⬚</span>
+<span class="navLabel">3D</span>
+</button>
+<a class="navItem" href="admin/" rel="noopener">
+<span class="navIcon">⚙</span>
+<span class="navLabel">Админка</span>
+</a>
+</nav>
+</section>
+<!-- Экран 2: Детали позиции -->
+<section aria-label="Детали" class="screen" hidden="" id="screenDetail">
+<div class="detailScroll">
+<header class="detailTop">
+<button aria-label="Назад" class="backText" id="btnDetailBack">«</button>
+<div class="detailTopTitle" id="detailTitle">—</div>
+</header>
+<div class="detailHero" id="detailHero"></div>
+<div class="detailBody">
+<div class="detailRow">
+<div class="detailName" id="detailName">—</div>
+<div class="detailSub" id="detailSub">—</div>
+</div>
+<div class="card" id="detailTechCard">
+<div class="cardTitle techHeader">
+<div class="techTitle">Узнать цену и наличие</div>
+<button class="btnSmall" hidden="" id="btnTechToggle" type="button">Показать</button>
+</div>
+<div aria-label="Связь и сайт продавца" class="convBody">
+<a class="convBtn convBtnPrimary" href="tel:+79780224411">
+<img alt="" class="convIcon" src="assets/icons/callmanager.webp"/>
+<span class="convText">Связь с менеджером</span>
+</a>
+<a class="convBtn convBtnSecondary" href="https://st-ru.com/" rel="noopener" target="_blank">
+<img alt="" class="convIcon" src="assets/icons/saitprodavca.webp"/>
+<span class="convText">Сайт продавца</span>
+</a>
+</div>
+<div class="techBody" hidden="" id="techBody">
+<button aria-label="Закрыть" class="techClose" hidden="" id="btnTechClose" type="button">✕</button>
+<div class="kv" id="detailTech"></div>
+</div>
+</div>
+<div class="sectionTitle">Доступно в технологиях</div>
+<div class="colorTechGrid">
+<img alt="StoneMix" class="colorTechImg" loading="lazy" src="assets/color_tech/1_stonemix.png"/>
+<!-- StoneMix palette gallery -->
+<div class="stonemixPaletteBlock">
+<div class="stonemixPaletteTitle">Цветовая гамма Стоунмикс</div>
+<div aria-label="Цветовая гамма Стоунмикс (листайте)" class="stonemixPaletteScroll">
+<div aria-label="Старый Крым" class="stonemixPaletteItem" role="img" style="background-image:url('assets/stonemix_palette/stonemix_palette_01.webp')"></div>
+<div aria-label="Старый Крым чёрный" class="stonemixPaletteItem" role="img" style="background-image:url('assets/stonemix_palette/stonemix_palette_02.webp')"></div>
+<div aria-label="Казантип" class="stonemixPaletteItem" role="img" style="background-image:url('assets/stonemix_palette/stonemix_palette_03.webp')"></div>
+<div aria-label="Новый свет" class="stonemixPaletteItem" role="img" style="background-image:url('assets/stonemix_palette/stonemix_palette_04.webp')"></div>
+<div aria-label="Старый Крым чёрно-белый" class="stonemixPaletteItem" role="img" style="background-image:url('assets/stonemix_palette/stonemix_palette_05.webp')"></div>
+<div aria-label="Беляус" class="stonemixPaletteItem" role="img" style="background-image:url('assets/stonemix_palette/stonemix_palette_06.webp')"></div>
+<div aria-label="Старый Крым чёрный (вариант)" class="stonemixPaletteItem" role="img" style="background-image:url('assets/stonemix_palette/stonemix_palette_07.webp')"></div>
+<div aria-label="Херсонес" class="stonemixPaletteItem" role="img" style="background-image:url('assets/stonemix_palette/stonemix_palette_08.webp')"></div>
+<div aria-label="Каламит" class="stonemixPaletteItem" role="img" style="background-image:url('assets/stonemix_palette/stonemix_palette_09.webp')"></div>
+<div aria-label="Терракот" class="stonemixPaletteItem" role="img" style="background-image:url('assets/stonemix_palette/stonemix_palette_10.webp')"></div>
+<div aria-label="Неаполь" class="stonemixPaletteItem" role="img" style="background-image:url('assets/stonemix_palette/stonemix_palette_11.webp')"></div>
+<div aria-label="Старый Крым графит" class="stonemixPaletteItem" role="img" style="background-image:url('assets/stonemix_palette/stonemix_palette_12.webp')"></div>
+<div aria-label="Кара-Даг" class="stonemixPaletteItem" role="img" style="background-image:url('assets/stonemix_palette/stonemix_palette_13.webp')"></div>
+<div aria-label="Ласпи" class="stonemixPaletteItem" role="img" style="background-image:url('assets/stonemix_palette/stonemix_palette_14.webp')"></div>
+<div aria-label="Старый Крым белый" class="stonemixPaletteItem" role="img" style="background-image:url('assets/stonemix_palette/stonemix_palette_15.webp')"></div>
+<div aria-label="Коктебель" class="stonemixPaletteItem" role="img" style="background-image:url('assets/stonemix_palette/stonemix_palette_16.webp')"></div>
+</div>
+</div>
+<img alt="ColorMix" class="colorTechImg" loading="lazy" src="assets/color_tech/2_colormix.png"/>
+<!-- ColorMix palette gallery -->
+<div class="colormixPaletteBlock">
+<div class="colormixPaletteTitle">Цветовая гамма Колормикс</div>
+<div aria-label="Цветовая гамма Колормикс (листайте)" class="colormixPaletteScroll">
+<div aria-label="Неаполь" class="colormixPaletteItem" role="img" style="background-image:url('assets/colormix_palette/colormix_palette_01.webp')"></div>
+<div aria-label="Коктебель" class="colormixPaletteItem" role="img" style="background-image:url('assets/colormix_palette/colormix_palette_02.webp')"></div>
+<div aria-label="Кара-Даг" class="colormixPaletteItem" role="img" style="background-image:url('assets/colormix_palette/colormix_palette_03.webp')"></div>
+<div aria-label="Ай-Петри" class="colormixPaletteItem" role="img" style="background-image:url('assets/colormix_palette/colormix_palette_04.webp')"></div>
+<div aria-label="Новый свет" class="colormixPaletteItem" role="img" style="background-image:url('assets/colormix_palette/colormix_palette_05.webp')"></div>
+<div aria-label="Солнечная долина" class="colormixPaletteItem" role="img" style="background-image:url('assets/colormix_palette/colormix_palette_06.webp')"></div>
+<div aria-label="Беляус" class="colormixPaletteItem" role="img" style="background-image:url('assets/colormix_palette/colormix_palette_07.webp')"></div>
+<div aria-label="Золотые ворота" class="colormixPaletteItem" role="img" style="background-image:url('assets/colormix_palette/colormix_palette_08.webp')"></div>
+<div aria-label="Форос" class="colormixPaletteItem" role="img" style="background-image:url('assets/colormix_palette/colormix_palette_09.webp')"></div>
+<div aria-label="Гурзуф" class="colormixPaletteItem" role="img" style="background-image:url('assets/colormix_palette/colormix_palette_10.webp')"></div>
+<div aria-label="Аю-Даг" class="colormixPaletteItem" role="img" style="background-image:url('assets/colormix_palette/colormix_palette_11.webp')"></div>
+<div aria-label="Херсонес" class="colormixPaletteItem" role="img" style="background-image:url('assets/colormix_palette/colormix_palette_12.webp')"></div>
+</div>
+</div>
+<img alt="Однотонная" class="colorTechImg" loading="lazy" src="assets/color_tech/3_monotone.png"/>
+<!-- Monotone palette gallery -->
+<div class="monotonePaletteBlock">
+<div class="monotonePaletteTitle">Цветовая гамма Однотонная</div>
+<div aria-label="Цветовая гамма Однотонная (листайте)" class="monotonePaletteScroll">
+<div aria-label="Терракот" class="monotonePaletteItem" role="img" style="background-image:url('assets/monotone_palette/monotone_palette_01.webp')"></div>
+<div aria-label="Красный" class="monotonePaletteItem" role="img" style="background-image:url('assets/monotone_palette/monotone_palette_02.webp')"></div>
+<div aria-label="Коричневый" class="monotonePaletteItem" role="img" style="background-image:url('assets/monotone_palette/monotone_palette_03.webp')"></div>
+<div aria-label="Жёлтый-яркий" class="monotonePaletteItem" role="img" style="background-image:url('assets/monotone_palette/monotone_palette_04.webp')"></div>
+<div aria-label="Светло-коричневый" class="monotonePaletteItem" role="img" style="background-image:url('assets/monotone_palette/monotone_palette_05.webp')"></div>
+<div aria-label="Белый" class="monotonePaletteItem" role="img" style="background-image:url('assets/monotone_palette/monotone_palette_06.webp')"></div>
+<div aria-label="Светло-серый" class="monotonePaletteItem" role="img" style="background-image:url('assets/monotone_palette/monotone_palette_07.webp')"></div>
+<div aria-label="Графит" class="monotonePaletteItem" role="img" style="background-image:url('assets/monotone_palette/monotone_palette_08.webp')"></div>
+<div aria-label="Жёлтый (горчичный)" class="monotonePaletteItem" role="img" style="background-image:url('assets/monotone_palette/monotone_palette_09.webp')"></div>
+<div aria-label="Черный" class="monotonePaletteItem" role="img" style="background-image:url('assets/monotone_palette/monotone_palette_10.webp')"></div>
+<div aria-label="Серые оттенки" class="monotonePaletteItem" role="img" style="background-image:url('assets/monotone_palette/monotone_palette_11.webp')"></div>
+<div aria-label="Красный яркий" class="monotonePaletteItem" role="img" style="background-image:url('assets/monotone_palette/monotone_palette_12.webp')"></div>
+</div>
+</div>
+</div>
+<div class="sectionTitle">Схемы укладки</div>
+<div class="layoutRow" id="layoutRow">
+<button class="layoutCard" data-layout="straight" type="button">
+<div class="layoutThumb" data-thumb="straight"></div>
+<div class="layoutLbl">Раскладка 1</div>
+</button>
+<button class="layoutCard" data-layout="diagonal" type="button">
+<div class="layoutThumb" data-thumb="diagonal"></div>
+<div class="layoutLbl">Раскладка 2</div>
+</button>
+</div>
+<div class="sectionTitle">Выберите цвет и жмите на кнопку</div>
+<div class="swatchRow" id="colorRow"></div>
+</div>
+</div>
+<footer class="detailCta">
+<button class="btnPrimary" id="btnViewAR" type="button"><span class="btnPrimaryText">Магия Актив Групп</span><img alt="Актив Групп" class="btnPrimaryLogo" src="assets/ui/active_group_logo.png"/></button>
+</footer>
+</section>
+<!-- Экран 3: AR -->
+<section aria-label="AR" class="screen" hidden="" id="screenAR">
+<header class="arTop">
+<button aria-label="Назад" class="backText" id="btnArBack">«</button>
+<div class="arTopText">
+<div class="arTitle" id="arProductTitle">—</div>
+<div class="arArea" id="arArea">—</div>
+</div>
+<button aria-label="Сброс" class="iconCircle" id="btnArReset">↻</button>
+</header>
+<!-- Подсказка сканирования -->
+<div class="scanHint" id="scanHint">
+<div class="scanTitle">СКАНИРУЙТЕ ПОВЕРХНОСТЬ</div>
+<div class="scanText">
           Плавно двигайте телефон влево-вправо и направляйте камеру на пол.
           Разметка работает после фиксации плоскости.
         </div>
-      </div>
-
-      <!-- Подсказка выставления контура (показывается после сканирования до замыкания фигуры) -->
-      <div id="contourHint" class="contourHint" hidden>
-        <div class="contourHintText">Поставьте контур: добавляйте точки кнопкой «＋» и замкните фигуру у первой точки.</div>
-      </div>
-      <!-- Debug overlay (включается ?debugAR=1) -->
-      <div id="arDebugOverlay" class="arDebugOverlay" hidden aria-hidden="true"></div>
-
-
-      <!-- Слой меток расстояний -->
-      <div id="measureLayer" class="measureLayer" aria-hidden="true"></div>
-
-      <!-- Основные кнопки разметки -->
-      <div id="arBottomCenter" class="arBottomCenter">
-        <button id="btnArAdd" class="fabPlus" type="button" aria-label="Добавить точку">＋</button>
-        <button id="btnArOk" class="fabOk" type="button" aria-label="ОК" hidden>OK</button>
-      </div>
-
-      <!-- Шаг после замыкания: редактирование/вырез/готово -->
-      <div id="postCloseBar" class="postCloseBar" hidden>
-        <div class="postCloseTitle">Следующий шаг</div>
-        <div class="postCloseBtns">
-          <button id="btnEditShape" class="btnGhost" type="button">Изменить форму</button>
-          <button id="btnCutout" class="btnGhost" type="button">Сделать вырез</button>
-        </div>
-        <button id="btnDone" class="btnPrimaryWide" type="button">Готово</button>
-      </div>
-
-      <!-- Нижняя панель после визуализации -->
-      <div id="finalBar" class="finalBar" hidden>
-        <div class="finalPatterns" id="finalPatterns">
-          <button id="btnLayoutCycle" class="patternTab" type="button">Смена укладки</button>
-          <button id="btnShapePicker" class="patternTab" type="button">Выбрать форму</button>
-        </div>
-        <div id="texLoadBarWrap" class="texLoadBarWrap" hidden aria-hidden="true">
-          <div id="texLoadBar" class="texLoadBar"></div>
-        </div>
-        <div class="finalColors" id="finalColors"></div>
-      </div>
-
-      <!-- Тех. элементы (скрыто) -->
-      <select id="layoutSelect" class="hidden" aria-hidden="true">
-        <option value="straight">Прямая</option>
-        <option value="diagonal">Диагональ 45°</option>
-      </select>
-
-      <label id="toggleOcclusionWrap" class="hidden" aria-hidden="true">
-        <input type="checkbox" id="toggleOcclusion" />
-      </label>
-
-      <!-- Shape picker (AR) -->
-      <div id="shapePickerBackdrop" class="shapePickerBackdrop" hidden></div>
-      <aside id="shapePickerPanel" class="shapePickerPanel" hidden>
-        <div class="shapePickerHeader">Формы</div>
-        <div id="shapePickerList" class="shapePickerList"></div>
-      </aside>
-
-    </section>
-
-  </div>
-
-  <script>
+</div>
+<!-- Подсказка выставления контура (показывается после сканирования до замыкания фигуры) -->
+<div class="contourHint" hidden="" id="contourHint">
+<div class="contourHintText">Поставьте контур: добавляйте точки кнопкой «＋» и замкните фигуру у первой точки.</div>
+</div>
+<!-- Debug overlay (включается ?debugAR=1) -->
+<div aria-hidden="true" class="arDebugOverlay" hidden="" id="arDebugOverlay"></div>
+<!-- Слой меток расстояний -->
+<div aria-hidden="true" class="measureLayer" id="measureLayer"></div>
+<!-- Основные кнопки разметки -->
+<div class="arBottomCenter" id="arBottomCenter">
+<button aria-label="Добавить точку" class="fabPlus" id="btnArAdd" type="button">＋</button>
+<button aria-label="ОК" class="fabOk" hidden="" id="btnArOk" type="button">OK</button>
+</div>
+<!-- Шаг после замыкания: редактирование/вырез/готово -->
+<div class="postCloseBar" hidden="" id="postCloseBar">
+<div class="postCloseTitle">Следующий шаг</div>
+<div class="postCloseBtns">
+<button class="btnGhost" id="btnEditShape" type="button">Изменить форму</button>
+<button class="btnGhost" id="btnCutout" type="button">Сделать вырез</button>
+</div>
+<button class="btnPrimaryWide" id="btnDone" type="button">Готово</button>
+</div>
+<!-- Нижняя панель после визуализации -->
+<div class="finalBar" hidden="" id="finalBar">
+<div class="finalPatterns" id="finalPatterns">
+<button class="patternTab" id="btnLayoutCycle" type="button">Смена укладки</button>
+<button class="patternTab" id="btnShapePicker" type="button">Выбрать форму</button>
+</div>
+<div aria-hidden="true" class="texLoadBarWrap" hidden="" id="texLoadBarWrap">
+<div class="texLoadBar" id="texLoadBar"></div>
+</div>
+<div class="finalColors" id="finalColors"></div>
+</div>
+<!-- Тех. элементы (скрыто) -->
+<select aria-hidden="true" class="hidden" id="layoutSelect">
+<option value="straight">Прямая</option>
+<option value="diagonal">Диагональ 45°</option>
+</select>
+<label aria-hidden="true" class="hidden" id="toggleOcclusionWrap">
+<input id="toggleOcclusion" type="checkbox"/>
+</label>
+<!-- Shape picker (AR) -->
+<div class="shapePickerBackdrop" hidden="" id="shapePickerBackdrop"></div>
+<aside class="shapePickerPanel" hidden="" id="shapePickerPanel">
+<div class="shapePickerHeader">Формы</div>
+<div class="shapePickerList" id="shapePickerList"></div>
+</aside>
+</section>
+</div>
+<script>
   (function () {
     const splash = document.getElementById('splashScreen');
     if (!splash) return;
@@ -278,8 +254,6 @@
   })();
 </script>
 <script src="js/sw-register.js"></script>
-  <script type="module" src="js/app.js"></script>
-
-
+<script src="js/app.js" type="module"></script>
 </body>
 </html>

@@ -776,3 +776,19 @@ to   { transform: scale(1.12); }
   border-color: rgba(90, 167, 255, 0.85);
   box-shadow: 0 0 0 2px rgba(90, 167, 255, 0.28);
 }
+
+
+/* Conversion block replacing technical parameters (detail screen only) */
+#detailTechCard .convBody{display:flex;flex-direction:column;gap:12px;padding:12px;}
+#detailTechCard .convBtn{display:flex;align-items:center;gap:10px;padding:14px 16px;border-radius:14px;text-decoration:none;user-select:none;-webkit-tap-highlight-color:transparent;}
+#detailTechCard .convIcon{width:24px;height:24px;flex:0 0 24px;opacity:0.95;}
+#detailTechCard .convText{font-weight:700;line-height:1.1;letter-spacing:0.1px;}
+#detailTechCard .convPrimary{background:rgba(33,150,243,0.55);color:#fff;}
+#detailTechCard .convPrimary:hover{background:rgba(33,150,243,0.68);}
+#detailTechCard .convSecondary{background:rgba(0,0,0,0.35);color:#fff;}
+#detailTechCard .convSecondary:hover{background:rgba(0,0,0,0.5);}
+
+#detailTechCard .convBtnPrimary{background:rgba(33,150,243,0.55);color:#fff;}
+#detailTechCard .convBtnPrimary:hover{background:rgba(33,150,243,0.68);}
+#detailTechCard .convBtnSecondary{background:rgba(0,0,0,0.35);color:#fff;}
+#detailTechCard .convBtnSecondary:hover{background:rgba(0,0,0,0.5);}
