@@ -39,20 +39,6 @@ const DEBUG_AR_ENABLED = (() => {
   }
 })();
 
-// Query flag helper (truthy/falsey). We keep feature flags ONLY for debug sessions.
-function readBoolQueryFlag(name, defaultValue = false) {
-  try {
-    const q = new URLSearchParams(window.location.search);
-    if (!q.has(name)) return defaultValue;
-    const v = (q.get(name) || '').trim().toLowerCase();
-    if (v === '' || v === '1' || v === 'true' || v === 'yes' || v === 'on') return true;
-    if (v === '0' || v === 'false' || v === 'no' || v === 'off') return false;
-    return defaultValue;
-  } catch (_) {
-    return defaultValue;
-  }
-}
-
 // Plane refinement flag: enable with ?planeRefine=1, disable with ?planeRefine=0. Default: enabled.
 const PLANE_REFINE_ENABLED = (() => {
   try {
@@ -67,17 +53,52 @@ const PLANE_REFINE_ENABLED = (() => {
   }
 })();
 
-// Floor Lock 2.0: internal debug-only toggle. Never affects the main product URL.
-const FLOOR_LOCK2_ENABLED = DEBUG_AR_ENABLED && readBoolQueryFlag('lock2', false);
+// Floor Lock 2.0 (experimental): enable with ?lock2=1
+// Goal: keep contour/fill maximally "nailed" to the floor plane (reduce hover) and improve tracking stability.
+const FLOOR_LOCK2_ENABLED = (() => {
+  try {
+    const q = new URLSearchParams(window.location.search);
+    if (!q.has('lock2')) return false;
+    const v = (q.get('lock2') || '').trim().toLowerCase();
+    if (v === '' || v === '1' || v === 'true' || v === 'yes' || v === 'on') return true;
+    if (v === '0' || v === 'false' || v === 'no' || v === 'off') return false;
+    return true;
+  } catch (_) {
+    return false;
+  }
+})();
 
-// World Lock via WebXR Anchors API: internal debug-only toggle. Never affects the main product URL.
-const WORLD_ANCHORS_ENABLED = DEBUG_AR_ENABLED && readBoolQueryFlag('anchors', false);
+// World Lock via WebXR Anchors API (experimental): enable with ?anchors=1
+// Notes:
+// - Works only if the browser implements Anchors API.
+// - Must NOT affect default flow when disabled.
+const WORLD_ANCHORS_ENABLED = (() => {
+  try {
+    const q = new URLSearchParams(window.location.search);
+    if (!q.has('anchors')) return false;
+    const v = (q.get('anchors') || '').trim().toLowerCase();
+    if (v === '' || v === '1' || v === 'true' || v === 'yes' || v === 'on') return true;
+    if (v === '0' || v === 'false' || v === 'no' || v === 'off') return false;
+    return true;
+  } catch (_) {
+    return false;
+  }
+})();
 
-// Atomic Texture Apply: now DEFAULT in the product.
-// For debug sessions it can be disabled with ?debugAR=1&atomicTex=0.
-const ATOMIC_TEX_ENABLED = DEBUG_AR_ENABLED
-  ? readBoolQueryFlag('atomicTex', true)
-  : true;
+// Atomic Texture Apply (experimental): enable with ?atomicTex=1
+// Goal: avoid "pale first fill" by ensuring the floor mesh becomes visible only after core maps are ready.
+const ATOMIC_TEX_ENABLED = (() => {
+  try {
+    const q = new URLSearchParams(window.location.search);
+    if (!q.has('atomicTex')) return false;
+    const v = (q.get('atomicTex') || '').trim().toLowerCase();
+    if (v === '' || v === '1' || v === 'true' || v === 'yes' || v === 'on') return true;
+    if (v === '0' || v === 'false' || v === 'no' || v === 'off') return false;
+    return true;
+  } catch (_) {
+    return false;
+  }
+})();
 
 // ------------------------
 // UI
@@ -2634,12 +2655,7 @@ async function startAR() {
 
   const sessionInit = {
     requiredFeatures: ['hit-test', 'dom-overlay'],
-    // Keep the main product XR session minimal and stable.
-    // Anchors are requested ONLY in debug sessions when explicitly enabled.
-    optionalFeatures: [
-      ...(WORLD_ANCHORS_ENABLED ? ['anchors'] : []),
-      ...(canRequestDepth ? ['depth-sensing'] : []),
-    ],
+    optionalFeatures: ['anchors', ...(canRequestDepth ? ['depth-sensing'] : [])],
     domOverlay: { root: UI.overlay },
     ...(canRequestDepth ? {
       depthSensing: {
@@ -3542,7 +3558,6 @@ function rebuildFill() {
 // Atomic Texture Apply (AR final):
 // When enabled, we hide the floor mesh until core shading maps are ready.
 // This avoids the "pale first fill" that happens when AR final starts before roughness/AO/normal are applied.
-let _atomicEnsureSeq = 0;
 async function atomicEnsureFinalMaterialReady() {
   try {
     if (!state || !state.atomicTexEnabled) return;
@@ -3559,11 +3574,6 @@ async function atomicEnsureFinalMaterialReady() {
     fillMesh.visible = false;
 
     const t = state.selectedTile;
-
-    // Staleness guard: if user switches tile/phase while we are loading, abort quietly.
-    const mySeq = ++_atomicEnsureSeq;
-    const isStale = () => (mySeq !== _atomicEnsureSeq) || (state.phase !== 'ar_final') || (!fillMesh) || (!tileMaterial) || (state.selectedTile !== t);
-
     const albedoUrl = (t.maps && t.maps.albedo) ? t.maps.albedo : t.texture;
     const normalUrl = (t.maps && t.maps.normal) ? t.maps.normal : null;
     const roughUrl  = (t.maps && t.maps.roughness) ? t.maps.roughness : null;
