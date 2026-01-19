@@ -125,6 +125,22 @@ function show(el, on = true) {
   else el.setAttribute('hidden', '');
 }
 
+// Patch 2 stable: lightweight hint used for commit gating (no new UI elements).
+function flashContourHint(msg, ms = 1100) {
+  try {
+    if (!UI || !UI.contourHint) return;
+    const el = UI.contourHint;
+    if (!el.dataset._origText) el.dataset._origText = el.textContent || '';
+    el.textContent = msg;
+    show(el, true);
+    window.clearTimeout(flashContourHint._t);
+    flashContourHint._t = window.setTimeout(() => {
+      // Restore original text; keep visibility as-is (do not break existing flow).
+      el.textContent = el.dataset._origText || el.textContent;
+    }, ms);
+  } catch (_) {}
+}
+
 function setActiveScreen(name) {
   const map = {
     catalog: UI.screenCatalog,
@@ -356,6 +372,13 @@ const state = {
     heightTolM: 0.05,
     heightTolMaxM: 0.08,
     minAngleDeg: 12,
+
+    // Commit gate (stability/UX): require the camera to be pitched towards the floor when adding a point.
+    // This reduces wall-targeting and the perceived far lift at very small view angles.
+    commitMinAngleNearDeg: 10,
+    commitMinAngleDeg: 12,
+    commitMinAngleFarDeg: 15,
+    commitFarDistM: 6.0,
 
     // Freeze logic
     freezeAngleDeg: 12,
@@ -2829,6 +2852,37 @@ function addPointFromReticle() {
   if (!state.xrSession) return;
   if (!state.floorLocked || state.phase === 'ar_scan') return;
   if (!reticle.visible) return;
+
+  // Commit gate: prevent adding points when the camera is too horizontal (high chance of aiming at walls / unstable far placement).
+  try {
+    const pr = state.planeRefine;
+    const viewAng = (pr && isFinite(pr.viewAngleDeg)) ? pr.viewAngleDeg : 90;
+
+    const xrCam = renderer.xr.getCamera(camera);
+    const cam = xrCam.cameras && xrCam.cameras.length ? xrCam.cameras[0] : xrCam;
+    const camPos = new THREE.Vector3();
+    cam.getWorldPosition(camPos);
+    const dx = reticle.position.x - camPos.x;
+    const dz = reticle.position.z - camPos.z;
+    const distXZ = Math.sqrt(dx*dx + dz*dz);
+
+    let minAng = (pr && pr.commitMinAngleDeg != null) ? pr.commitMinAngleDeg : 12;
+    const nearAng = (pr && pr.commitMinAngleNearDeg != null) ? pr.commitMinAngleNearDeg : 10;
+    const farAng = (pr && pr.commitMinAngleFarDeg != null) ? pr.commitMinAngleFarDeg : 15;
+    const farDist = (pr && pr.commitFarDistM != null) ? pr.commitFarDistM : 6.0;
+
+    if (distXZ <= 2.5) {
+      minAng = nearAng;
+    } else if (distXZ >= farDist) {
+      minAng = farAng;
+    }
+
+    if (viewAng < minAng) {
+      flashContourHint('Наклоните камеру на пол, чтобы поставить точку.', 1200);
+      return;
+    }
+  } catch (_) {}
+
   addPointAtWorld(reticle.position);
 }
 
@@ -3587,7 +3641,13 @@ function updateXR(frame) {
       reticleOk = true;
     } else {
       const t = (activeY - __tmpCamPos.y) / __tmpFwd.y;
-      if (t > 0.05 && t < 12.0) {
+      // Dynamic distance cap: at shallow view angles the ray/plane intersection becomes unreliable for far aiming.
+      // Keep the reticle responsive, but limit far placement unless the user is looking sufficiently down at the floor.
+      let maxT = 12.0;
+      if (viewAngleToPlane < 10) maxT = 6.0;
+      else if (viewAngleToPlane < 12) maxT = 8.0;
+      else if (viewAngleToPlane < 15) maxT = 10.0;
+      if (t > 0.05 && t < maxT) {
         reticle.position.copy(__tmpCamPos).addScaledVector(__tmpFwd, t);
         reticle.position.y = activeY;
         reticle.quaternion.set(0, 0, 0, 1);
