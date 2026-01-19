@@ -86,9 +86,8 @@ const WORLD_ANCHORS_ENABLED = (() => {
 })();
 
 // Atomic Texture Apply (experimental): enable with ?atomicTex=1
-// Goal: avoid the first-apply 'pale' look by applying albedo+shading maps atomically.
-// When enabled in AR final, the fill mesh is hidden until the full core map set is ready.
-const ATOMIC_TEX_APPLY_ENABLED = (() => {
+// Goal: avoid "pale first fill" by ensuring the floor mesh becomes visible only after core maps are ready.
+const ATOMIC_TEX_ENABLED = (() => {
   try {
     const q = new URLSearchParams(window.location.search);
     if (!q.has('atomicTex')) return false;
@@ -221,7 +220,7 @@ function updateArTopStripVar() {
 // ------------------------
 const _arTexProgress = { seq: 0, total: 0, done: 0, hideTimer: 0, showTimer: 0, shown: false, shownAt: 0 };
 
-function _arTexProgressShow(seq, total, opts = {}) {
+function _arTexProgressShow(seq, total) {
   try {
     if (!UI.texLoadBarWrap || !UI.texLoadBar) return;
 
@@ -241,9 +240,7 @@ function _arTexProgressShow(seq, total, opts = {}) {
     }
 
     // Delay UI to avoid flicker on fast texture switches.
-    // Default: show only if loading still in progress after 2s.
-    // When opts.forceImmediate is true (used by atomic apply), show immediately because the fill mesh is hidden.
-    const _delayMs = (opts && opts.forceImmediate) ? 0 : 2000;
+    // If loading still in progress after 2s, show progress bar with current progress.
     _arTexProgress.showTimer = setTimeout(() => {
       try {
         if (seq !== _arTexProgress.seq) return;
@@ -262,7 +259,26 @@ function _arTexProgressShow(seq, total, opts = {}) {
 
         updateArBottomStripVar();
       } catch (_) {}
-    }, _delayMs);
+    }, 2000);
+  } catch (_) {}
+}
+
+
+function _arTexProgressShowImmediate(seq, total) {
+  try {
+    _arTexProgressShow(seq, total);
+    if (!UI.texLoadBarWrap || !UI.texLoadBar) return;
+    // Cancel delayed show and show immediately.
+    if (_arTexProgress.showTimer) {
+      clearTimeout(_arTexProgress.showTimer);
+      _arTexProgress.showTimer = 0;
+    }
+    UI.texLoadBar.style.width = '0%';
+    UI.texLoadBarWrap.classList.add('is-visible');
+    show(UI.texLoadBarWrap, true);
+    _arTexProgress.shown = true;
+    _arTexProgress.shownAt = Date.now();
+    updateArBottomStripVar();
   } catch (_) {}
 }
 
@@ -354,10 +370,9 @@ const state = {
   // Patch: Floor Lock 2.0 + World Lock (anchors)
   floorLock2Enabled: FLOOR_LOCK2_ENABLED,
   worldAnchorsEnabled: WORLD_ANCHORS_ENABLED,
-
-  // Patch: Atomic Texture Apply (stable first-apply shading)
-  atomicTexApplyEnabled: ATOMIC_TEX_APPLY_ENABLED,
-  _atomicHiddenSeq: 0,
+  atomicTexEnabled: ATOMIC_TEX_ENABLED,
+  _atomicFinalEnsuring: false,
+  _atomicFinalEnsuredOnce: false,
   // Rolling reticle samples for gating (only used when floorLock2Enabled)
   _lock2ReticleSamples: [],
   _lock2LastGateMsgT: 0,
@@ -1571,18 +1586,9 @@ async function selectTile(tileOrId) {
 
   const _showTexProgress = state.phase === 'ar_final';
   const _texProgSeq = _showTexProgress ? (_arTexProgress.seq + 1) : 0;
-
-  // Atomic apply: in AR final we hide the fill mesh until core maps are ready,
-  // so show progress immediately to avoid a 'blank' moment.
-  const _atomicInAR = Boolean(state.atomicTexApplyEnabled && state.phase === 'ar_final' && fillMesh);
-  if (_atomicInAR) {
-    state._atomicHiddenSeq = _mySeq;
-    try { fillMesh.visible = false; } catch (_) {}
-  }
-
   if (_showTexProgress) {
-    const _total = [albedoUrl, roughUrl, aoUrl, normalUrl].filter(Boolean).length;
-    _arTexProgressShow(_texProgSeq, _total, { forceImmediate: _atomicInAR });
+    const _total = [albedoUrl, roughUrl, aoUrl].filter(Boolean).length;
+    _arTexProgressShow(_texProgSeq, _total);
   }
 
 
@@ -1597,7 +1603,6 @@ async function selectTile(tileOrId) {
     albedoP.finally(() => _arTexProgressTick(_texProgSeq));
     roughP.finally(() => _arTexProgressTick(_texProgSeq));
     aoP.finally(() => _arTexProgressTick(_texProgSeq));
-    normalP.finally(() => _arTexProgressTick(_texProgSeq));
   }
 
 
@@ -1608,11 +1613,6 @@ async function selectTile(tileOrId) {
   if (!albedoTex) {
     console.warn('[surfaces] albedo missing, keeping previous material for stability:', albedoUrl);
     state.selectedTile = _prevTile || state.selectedTile;
-    // If atomic mode hid the fill mesh, restore visibility for the current (non-stale) selection.
-    if (state._atomicHiddenSeq === _mySeq && fillMesh) {
-      try { fillMesh.visible = true; } catch (_) {}
-      state._atomicHiddenSeq = 0;
-    }
     return;
   }
 
@@ -1658,25 +1658,18 @@ let aoTexCore = null;
 let normalTex = null;
 
 if (state && state.phase === 'ar_final') {
-  // In AR final, we keep shading stable.
-  // When atomic apply is enabled, wait for the full core set (roughness + AO when present + normal)
-  // before revealing the fill mesh, so the first visible frame is already correct.
-
+  // Wait for roughness fully (no short timeout). If the file truly doesn't exist, the loader resolves null quickly.
   roughTex = await roughP;
   if (isStale()) return;
 
+  // AO strongly affects perceived brightness. If AO is present in the palette, wait for it too.
   aoTexCore = await aoP;
   if (isStale()) return;
 
-  if (state.atomicTexApplyEnabled) {
-    normalTex = await normalP;
-    if (isStale()) return;
-  } else {
-    // Normal can lag behind; we keep it opportunistic to preserve snappy switching.
-    const normalR = await _withTimeout(normalP, 350);
-    if (isStale()) return;
-    normalTex = normalR.ok ? normalR.v : null;
-  }
+  // Normal can lag behind; we keep it opportunistic to preserve snappy switching.
+  const normalR = await _withTimeout(normalP, 350);
+  if (isStale()) return;
+  normalTex = normalR.ok ? normalR.v : null;
 } else {
   // Non-AR (detail / desktop) stays responsive: short waits.
   const _coreWaitMs = 260;
@@ -1727,13 +1720,7 @@ if (state && state.phase === 'ar_final') {
   // - In AR final: premium in-shader crossfade (no transparency/depth side effects).
   // - Elsewhere: apply immediately.
   if (state.phase === 'ar_final') {
-    if (state.atomicTexApplyEnabled) {
-      // Atomic apply: the fill mesh is hidden until core maps are ready, so apply immediately.
-      applyMapToTileMaterial(mat, 'albedo', albedoTex);
-    } else {
-      // Premium in-shader crossfade (no transparency/depth side effects).
-      crossfadeAlbedoOnMaterial(mat, albedoTex, 140);
-    }
+    crossfadeAlbedoOnMaterial(mat, albedoTex, 140);
   } else {
     applyMapToTileMaterial(mat, 'albedo', albedoTex);
   }
@@ -1742,12 +1729,6 @@ if (state && state.phase === 'ar_final') {
   if (fillMesh) {
     fillMesh.material = mat;
     fillMesh.material.needsUpdate = true;
-  }
-
-  // Atomic apply: reveal the fill mesh only after core maps + albedo have been applied.
-  if (state.phase === 'ar_final' && state.atomicTexApplyEnabled && state._atomicHiddenSeq === _mySeq && fillMesh) {
-    try { fillMesh.visible = true; } catch (_) {}
-    state._atomicHiddenSeq = 0;
   }
 
   // Update UI hero/title selections.
@@ -3203,6 +3184,7 @@ function addPointAtWorld(worldPos) {
   rebuildFill();
   updateAreaUI();
 
+
   if (state.points.length >= 3) show(UI.btnArOk, true);
 }
 
@@ -3572,6 +3554,83 @@ function rebuildFill() {
   fillMesh.renderOrder = 2;
   anchorGroup.add(fillMesh);
 }
+
+// Atomic Texture Apply (AR final):
+// When enabled, we hide the floor mesh until core shading maps are ready.
+// This avoids the "pale first fill" that happens when AR final starts before roughness/AO/normal are applied.
+async function atomicEnsureFinalMaterialReady() {
+  try {
+    if (!state || !state.atomicTexEnabled) return;
+    if (state.phase !== 'ar_final') return;
+    if (!fillMesh || !tileMaterial || !state.selectedTile) return;
+    if (state._atomicFinalEnsuring) return;
+
+    // If we've already ensured once for this session and the mesh is visible, don't block.
+    if (state._atomicFinalEnsuredOnce && fillMesh.visible) return;
+
+    state._atomicFinalEnsuring = true;
+
+    // Hide fill until ready.
+    fillMesh.visible = false;
+
+    const t = state.selectedTile;
+    const albedoUrl = (t.maps && t.maps.albedo) ? t.maps.albedo : t.texture;
+    const normalUrl = (t.maps && t.maps.normal) ? t.maps.normal : null;
+    const roughUrl  = (t.maps && t.maps.roughness) ? t.maps.roughness : null;
+    const aoUrl     = (t.maps && t.maps.ao) ? t.maps.ao : null;
+
+
+    const preferredQuality = getPreferredSurfaceQuality({ inAR: true });
+
+    // Show progress immediately (we are intentionally hiding the mesh).
+    const seq = _arTexProgress.seq + 1;
+    const total = Math.max(1, [albedoUrl, roughUrl, aoUrl, normalUrl].filter(Boolean).length);
+    _arTexProgressShowImmediate(seq, total);
+
+    const jobs = [];
+    const addJob = (kind, url) => {
+      if (!url) return Promise.resolve(null);
+      const pr = loadTexSmartCached(url, kind, preferredQuality, isStale, { priority: 'high' });
+      jobs.push(pr);
+      pr.finally(() => _arTexProgressTick(seq));
+      return pr;
+    };
+
+
+    const albedoP = addJob('albedo', albedoUrl);
+    const roughP  = addJob('roughness', roughUrl);
+    const aoP     = addJob('ao', aoUrl);
+    const normalP = addJob('normal', normalUrl);
+
+    const [albedoTex, roughTex, aoTex, normalTex] = await Promise.all([albedoP, roughP, aoP, normalP]);
+    if (isStale()) return;
+
+    // Ensure we have a valid albedo (critical). If missing, keep hidden to avoid broken white fill.
+    const albedoFinal = albedoTex || getFallbackWhiteTex();
+
+    // Apply maps atomically.
+    applyMapToTileMaterial(tileMaterial, 'roughness', roughTex || null);
+    applyMapToTileMaterial(tileMaterial, 'ao', aoTex || null);
+    applyMapToTileMaterial(tileMaterial, 'normal', normalTex || null);
+    applyMapToTileMaterial(tileMaterial, 'height', null);
+
+    // IMPORTANT: avoid first-apply crossfade from placeholder; set albedo directly.
+    applyMapToTileMaterial(tileMaterial, 'albedo', albedoFinal);
+
+    fillMesh.material = tileMaterial;
+    fillMesh.material.needsUpdate = true;
+
+    // Show fill only after maps are applied.
+    fillMesh.visible = true;
+    state._atomicFinalEnsuredOnce = true;
+  } catch (e) {
+    console.warn('[AR] atomicEnsureFinalMaterialReady failed:', e);
+    try { if (fillMesh) fillMesh.visible = true; } catch (_) {}
+  } finally {
+    try { state._atomicFinalEnsuring = false; } catch (_) {}
+  }
+}
+
 
 // ------------------------
 // Measurements overlay
@@ -4284,7 +4343,7 @@ UI.btnCutout?.addEventListener('click', () => {
   if (UI.measureLayer) UI.measureLayer.style.display = 'block';
 });
 
-UI.btnDone?.addEventListener('click', () => {
+UI.btnDone?.addEventListener('click', async () => {
   state.phase = 'ar_final';
   show(UI.contourHint, false);
   show(UI.postCloseBar, false);
@@ -4301,6 +4360,11 @@ UI.btnDone?.addEventListener('click', () => {
 
   rebuildFill();
   updateAreaUI();
+
+  // Atomic Texture Apply (optional): hide fill until core maps are ready (fixes "pale first fill").
+  if (state.atomicTexEnabled) {
+    await atomicEnsureFinalMaterialReady();
+  }
 
   // Build bottom controls (layout): single cycle button
   state.layoutCycleInitial = state.layout;
