@@ -257,8 +257,9 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   padding: 0 18px;
   border: none;
   border-radius: 14px;
-  background: rgb(78,118,137); /* #4E7689 */
-  color: #083344;
+  /* Match "Связь с менеджером" CTA color */
+  background: rgba(90, 170, 255, 0.65);
+  color: #ffffff;
   font-size: 16px;
   font-weight: 700;
   cursor: pointer;
@@ -805,6 +806,8 @@ to   { transform: scale(1.12); }
   background:rgba(0,0,0,0.46);
 }
 #detailTechCard .convBtn.convPrimary{
+  /* Give primary CTA a bit more width so the full label fits */
+  flex:1.65 1 0;
   background:rgba(90, 170, 255, 0.65);
 }
 #detailTechCard .convBtn.convPrimary:active,
@@ -814,13 +817,15 @@ to   { transform: scale(1.12); }
 #detailTechCard .convIcon{width:20px;height:20px;flex:0 0 20px;}
 #detailTechCard .convText{
   font-weight:700;
-  font-size:14px;
+  /* Responsive sizing: keep on one line without truncation */
+  font-size:clamp(12px, 3.4vw, 14px);
   line-height:1.05;
   white-space:nowrap;
   overflow:hidden;
-  text-overflow:ellipsis;
+  text-overflow:clip;
 }
 @media (max-width: 360px){
-  #detailTechCard .convText{font-size:13px;}
+  #detailTechCard .convBody{gap:8px;}
   #detailTechCard .convBtn{padding:11px 8px;}
+  #detailTechCard .convIcon{width:18px;height:18px;flex:0 0 18px;}
 }
