@@ -53,63 +53,6 @@ const PLANE_REFINE_ENABLED = (() => {
   }
 })();
 
-// Patch 7: UX + feature flags
-// - AR hints enabled by default; disable with ?arHints=0
-// - Coverage grid enabled by default; disable with ?coverage=0
-// - Multi-sample commit enabled by default; disable with ?multiSample=0
-// - Fill lock enabled by default; disable with ?fillLock=0
-const AR_HINTS_ENABLED = (() => {
-  try {
-    const q = new URLSearchParams(window.location.search);
-    if (!q.has('arHints')) return true;
-    const v = (q.get('arHints') || '').trim().toLowerCase();
-    if (v === '' || v === '1' || v === 'true' || v === 'yes' || v === 'on') return true;
-    if (v === '0' || v === 'false' || v === 'no' || v === 'off') return false;
-    return true;
-  } catch (_) {
-    return true;
-  }
-})();
-
-const COVERAGE_ENABLED = (() => {
-  try {
-    const q = new URLSearchParams(window.location.search);
-    if (!q.has('coverage')) return true;
-    const v = (q.get('coverage') || '').trim().toLowerCase();
-    if (v === '' || v === '1' || v === 'true' || v === 'yes' || v === 'on') return true;
-    if (v === '0' || v === 'false' || v === 'no' || v === 'off') return false;
-    return true;
-  } catch (_) {
-    return true;
-  }
-})();
-
-const MULTISAMPLE_ENABLED = (() => {
-  try {
-    const q = new URLSearchParams(window.location.search);
-    if (!q.has('multiSample')) return true;
-    const v = (q.get('multiSample') || '').trim().toLowerCase();
-    if (v === '' || v === '1' || v === 'true' || v === 'yes' || v === 'on') return true;
-    if (v === '0' || v === 'false' || v === 'no' || v === 'off') return false;
-    return true;
-  } catch (_) {
-    return true;
-  }
-})();
-
-const FILL_LOCK_ENABLED = (() => {
-  try {
-    const q = new URLSearchParams(window.location.search);
-    if (!q.has('fillLock')) return true;
-    const v = (q.get('fillLock') || '').trim().toLowerCase();
-    if (v === '' || v === '1' || v === 'true' || v === 'yes' || v === 'on') return true;
-    if (v === '0' || v === 'false' || v === 'no' || v === 'off') return false;
-    return true;
-  } catch (_) {
-    return true;
-  }
-})();
-
 // ------------------------
 // UI
 // ------------------------
@@ -174,7 +117,6 @@ const UI = {
   // Hidden tech
   layoutSelect: document.getElementById('layoutSelect'),
   toggleOcclusion: document.getElementById('toggleOcclusion'),
-
 };
 
 function show(el, on = true) {
@@ -378,58 +320,6 @@ const state = {
   reticleVisible: false,
   snapArmed: false,
 
-  // Patch 2.1: commit gating for contour points
-  canCommitPoint: false,
-  reticleMode: 'none',
-  viewAngleToPlane: 0,
-
-  // Reticle stabilization (Patch 2.2.1): reduces sudden jumps while aiming
-  reticleStab: {
-    enabled: true,
-    pos: null,
-    lastMode: "none",
-    modeHoldUntil: 0,
-    lastHitOkUntil: 0,
-
-    // Camera motion tracking (used to avoid "laggy" reticle while panning)
-    lastT: 0,
-    prevCamPos: null,
-    prevCamQuat: null,
-
-    // Adaptive smoothing (steady camera => smooth; moving camera => snap)
-    alphaStill: 0.22,
-    alphaMove: 0.95,
-    snapMotion: 0.80,
-    deadbandM: 0.01,
-
-    // Outlier handling: ignore big jumps when the camera is steady, but accept quickly if consistent
-    outlierMotionMax: 0.35,
-    outlierAcceptN: 3,
-    outlierAlpha: 0.35,
-    _outlierN: 0,
-
-    // Motion normalizers
-    motionAngNorm: 2.5, // rad/s
-    motionPosNorm: 1.5, // m/s
-
-    history: [],
-    maxHistoryMs: 350,
-    emaNear: 0.35,
-    emaFar: 0.18,
-    jumpRejectNearM: 0.25,
-    jumpRejectFarM: 0.60,
-    holdOnModeChangeMs: 140,
-    hitLatchMs: 180,
-  },
-
-  // Patch 7: AR hint throttling (uses existing contourHint UI)
-  arHints: {
-    enabled: AR_HINTS_ENABLED,
-    shownAfterLock: false,
-    lastFlashT: 0,
-    cooldownMs: 900,
-  },
-
   points: /** @type {THREE.Vector3[]} */ ([]),
   holes: /** @type {THREE.Vector3[][]} */ ([]),
   holePoints: /** @type {THREE.Vector3[]} */ ([]),
@@ -477,156 +367,14 @@ const state = {
     framesT: [],
     validT: [],
 
-    // Drift control (Patch 5)
-    lastValidHitT: 0,
-    degraded: false,
-    degradeAfterMs: 800,
-    degradeHoldMs: 500,
-
-    // Plane Y velocity limits (cm/s)
-    maxDownCms: 5.0,
-    maxUpCms: 1.0,
-
     // Status (useful for debug overlay)
     viewAngleDeg: NaN,
     validHit: false,
     frozen: false,
   },
 
-
-// Coverage / confidence grid (Patch 3): tracks scanned floor areas to make far placement predictable
-coverageGrid: {
-  enabled: COVERAGE_ENABLED,
-  // grid parameters
-  cellSizeM: 0.65,
-  radiusM: 15.0,
-
-  // decay / freshness
-  halfLifeMs: 10000,
-  staleMs: 20000,
-
-  // sampling cadence
-  sampleIntervalMs: 100,
-  lastSampleT: 0,
-
-  // origin of the grid (set at floor lock)
-  originX: 0,
-  originZ: 0,
-  lockedT: 0,
-  warmupMs: 1200,
-
-  // storage: key -> {c,lastT}
-  cells: new Map(),
-
-  // last evaluation (debug)
-  last: { zone: 'none', score: 0, c: 0, ageMs: 0, reqRed: 0, reqGreen: 0 },
-},
-
-// Current confidence zone for committing points: none|red|yellow|green
-commitZone: 'none',
-
 };
 
-
-
-// ------------------------
-// Coverage / confidence grid helpers (Patch 3)
-// ------------------------
-function _covResetAt(x, z) {
-  try {
-    const cg = state.coverageGrid;
-    if (!cg || !cg.enabled) return;
-    cg.cells = new Map();
-    cg.originX = isFinite(x) ? x : 0;
-    cg.originZ = isFinite(z) ? z : 0;
-    cg.lastSampleT = 0;
-    cg.lockedT = performance.now();
-    cg.last = { zone: 'none', score: 0, c: 0, ageMs: 0, reqRed: 0, reqGreen: 0 };
-    state.commitZone = 'none';
-  } catch (_) {}
-}
-
-function _covKey(ix, iz) {
-  return ix + ',' + iz;
-}
-
-function _covAddSample(x, z, nowT) {
-  try {
-    const cg = state.coverageGrid;
-    if (!cg || !cg.enabled) return;
-    if (!isFinite(x) || !isFinite(z)) return;
-    const interval = cg.sampleIntervalMs || 100;
-    if (nowT - (cg.lastSampleT || 0) < interval) return;
-    cg.lastSampleT = nowT;
-
-    const cs = cg.cellSizeM || 0.65;
-    const dx = x - (cg.originX || 0);
-    const dz = z - (cg.originZ || 0);
-    const r = Math.hypot(dx, dz);
-    if (r > (cg.radiusM || 15)) return;
-
-    const ix = Math.floor(dx / cs);
-    const iz = Math.floor(dz / cs);
-    const key = _covKey(ix, iz);
-    let cell = cg.cells.get(key);
-    if (!cell) {
-      cell = { c: 0, lastT: nowT };
-      cg.cells.set(key, cell);
-    }
-
-    const half = cg.halfLifeMs || 10000;
-    const age = Math.max(0, nowT - (cell.lastT || nowT));
-    if (age > 0 && isFinite(half) && half > 0) {
-      const decay = Math.exp(-age / half);
-      cell.c = cell.c * decay;
-    }
-
-    cell.c = (cell.c || 0) + 1;
-    cell.lastT = nowT;
-  } catch (_) {}
-}
-
-function _covEvalZone(x, z, nowT, distM) {
-  const cg = state.coverageGrid;
-  if (!cg || !cg.enabled) return { zone: 'none', score: 0, c: 0, ageMs: 0, reqRed: 0, reqGreen: 0 };
-  if (!isFinite(x) || !isFinite(z)) return { zone: 'none', score: 0, c: 0, ageMs: 0, reqRed: 0, reqGreen: 0 };
-
-  const cs = cg.cellSizeM || 0.65;
-  const dx = x - (cg.originX || 0);
-  const dz = z - (cg.originZ || 0);
-  const r = Math.hypot(dx, dz);
-  if (r > (cg.radiusM || 15)) return { zone: 'red', score: 0, c: 0, ageMs: 1e9, reqRed: 0, reqGreen: 0 };
-
-  const ix = Math.floor(dx / cs);
-  const iz = Math.floor(dz / cs);
-  const key = _covKey(ix, iz);
-  const cell = cg.cells.get(key);
-  const c = cell ? (cell.c || 0) : 0;
-  const ageMs = cell ? Math.max(0, nowT - (cell.lastT || nowT)) : 1e9;
-
-  const staleMs = cg.staleMs || 20000;
-  const freshness = (ageMs >= staleMs) ? 0 : Math.max(0, 1 - (ageMs / staleMs));
-
-  // Distance-based requirements (near -> far)
-  const d = isFinite(distM) ? distM : 0;
-  const t = d <= 3 ? 0 : (d >= 10 ? 1 : (d - 3) / 7);
-  const reqRed = 1 + 2 * t;    // 1 .. 3
-  const reqGreen = 3 + 5 * t;  // 3 .. 8
-
-  const norm = (reqGreen > 0) ? Math.min(1, c / reqGreen) : 0;
-  const score = norm * freshness;
-
-  let zone = 'red';
-  if (score >= 0.70 && c >= reqGreen) {
-    zone = 'green';
-  } else if (score >= 0.33 && c >= reqRed) {
-    zone = 'yellow';
-  } else {
-    zone = 'red';
-  }
-
-  return { zone, score, c, ageMs, reqRed, reqGreen };
-}
 
 // ------------------------
 // Texture loading limiter (prevents spikes when user rapidly switches textures)
@@ -1130,32 +878,6 @@ const pointsGroup = new THREE.Group();
 anchorGroup.add(pointsGroup);
 let line = null;
 let fillMesh = null;
-
-// Patch 6: lock filled mesh transform after final fill (prevents perceived drift from any later plane updates)
-let __fillLocked = false;
-let __fillLockedMatrix = null;
-
-function lockFillMeshTransform() {
-  if (!fillMesh) { __fillLocked = false; __fillLockedMatrix = null; return; }
-  if (__fillLocked) return;
-  try {
-    fillMesh.updateMatrix();
-    fillMesh.matrixAutoUpdate = false;
-    fillMesh.matrixWorldNeedsUpdate = true;
-    __fillLockedMatrix = fillMesh.matrix.clone();
-    __fillLocked = true;
-  } catch (_) {}
-}
-
-function unlockFillMeshTransform() {
-  if (!fillMesh) { __fillLocked = false; __fillLockedMatrix = null; return; }
-  if (!__fillLocked) return;
-  try {
-    fillMesh.matrixAutoUpdate = true;
-  } catch (_) {}
-  __fillLocked = false;
-  __fillLockedMatrix = null;
-}
 
 // Materials
 let tileMaterial = null;
@@ -3032,32 +2754,11 @@ async function fullRestartAR() {
 // ------------------------
 // Floor lock + points
 // ------------------------
-let __contourHintOriginalText = null;
-let __contourHintTimer = 0;
-function flashContourHint(msg, ms = 1500) {
-  try {
-    const el = UI.contourHint;
-    if (!el) return;
-    if (__contourHintOriginalText == null) __contourHintOriginalText = el.textContent;
-    el.textContent = msg;
-    show(el, true);
-    if (__contourHintTimer) clearTimeout(__contourHintTimer);
-    __contourHintTimer = setTimeout(() => {
-      try {
-        if (__contourHintOriginalText != null) el.textContent = __contourHintOriginalText;
-      } catch (_) {}
-    }, ms);
-  } catch (_) {}
-}
-
 function ensureFloorLocked() {
   if (state.floorLocked) return;
   if (!reticle.visible) return;
   state.floorLocked = true;
   state.floorY = reticle.position.y;
-
-  // Patch 3: initialize coverage grid origin at floor lock
-  try { _covResetAt(reticle.position.x, reticle.position.z); } catch (_) {}
 
   // lock scanning grid to the floor (and then hide it — it is only for scanning)
   scanGrid.position.set(reticle.position.x, state.floorY + 0.001, reticle.position.z);
@@ -3073,16 +2774,6 @@ function ensureFloorLocked() {
     show(UI.contourHint, true);
   }
   state.phase = 'ar_draw';
-
-  // Patch 7: subtle onboarding hint about "doscanning" for дальние точки (one-time)
-  try {
-    const h = state.arHints;
-    if (h && h.enabled && !h.shownAfterLock) {
-      h.shownAfterLock = true;
-      h.lastFlashT = performance.now();
-      flashContourHint('Чтобы ставить точки дальше — досканируйте область, плавно ведя камерой по полу.', 2600);
-    }
-  } catch (_) {}
 }
 
 function addPointAtWorld(worldPos) {
@@ -3138,112 +2829,6 @@ function addPointFromReticle() {
   if (!state.xrSession) return;
   if (!state.floorLocked || state.phase === 'ar_scan') return;
   if (!reticle.visible) return;
-  // Require stable aiming (hit or short latch) and sufficient view angle.
-  if (!state.canCommitPoint) {
-    // Patch 7: avoid hint spam (especially when user taps repeatedly)
-    try {
-      const h = state.arHints;
-      const nowT = performance.now();
-      if (h && h.enabled) {
-        const cd = h.cooldownMs || 900;
-        if ((nowT - (h.lastFlashT || 0)) < cd) return;
-        h.lastFlashT = nowT;
-      }
-    } catch (_) {}
-    const minA = (state.planeRefine?.minAngleDeg || 12);
-    if ((state.viewAngleToPlane || 0) < minA) {
-      flashContourHint('Наклоните камеру вниз, чтобы прицелиться в пол.');
-    } else if (state.commitZone === 'red') {
-      flashContourHint('Досканируйте участок пола: медленно проведите камерой по полу в зоне, где хотите поставить точку.');
-    } else {
-      flashContourHint('Досканируйте пол, чтобы поставить точку стабильно на поверхности.');
-    }
-    return;
-  }
-
-  // Patch 4: multi-sample commit (distance + zone aware) to reduce jitter/outliers.
-  // We reuse the per-frame reticle history (already filtered/latched) to avoid extra hit-test load.
-  if (MULTISAMPLE_ENABLED) try {
-    const rs = state.reticleStab;
-    if (rs && rs.history && rs.history.length) {
-      const nowT = performance.now();
-      const minA = (state.planeRefine?.minAngleDeg || 12);
-      const last = rs.history[rs.history.length - 1];
-      const distXZ = (last && isFinite(last.distXZ)) ? last.distXZ : 0;
-
-      // Distance-adaptive window + minimum sample count.
-      // 0-5m: faster commit; 5-10m: more samples for stability.
-      const tD = (distXZ <= 5) ? 0 : (distXZ >= 10 ? 1 : (distXZ - 5) / 5);
-      let win = 200 + 140 * tD;     // 200 .. 340 ms
-      let minN = Math.round(7 + 6 * tD); // 7 .. 13
-      if (state.commitZone === 'yellow') { win += 60; minN += 3; }
-      if (state.commitZone === 'green') { /* default */ }
-
-      const xs = [];
-      const zs = [];
-      const pts = [];
-      const latchedOk = (rs.lastHitOkUntil || 0) > nowT;
-
-      for (let k = rs.history.length - 1; k >= 0; k--) {
-        const h = rs.history[k];
-        if (!h) continue;
-        const age = nowT - h.t;
-        if (age > win) break;
-        if (!(h.viewAngle >= minA)) continue;
-        // Prefer true hit-based samples. Latch allows a short grace window right after a valid hit.
-        if (!(h.usedHit || latchedOk)) continue;
-        // If we have validity info, prefer valid samples.
-        if (h.usedHit && h.validHit === false) continue;
-        pts.push(h);
-        xs.push(h.x);
-        zs.push(h.z);
-      }
-
-      const median = (arr) => {
-        const a = arr.slice().sort((p,q)=>p-q);
-        const m = (a.length / 2) | 0;
-        return a[m];
-      };
-
-      if (xs.length >= 5) {
-        let mx = median(xs);
-        let mz = median(zs);
-
-        // Outlier reject around the median (robust). Keeps commit responsive but prevents rare teleports.
-        const dists = pts.map(p => Math.hypot(p.x - mx, p.z - mz)).sort((a,b)=>a-b);
-        const mad = dists[(dists.length / 2) | 0] || 0;
-        // Threshold grows slightly with distance; never too small.
-        const baseThr = 0.06 + 0.20 * tD; // 6cm .. 26cm
-        const thr = Math.max(baseThr, 2.5 * mad);
-        const fxs = [];
-        const fzs = [];
-        for (let i = 0; i < pts.length; i++) {
-          const p = pts[i];
-          if (Math.hypot(p.x - mx, p.z - mz) <= thr) {
-            fxs.push(p.x);
-            fzs.push(p.z);
-          }
-        }
-        if (fxs.length >= 5) {
-          mx = median(fxs);
-          mz = median(fzs);
-        }
-
-        // If we don't have enough samples, still commit using the best estimate we have.
-        // But when we do have enough, commit becomes very stable.
-        if (xs.length >= minN || fxs.length >= minN) {
-          __tmpCommitPos.set(mx, reticle.position.y, mz);
-          addPointAtWorld(__tmpCommitPos);
-          return;
-        }
-        // Not enough samples yet: commit to median anyway (keeps UX snappy).
-        __tmpCommitPos.set(mx, reticle.position.y, mz);
-        addPointAtWorld(__tmpCommitPos);
-        return;
-      }
-    }
-  } catch (_) {}
-
   addPointAtWorld(reticle.position);
 }
 
@@ -3562,9 +3147,6 @@ function rebuildFill() {
     fillMesh = null;
   }
 
-  __fillLocked = false;
-  __fillLockedMatrix = null;
-
   const isClosed = state.closed && state.points.length >= 3;
   if (!isClosed) return;
 
@@ -3600,13 +3182,6 @@ function rebuildFill() {
   fillMesh = new THREE.Mesh(geom, mat);
   fillMesh.renderOrder = 2;
   anchorGroup.add(fillMesh);
-
-  // Patch 6 (flagged in Patch 7): lock transform in final phase so later plane refinement cannot visually move the filled area
-  if (state.phase === 'ar_final' && FILL_LOCK_ENABLED) {
-    lockFillMeshTransform();
-  } else {
-    unlockFillMeshTransform();
-  }
 }
 
 // ------------------------
@@ -3801,10 +3376,9 @@ function _arDebugUpdateOverlay() {
     const jitter = _arDebugJitter2D(jitterWin);
 
     const lines = [
-      `AR debug (Patch 7.5)`,
+      `AR debug (Patch 2)`,
       `state: ${_arDebugStateLabel()}`,
       `fps: ${_fmt(dbg.fps, 0)}`,
-      `motion: ${state.reticleStab && typeof state.reticleStab.lastMotion === 'number' ? _fmt(state.reticleStab.lastMotion, 2) : '—'}`,
       `hit-test: ${hitsPerSec} hits/s`,
       `hit success (2s): ${_fmt(hitPct2s, 0)}%`,
       `valid floor (2s): ${_fmt(validPct2s, 0)}%`,
@@ -3813,49 +3387,12 @@ function _arDebugUpdateOverlay() {
       `viewAngle: ${viewAng == null ? '—' : _fmt(viewAng, 1)}°`,
       `normalAngle: ${ang == null ? '—' : _fmt(ang, 1)}°`,
       `freeze: ${frozen ? 'on' : 'off'}`,
-      `canCommit: ${state.canCommitPoint ? 'on' : 'off'}` ,
-      `blockReason: ${state.commitBlockReason || '—'}`,
-      `minAngleUsed: ${state._minAngleCommitUsed != null ? _fmt(state._minAngleCommitUsed, 1) : '—'}°`,
-      `floorUpThr: ${state._upThrUsed != null ? _fmt(state._upThrUsed, 2) : '—'}`,
-      `zone: ${state.commitZone || 'none'}`,
-      `cov: ${state.coverageGrid && state.coverageGrid.last ? _fmt(state.coverageGrid.last.score, 2) : '—'} (c=${state.coverageGrid && state.coverageGrid.last ? _fmt(state.coverageGrid.last.c, 1) : '—'})`,
       `mode: ${mode}`,
     ];
 
     UI.arDebugOverlay.textContent = lines.join('\n');
     show(UI.arDebugOverlay, true);
   } catch (_) {}
-}
-
-
-// ------------------------
-// Adaptive gating helpers (Patch 7.1): reduces false 'red' and makes thresholds device-friendly
-// ------------------------
-function _clamp(v, a, b) {
-  return Math.min(b, Math.max(a, v));
-}
-
-function _arAdaptiveMinAngle(baseDeg, distM, inWarmup) {
-  const base = (typeof baseDeg === 'number' && isFinite(baseDeg)) ? baseDeg : 12;
-  const d = (typeof distM === 'number' && isFinite(distM)) ? distM : 0;
-  let a = base;
-  // Warmup: allow slightly lower angle so the user can place initial points without feeling blocked.
-  if (inWarmup) a -= 2;
-  // Near: slightly more permissive. Far: slightly stricter to avoid wall/air commits.
-  if (d <= 3) a -= 1;
-  else if (d >= 8) a += 1;
-  return _clamp(a, 9, 14);
-}
-
-function _arAdaptiveUpThreshold(distM, inWarmup) {
-  const d = (typeof distM === 'number' && isFinite(distM)) ? distM : 0;
-  // Default floor-like threshold used in Patch 2.2
-  let thr = 0.60;
-  // Warmup/near: be more permissive to reduce false negatives on common phones.
-  if (inWarmup || d <= 3) thr = 0.55;
-  else if (d >= 8) thr = 0.70;
-  else if (d >= 6) thr = 0.65;
-  return thr;
 }
 
 // ------------------------
@@ -3865,8 +3402,6 @@ const __tmpUp = new THREE.Vector3();
 const __tmpCamPos = new THREE.Vector3();
 const __tmpFwd = new THREE.Vector3();
 const __tmpHitPos = new THREE.Vector3();
-const __tmpV3 = new THREE.Vector3();
-const __tmpCommitPos = new THREE.Vector3();
 const __tmpHitQuat = new THREE.Quaternion();
 
 function updateXR(frame) {
@@ -3920,77 +3455,65 @@ function updateXR(frame) {
 
   // During scanning: accumulate floor Y samples only when the camera is pitched down
   if (!state.floorLocked && state.phase === 'ar_scan' && gotHit && hitY != null) {
+    const xrCam = renderer.xr.getCamera(camera);
+    const cam = xrCam.cameras && xrCam.cameras.length ? xrCam.cameras[0] : xrCam;
+    __tmpFwd.set(0, 0, -1).applyQuaternion(cam.quaternion);
+
     if (__tmpFwd.y < -0.15) {
-      // Patch 2.1: sample floor height only from reliable, near-floor hits
-      // - require mostly-up surface (avoid walls/objects)
-      // - require sufficient pitch down (viewAngle)
-      // - require near distance (far hits are noisy)
-      const hitDist = __tmpHitPos.distanceTo(__tmpCamPos);
-      const sampleOk = (__tmpUp.y >= 0.90) && (viewAngleToPlane >= 12) && (hitDist <= 4.0);
-      if (sampleOk) {
-        state.floorSamples.push(hitY);
-        if (state.floorSamples.length > 40) state.floorSamples.shift();
+      state.floorSamples.push(hitY);
+      if (state.floorSamples.length > 40) state.floorSamples.shift();
 
-        const sorted = state.floorSamples.slice().sort((a, b) => a - b);
-        const p = (q) => {
-          if (!sorted.length) return null;
-          const pos = (sorted.length - 1) * q;
-          const lo = Math.floor(pos), hi = Math.ceil(pos);
-          const t = pos - lo;
-          return sorted[lo] * (1 - t) + sorted[hi] * t;
-        };
+      const sorted = state.floorSamples.slice().sort((a, b) => a - b);
+      const p = (q) => {
+        if (!sorted.length) return null;
+        const pos = (sorted.length - 1) * q;
+        const lo = Math.floor(pos), hi = Math.ceil(pos);
+        const t = pos - lo;
+        return sorted[lo] * (1 - t) + sorted[hi] * t;
+      };
 
-        // Use a slightly lower percentile to avoid "floating" (prefer being a hair below rather than above)
-        const p15 = p(0.15);
-        const p80 = p(0.80);
-        state.floorYEstimate = p15;
+      const p20 = p(0.20);
+      const p80 = p(0.80);
+      state.floorYEstimate = p20;
 
-        // Consider floor stable when spread is small and enough samples collected
-        const spread = (p80 != null && p15 != null) ? (p80 - p15) : 999;
-        if ((sorted.length >= 12 && spread < 0.04) || sorted.length >= 25) {
-          state.floorLocked = true;
-          state.floorStable = true;
-          state.floorY = p15;
+      // Consider floor stable when spread is small and enough samples collected
+      const spread = (p80 != null && p20 != null) ? (p80 - p20) : 999;
+      if ((sorted.length >= 12 && spread < 0.04) || sorted.length >= 25) {
+        state.floorLocked = true;
+        state.floorStable = true;
+        state.floorY = p20;
 
-          // Patch 3: initialize coverage grid origin at floor lock
-          try { _covResetAt(reticle.position.x, reticle.position.z); } catch (_) {}
-
-          // Patch 2: initialize plane refinement reference height
-          try {
-            const pr = state.planeRefine;
-            if (pr && pr.enabled) {
-              pr.planeYRef = state.floorY;
-              pr.lastPlaneUpdateT = performance.now();
-              pr.lastRefineT = 0;
-              pr.freezeUntil = 0;
-              pr.framesT.length = 0;
-              pr.validT.length = 0;
-              pr.validHit = false;
-              pr.frozen = false;
-            }
-          } catch (_) {}
-
-          // Switch to drawing phase (match app: + appears after scanning/floor lock)
-          state.phase = 'ar_draw';
-          show(UI.scanHint, false);
-          // Keep bottom menu hidden until contour is closed; show a clear hint for contour placement.
-          if (!state.hasEverClosedContour) {
-            show(UI.contourHint, true);
+        // Patch 2: initialize plane refinement reference height
+        try {
+          const pr = state.planeRefine;
+          if (pr && pr.enabled) {
+            pr.planeYRef = state.floorY;
+            pr.lastPlaneUpdateT = performance.now();
+            pr.lastRefineT = 0;
+            pr.freezeUntil = 0;
+            pr.framesT.length = 0;
+            pr.validT.length = 0;
+            pr.validHit = false;
+            pr.frozen = false;
           }
-          show(UI.arBottomCenter, true);
-          show(UI.btnArAdd, true);
-          show(UI.btnArOk, false);
+        } catch (_) {}
+
+        // Switch to drawing phase (match app: + appears after scanning/floor lock)
+        state.phase = 'ar_draw';
+        show(UI.scanHint, false);
+        // Keep bottom menu hidden until contour is closed; show a clear hint for contour placement.
+        if (!state.hasEverClosedContour) {
+          show(UI.contourHint, true);
         }
+        show(UI.arBottomCenter, true);
+        show(UI.btnArAdd, true);
+        show(UI.btnArOk, false);
       }
     }
   }
 
+  
   // Patch 2: continuous refinement (reference plane tracking + freeze heuristics)
-  // Patch 7.1: adaptive gating thresholds to reduce false negatives ("grey" zone)
-  let __minAFrame = (state.planeRefine?.minAngleDeg || 12);
-  let __upThrFrame = 0.60;
-  let __inWarmupFrame = false;
-
   let validFloorHit = false;
   let refineFrozen = false;
   try {
@@ -4003,33 +3526,11 @@ function updateXR(frame) {
       pr.framesT.push(now);
       while (pr.framesT.length && pr.framesT[0] < (now - 1000)) pr.framesT.shift();
 
-      const dy = (gotHitRaw && hitY != null) ? Math.abs(hitY - state.floorY) : 999;
+      const dy = (gotHitRaw && hitY != null) ? Math.abs(hitY - pr.planeYRef) : 999;
       const heightTol = pr.heightTolM;
-      const gateDist = (gotHitRaw && hitX != null && hitZ != null) ? Math.hypot(hitX - __tmpCamPos.x, hitZ - __tmpCamPos.z) : 0;
-      const cg = state.coverageGrid;
-      const warmMs = (cg && cg.enabled) ? (cg.warmupMs || 0) : 0;
-      __inWarmupFrame = !!(warmMs > 0 && (now - (cg.lockedT || 0)) < warmMs);
-      __minAFrame = _arAdaptiveMinAngle(pr.minAngleDeg || 12, gateDist, __inWarmupFrame);
-      __upThrFrame = _arAdaptiveUpThreshold(gateDist, __inWarmupFrame);
-      state._minAngleUsed = __minAFrame;
-      state._upThrUsed = __upThrFrame;
-      const angleOk = viewAngleToPlane >= __minAFrame;
-      const upOk = (gotHitRaw && isFinite(__tmpUp.y)) ? (__tmpUp.y >= __upThrFrame) : gotHit;
-      // Patch 2.2: treat floor validity primarily by view angle + surface-upness; height check is diagnostic only.
-      validFloorHit = !!(gotHitRaw && hitY != null && angleOk && upOk);
-      if (validFloorHit) {
-        pr.validT.push(now);
-        pr.lastValidHitT = now;
-        pr.degraded = false;
-      } else {
-        const lastOk = pr.lastValidHitT || 0;
-        if (lastOk && (now - lastOk) > (pr.degradeAfterMs || 800)) {
-          pr.degraded = true;
-          pr.freezeUntil = Math.max(pr.freezeUntil || 0, now + (pr.degradeHoldMs || 500));
-        }
-      }
-
-
+      const angleOk = viewAngleToPlane >= pr.minAngleDeg;
+      validFloorHit = !!(gotHitRaw && hitY != null && dy <= heightTol && angleOk);
+      if (validFloorHit) pr.validT.push(now);
       while (pr.validT.length && pr.validT[0] < (now - 1000)) pr.validT.shift();
 
       const framesN = pr.framesT.length;
@@ -4044,33 +3545,15 @@ function updateXR(frame) {
         const dt = Math.max(0.016, Math.min(0.2, (now - (pr.lastPlaneUpdateT || now)) / 1000));
         pr.lastPlaneUpdateT = now;
 
-        // Patch 2.1: EMA with asymmetric speed limits
-        // - allow correcting DOWN to the real floor faster
-        // - allow moving UP (into air) very slowly (prevents hovering)
+        // Simple EMA with a speed limit (~5 cm/s)
         const alpha = 0.25;
         const target = hitY;
-
-        // Patch 5: drift control + outlier reject for height updates (prevents sudden drift when we briefly hit non-floor geometry)
-        const maxDown = (pr.maxDownCms || 5.0) * 0.01 * dt; // m per dt
-        const maxUp = (pr.maxUpCms || 1.0) * 0.01 * dt;
-        const dAbs = Math.abs(target - pr.planeYRef);
-        const maxDelta = Math.max(pr.heightTolMaxM || 0.08, 0.12) * 3; // ~0.36m
-        if (dAbs <= maxDelta) {
-          const proposed = pr.planeYRef + (target - pr.planeYRef) * alpha;
-          let move = proposed - pr.planeYRef;
-          if (move > maxUp) move = maxUp;
-          if (move < -maxDown) move = -maxDown;
-          pr.planeYRef = pr.planeYRef + move;
-        }
-
-        // If the user has not placed any contour points yet, keep floorY tightly aligned.
-        if (state.points.length === 0 && state.holePoints.length === 0) {
-          const proposedFloor = state.floorY + (target - state.floorY) * alpha;
-          let m2 = proposedFloor - state.floorY;
-          if (m2 > maxUp) m2 = maxUp;
-          if (m2 < -maxDown) m2 = -maxDown;
-          state.floorY = state.floorY + m2;
-        }
+        const proposed = pr.planeYRef + (target - pr.planeYRef) * alpha;
+        const maxMove = 0.05 * dt;
+        let move = proposed - pr.planeYRef;
+        if (move > maxMove) move = maxMove;
+        if (move < -maxMove) move = -maxMove;
+        pr.planeYRef = pr.planeYRef + move;
       }
 
       pr.viewAngleDeg = viewAngleToPlane;
@@ -4083,151 +3566,37 @@ function updateXR(frame) {
   const activeY = state.floorLocked ? state.floorY : (state.floorYEstimate != null ? state.floorYEstimate : hitY);
 
   let reticleOk = false;
-  let reticleUsedHit = false;
-  let targetX = null, targetY = null, targetZ = null;
-
-  // Candidate compute (raw): prefer hit XZ when floor-like; otherwise fallback ray ∩ plane.
   if (activeY != null && __tmpFwd.y < -0.02) {
+    // Prefer using the hit position (XZ) when it matches the floor height reference;
+    // otherwise fall back to ray ∩ plane (Y=activeY).
     let useHit = false;
     if (state.floorLocked) {
+      // Use refined reference height for matching, but keep geometry anchored to state.floorY.
       const pr = state.planeRefine;
-      if (gotHitRaw && hitY != null && viewAngleToPlane >= __minAFrame && (__tmpUp.y >= __upThrFrame)) {
+      const yRef = (pr && pr.enabled && isFinite(pr.planeYRef)) ? pr.planeYRef : state.floorY;
+      const tol = (pr && pr.enabled) ? pr.heightTolMaxM : 0.08;
+      if (gotHitRaw && hitY != null && Math.abs(hitY - yRef) <= tol) {
         useHit = true;
       }
     }
 
     if (useHit && hitX != null && hitZ != null) {
-      targetX = hitX; targetY = activeY; targetZ = hitZ;
+      reticle.position.set(hitX, activeY, hitZ);
+      reticle.quaternion.set(0, 0, 0, 1);
+      reticle.visible = true;
       reticleOk = true;
-      reticleUsedHit = true;
     } else {
       const t = (activeY - __tmpCamPos.y) / __tmpFwd.y;
       if (t > 0.05 && t < 12.0) {
-        __tmpV3.copy(__tmpCamPos).addScaledVector(__tmpFwd, t);
-        targetX = __tmpV3.x; targetY = activeY; targetZ = __tmpV3.z;
+        reticle.position.copy(__tmpCamPos).addScaledVector(__tmpFwd, t);
+        reticle.position.y = activeY;
+        reticle.quaternion.set(0, 0, 0, 1);
+        reticle.visible = true;
         reticleOk = true;
       }
     }
   }
-
-  if (reticleOk) {
-    // Patch 7.5: stabilize reticle without "lag".
-    // Strategy:
-    // - when camera is moving fast: snap to target (behaves like stable baseline)
-    // - when camera is steady: smooth to suppress micro-jitter
-    // - big jumps while camera is steady are treated as outliers (ignore unless consistent)
-    const rs = state.reticleStab;
-    const nowT = performance.now();
-    const mode = reticleUsedHit ? 'hit' : 'fallback_y_plane';
-
-    if (rs && rs.enabled) {
-      if (!rs.pos) rs.pos = new THREE.Vector3(targetX, targetY, targetZ);
-
-      // init motion trackers
-      if (!rs.prevCamPos) rs.prevCamPos = new THREE.Vector3(__tmpCamPos.x, __tmpCamPos.y, __tmpCamPos.z);
-      if (!rs.prevCamQuat) rs.prevCamQuat = new THREE.Quaternion(cam.quaternion.x, cam.quaternion.y, cam.quaternion.z, cam.quaternion.w);
-
-      // motion score (0..1)
-      const dt = Math.max(1 / 120, (nowT - (rs.lastT || nowT)) / 1000);
-      rs.lastT = nowT;
-
-      // angular velocity from quaternion delta
-      let dot = rs.prevCamQuat.x * cam.quaternion.x + rs.prevCamQuat.y * cam.quaternion.y + rs.prevCamQuat.z * cam.quaternion.z + rs.prevCamQuat.w * cam.quaternion.w;
-      dot = Math.min(1, Math.max(-1, Math.abs(dot)));
-      const ang = 2 * Math.acos(dot);
-      const angVel = (dt > 0) ? (ang / dt) : 0;
-
-      // positional velocity
-      const dPos = rs.prevCamPos.distanceTo(__tmpCamPos);
-      const posVel = (dt > 0) ? (dPos / dt) : 0;
-
-      // update prev camera pose
-      rs.prevCamPos.copy(__tmpCamPos);
-      rs.prevCamQuat.copy(cam.quaternion);
-
-      const motion = Math.min(1, Math.max(angVel / (rs.motionAngNorm || 2.5), posVel / (rs.motionPosNorm || 1.5)));
-      rs.lastMotion = motion;
-
-      if (mode !== rs.lastMode) {
-        rs.lastMode = mode;
-        rs.modeHoldUntil = nowT + rs.holdOnModeChangeMs;
-      }
-
-      // Distance-based smoothing parameters (XZ only; Y clamped separately)
-      const distXZ = Math.hypot(targetX - __tmpCamPos.x, targetZ - __tmpCamPos.z);
-      const tD = (distXZ <= 3) ? 0 : (distXZ >= 8 ? 1 : (distXZ - 3) / 5);
-      const jumpThresh = rs.jumpRejectNearM + (rs.jumpRejectFarM - rs.jumpRejectNearM) * tD;
-
-      const dx = targetX - rs.pos.x;
-      const dz = targetZ - rs.pos.z;
-      const jump = Math.hypot(dx, dz);
-
-      // deadband to remove tiny shimmer when camera is steady
-      if (jump <= (rs.deadbandM || 0.01)) {
-        rs._outlierN = 0;
-      } else {
-        // decide smoothing / snapping
-        let a = (rs.alphaStill || 0.22) + ((rs.alphaMove || 0.95) - (rs.alphaStill || 0.22)) * motion;
-        if (motion >= (rs.snapMotion || 0.80)) a = 1.0;
-
-        // Avoid mode-flip "lag": do not artificially slow down; instead treat large deltas as outliers only when steady.
-        const treatAsOutlier = (jump > jumpThresh) && (motion <= (rs.outlierMotionMax || 0.35)) && (nowT >= rs.modeHoldUntil);
-        if (treatAsOutlier) {
-          rs._outlierN = (rs._outlierN || 0) + 1;
-          if (rs._outlierN >= (rs.outlierAcceptN || 3)) {
-            // accept after consistent outliers (prevents "stuck" reticle)
-            rs.pos.x += dx * (rs.outlierAlpha || 0.35);
-            rs.pos.z += dz * (rs.outlierAlpha || 0.35);
-            rs._outlierN = 0;
-          }
-        } else {
-          rs._outlierN = 0;
-          rs.pos.x = rs.pos.x + dx * a;
-          rs.pos.z = rs.pos.z + dz * a;
-        }
-      }
-      rs.pos.y = targetY;
-
-      reticle.position.copy(rs.pos);
-    } else {
-      reticle.position.set(targetX, targetY, targetZ);
-    }
-
-    reticle.position.y = targetY;
-    reticle.quaternion.set(0, 0, 0, 1);
-    reticle.visible = true;
-
-    // History for stable commit (median of last window)
-    if (rs) {
-      // Keep a short history of reticle poses for stable multi-sample commit.
-      // distXZ is used to adapt sampling window based on distance.
-      rs.history.push({
-        t: nowT,
-        x: reticle.position.x,
-        z: reticle.position.z,
-        distXZ: Math.hypot(reticle.position.x - __tmpCamPos.x, reticle.position.z - __tmpCamPos.z),
-        usedHit: reticleUsedHit,
-        validHit: !!validFloorHit,
-        viewAngle: viewAngleToPlane,
-        mode
-      });
-      const cut = nowT - (rs.maxHistoryMs || 350);
-      while (rs.history.length && rs.history[0].t < cut) rs.history.shift();
-      if (reticleUsedHit && validFloorHit && viewAngleToPlane >= __minAFrame) {
-        rs.lastHitOkUntil = nowT + (rs.hitLatchMs || 180);
-      }
-
-      // Patch 3: update coverage grid only from valid hit-based floor samples
-      try {
-        if (reticleUsedHit && validFloorHit && viewAngleToPlane >= __minAFrame) {
-          _covAddSample(reticle.position.x, reticle.position.z, nowT);
-        }
-      } catch (_) {}
-
-    }
-  } else {
-    reticle.visible = false;
-  }
+  if (!reticleOk) reticle.visible = false;
 
   // Scan grid: show only while scanning AND only when we have a valid projected reticle
   if (!state.floorLocked && state.phase === 'ar_scan') {
@@ -4245,58 +3614,6 @@ function updateXR(frame) {
     reticle.position.y = state.floorY;
   }
 
-// Patch 2.1: store per-frame AR gating signals for point placement
-  state.viewAngleToPlane = viewAngleToPlane;
-  state.reticleMode = (reticle.visible ? (reticleUsedHit ? 'hit' : 'fallback_y_plane') : 'none');
-
-const __baseMinA = (state.planeRefine?.minAngleDeg || 12);
-const __minA = (state._minAngleUsed || __baseMinA);
-let __minACommit = __minA;
-
-const __rs = state.reticleStab;
-const __nowT = performance.now();
-const __latched = !!(__rs && ((__rs.lastHitOkUntil || 0) > __nowT));
-
-// Patch 3: coverage/confidence gating for predictable far placement
-try {
-  if (state.floorLocked && reticle.visible && state.coverageGrid && state.coverageGrid.enabled) {
-    const distM = Math.hypot(reticle.position.x - __tmpCamPos.x, reticle.position.z - __tmpCamPos.z);
-    let info = _covEvalZone(reticle.position.x, reticle.position.z, __nowT, distM);
-    // Warmup grace right after lock: allow near placements while grid is filling
-    const warm = state.coverageGrid.warmupMs || 0;
-    const __inWarm = (warm > 0 && (__nowT - (state.coverageGrid.lockedT || 0)) < warm);
-    __minACommit = _arAdaptiveMinAngle(__baseMinA, distM, __inWarm);
-    state._minAngleCommitUsed = __minACommit;
-    if (info.zone === 'red' && warm > 0 && (__nowT - (state.coverageGrid.lockedT || 0)) < warm && distM <= 4.0 && ((reticleUsedHit && validFloorHit) || __latched)) {
-      // Patch 7: avoid per-frame allocations in warmup path
-      info.zone = 'yellow';
-    }
-    state.coverageGrid.last = info;
-    state.commitZone = info.zone;
-  } else {
-    state.commitZone = 'none';
-    if (state.coverageGrid) state.coverageGrid.last = { zone: 'none', score: 0, c: 0, ageMs: 0, reqRed: 0, reqGreen: 0 };
-  }
-} catch (_) {
-  state.commitZone = 'none';
-}
-
-const __baseOk = !!(reticle.visible && viewAngleToPlane >= __minACommit && ((reticleUsedHit && validFloorHit) || __latched));
-const __zoneOk = (state.commitZone !== 'red');
-state.canCommitPoint = !!(__baseOk && __zoneOk);
-
-// Patch 7.1: explicit block reason (debug + tuning). Values: angle|noHit|redZone|degraded|noReticle|ok
-try {
-  let reason = 'ok';
-  if (!reticle.visible) reason = 'noReticle';
-  else if (state.planeRefine && state.planeRefine.degraded) reason = 'degraded';
-  else if (viewAngleToPlane < __minACommit) reason = 'angle';
-  else if (!((reticleUsedHit && validFloorHit) || __latched)) reason = 'noHit';
-  else if (state.commitZone === 'red') reason = 'redZone';
-  state.commitBlockReason = reason;
-} catch (_) { state.commitBlockReason = '—'; }
-
-
 
   // AR debug sample (Patch 2): record hit-test stability without changing behavior
   if (state.debugAR && state.debugAR.enabled) {
@@ -4306,7 +3623,7 @@ try {
       const dz = reticle.visible ? (reticle.position.z - __tmpCamPos.z) : 0;
       const dist = reticle.visible ? Math.sqrt(dx*dx + dy*dy + dz*dz) : NaN;
 
-      const mode = (reticle.visible ? (reticleUsedHit ? 'hit' : 'fallback_y_plane') : 'none');
+      const mode = (reticle.visible ? ( (gotHitRaw && hitY != null) ? 'hit' : 'fallback_y_plane') : 'none');
 
       _arDebugRecordSample({
         t: performance.now(),
@@ -4360,19 +3677,9 @@ try {
     const d0 = distXZ(state.points[0], loc);
     state.snapArmed = d0 < SNAP_DIST_M;
   }
-  
-if (reticle.material?.color) {
-  let base = 0x2f6cff;
-  const inPlace = (state.phase === 'ar_draw' || state.phase === 'ar_cut') && !state.closed && state.floorLocked;
-  if (inPlace) {
-    if (state.commitZone === 'green') base = 0x36d399;
-    else if (state.commitZone === 'yellow') base = 0xfbbf24;
-    else if (state.commitZone === 'red') base = 0x9ca3af;
-    else if (!state.canCommitPoint) base = 0x9ca3af;
+  if (reticle.material?.color) {
+    reticle.material.color.setHex(state.snapArmed ? 0x36d399 : 0x2f6cff);
   }
-  reticle.material.color.setHex(state.snapArmed ? 0x36d399 : base);
-}
-
   // "firstRing" теперь находится внутри флажка (вложенный объект)
   let firstRing = null;
   pointsGroup.traverse((o) => {
@@ -4425,7 +3732,9 @@ if (reticle.material?.color) {
       }
     }
   }
+
   // UI measure labels
+  // Reuse XR camera computed at the beginning of updateXR(); do not redeclare.
   updateMeasureLabels(xrCam);
 }
 
