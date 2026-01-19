@@ -125,22 +125,6 @@ function show(el, on = true) {
   else el.setAttribute('hidden', '');
 }
 
-// Patch 2 stable: lightweight hint used for commit gating (no new UI elements).
-function flashContourHint(msg, ms = 1100) {
-  try {
-    if (!UI || !UI.contourHint) return;
-    const el = UI.contourHint;
-    if (!el.dataset._origText) el.dataset._origText = el.textContent || '';
-    el.textContent = msg;
-    show(el, true);
-    window.clearTimeout(flashContourHint._t);
-    flashContourHint._t = window.setTimeout(() => {
-      // Restore original text; keep visibility as-is (do not break existing flow).
-      el.textContent = el.dataset._origText || el.textContent;
-    }, ms);
-  } catch (_) {}
-}
-
 function setActiveScreen(name) {
   const map = {
     catalog: UI.screenCatalog,
@@ -373,13 +357,6 @@ const state = {
     heightTolMaxM: 0.08,
     minAngleDeg: 12,
 
-    // Commit gate (stability/UX): require the camera to be pitched towards the floor when adding a point.
-    // This reduces wall-targeting and the perceived far lift at very small view angles.
-    commitMinAngleNearDeg: 10,
-    commitMinAngleDeg: 12,
-    commitMinAngleFarDeg: 15,
-    commitFarDistM: 6.0,
-
     // Freeze logic
     freezeAngleDeg: 12,
     minValidRatio: 0.20,
@@ -395,6 +372,15 @@ const state = {
     validHit: false,
     frozen: false,
   },
+  // Floor plane model (stable improvements): best-fit tilted plane used to prevent far lift/tilt
+  floorPlaneSamples: [],
+  floorPlane: null, // {enabled, n:THREE.Vector3, d:number, origin:THREE.Vector3, u:THREE.Vector3, v:THREE.Vector3, tiltDeg:number}
+
+  // Reticle gating (wall guard)
+  reticleWall: false,
+  reticleBlocked: false,
+  reticleBlockReason: '',
+
 
 };
 
@@ -2783,6 +2769,14 @@ function ensureFloorLocked() {
   state.floorLocked = true;
   state.floorY = reticle.position.y;
 
+  // Ensure floor plane model is present even when locked via fallback.
+  try {
+    const originHint = reticle.position.clone();
+    const fp = _fitFloorPlaneFromSamples(state.floorPlaneSamples, originHint, 2.5);
+    if (fp) state.floorPlane = fp;
+    else state.floorPlane = { enabled: true, n: new THREE.Vector3(0,1,0), d: -state.floorY, origin: originHint.clone(), u: new THREE.Vector3(1,0,0), v: new THREE.Vector3(0,0,1), tiltDeg: 0 };
+  } catch (_) { state.floorPlane = { enabled: true, n: new THREE.Vector3(0,1,0), d: -state.floorY, origin: reticle.position.clone(), u: new THREE.Vector3(1,0,0), v: new THREE.Vector3(0,0,1), tiltDeg: 0 }; }
+
   // lock scanning grid to the floor (and then hide it — it is only for scanning)
   scanGrid.position.set(reticle.position.x, state.floorY + 0.001, reticle.position.z);
   scanGrid.visible = false;
@@ -2806,9 +2800,18 @@ function addPointAtWorld(worldPos) {
   ensureFloorLocked();
   if (!state.floorLocked) return;
 
-  // Clamp on floor
+  // Clamp/project onto the active floor model
   const hitWorld = worldPos.clone();
-  hitWorld.y = state.floorY;
+  try {
+    const fp = state.floorPlane;
+    if (state.floorLocked && fp && fp.enabled && fp.n && isFinite(fp.d)) {
+      _projectPointToPlane(hitWorld, fp);
+    } else {
+      hitWorld.y = state.floorY;
+    }
+  } catch (_) {
+    hitWorld.y = state.floorY;
+  }
 
   // Convert to local space (anchorGroup)
   const local = anchorGroup.worldToLocal(hitWorld);
@@ -2852,37 +2855,8 @@ function addPointFromReticle() {
   if (!state.xrSession) return;
   if (!state.floorLocked || state.phase === 'ar_scan') return;
   if (!reticle.visible) return;
-
-  // Commit gate: prevent adding points when the camera is too horizontal (high chance of aiming at walls / unstable far placement).
-  try {
-    const pr = state.planeRefine;
-    const viewAng = (pr && isFinite(pr.viewAngleDeg)) ? pr.viewAngleDeg : 90;
-
-    const xrCam = renderer.xr.getCamera(camera);
-    const cam = xrCam.cameras && xrCam.cameras.length ? xrCam.cameras[0] : xrCam;
-    const camPos = new THREE.Vector3();
-    cam.getWorldPosition(camPos);
-    const dx = reticle.position.x - camPos.x;
-    const dz = reticle.position.z - camPos.z;
-    const distXZ = Math.sqrt(dx*dx + dz*dz);
-
-    let minAng = (pr && pr.commitMinAngleDeg != null) ? pr.commitMinAngleDeg : 12;
-    const nearAng = (pr && pr.commitMinAngleNearDeg != null) ? pr.commitMinAngleNearDeg : 10;
-    const farAng = (pr && pr.commitMinAngleFarDeg != null) ? pr.commitMinAngleFarDeg : 15;
-    const farDist = (pr && pr.commitFarDistM != null) ? pr.commitFarDistM : 6.0;
-
-    if (distXZ <= 2.5) {
-      minAng = nearAng;
-    } else if (distXZ >= farDist) {
-      minAng = farAng;
-    }
-
-    if (viewAng < minAng) {
-      flashContourHint('Наклоните камеру на пол, чтобы поставить точку.', 1200);
-      return;
-    }
-  } catch (_) {}
-
+  // Wall guard: do not place points when pointing at a wall/vertical surface
+  if (state.reticleBlocked) return;
   addPointAtWorld(reticle.position);
 }
 
@@ -3146,15 +3120,25 @@ function rebuildThickLine(closed = false) {
   for (let i = 0; i < drawPts.length - 1; i++) {
     const a = drawPts[i];
     const b = drawPts[i + 1];
-    const len = distXZ(a, b);
+    const len = a.distanceTo(b);
     if (len < 1e-6) continue;
 
-    const mid = new THREE.Vector3((a.x + b.x) / 2, state.floorY + 0.008, (a.z + b.z) / 2);
+    // Place the line slightly above the fitted plane to avoid z-fighting.
+    const mid = new THREE.Vector3((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
+    try {
+      const fp = state.floorPlane;
+      if (state.floorLocked && fp && fp.enabled && fp.n) {
+        mid.addScaledVector(fp.n, 0.008);
+      } else {
+        mid.y = state.floorY + 0.008;
+      }
+    } catch (_) { mid.y = state.floorY + 0.008; }
+
     const cyl = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, len, 10), mat);
     cyl.position.copy(mid);
 
-    // orient cylinder along segment on XZ
-    const dir = new THREE.Vector3(b.x - a.x, 0, b.z - a.z).normalize();
+    // orient cylinder along 3D segment (works for slight plane tilt)
+    const dir = new THREE.Vector3().subVectors(b, a).normalize();
     const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
     cyl.quaternion.copy(quat);
 
@@ -3203,6 +3187,53 @@ function rebuildFill() {
 
   const isClosed = state.closed && state.points.length >= 3;
   if (!isClosed) return;
+
+  // If we have a fitted floor plane, build the fill directly on that plane (prevents far lift).
+  try {
+    const fp = state.floorPlane;
+    if (state.floorLocked && fp && fp.enabled && fp.n && isFinite(fp.d) && fp.u && fp.v && fp.origin) {
+      const originW = fp.origin.clone();
+      const u = fp.u.clone();
+      const v = fp.v.clone();
+      const n = fp.n.clone();
+
+      // Convert local points to world (anchorGroup is identity in this project, but keep safe).
+      const toWorld = (pt) => anchorGroup.localToWorld(pt.clone());
+      const wPts = state.points.map(toWorld);
+
+      // Map world points to plane 2D coords
+      const to2D = (wp) => {
+        const rel = wp.sub(originW);
+        return new THREE.Vector2(rel.dot(u), rel.dot(v));
+      };
+      const pts2 = wPts.map(p => to2D(p));
+      const shape = new THREE.Shape(pts2);
+
+      // Holes
+      for (const hole of state.holes) {
+        if (!hole || hole.length < 3) continue;
+        const hw = hole.map(toWorld);
+        const hp2 = hw.map(p => to2D(p));
+        const path = new THREE.Path(hp2);
+        shape.holes.push(path);
+      }
+
+      const geom = new THREE.ShapeGeometry(shape, 1);
+      // Lift slightly along plane normal to avoid z-fighting
+      const pos = originW.clone().addScaledVector(n, 0.002);
+      const m = new THREE.Matrix4();
+      m.makeBasis(u, v, n);
+      m.setPosition(pos);
+      geom.applyMatrix4(m);
+
+      const mat = (state.phase === 'ar_final') ? tileMaterial : maskMaterial;
+      if (!mat) return;
+      fillMesh = new THREE.Mesh(geom, mat);
+      fillMesh.renderOrder = 2;
+      anchorGroup.add(fillMesh);
+      return;
+    }
+  } catch (_) {}
 
   // IMPORTANT:
   // THREE.Shape/ShapeGeometry is generated in the XY plane.
@@ -3290,7 +3321,8 @@ function updateMeasureLabels(xrCam) {
     const b = pts[(i + 1) % pts.length];
     const d = distXZ(a, b);
 
-    const mid = new THREE.Vector3((a.x + b.x) / 2, state.floorY + 0.02, (a.z + b.z) / 2);
+    const mid = new THREE.Vector3((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
+    try { const fp = state.floorPlane; if (fp && fp.enabled && fp.n) mid.addScaledVector(fp.n, 0.02); else mid.y = state.floorY + 0.02; } catch (_) { mid.y = state.floorY + 0.02; }
     const midW = anchorGroup.localToWorld(mid.clone());
 
     const v = midW.clone().project(xrCam);
@@ -3441,6 +3473,8 @@ function _arDebugUpdateOverlay() {
       `viewAngle: ${viewAng == null ? '—' : _fmt(viewAng, 1)}°`,
       `normalAngle: ${ang == null ? '—' : _fmt(ang, 1)}°`,
       `freeze: ${frozen ? 'on' : 'off'}`,
+      `blockReason: ${state.reticleBlockReason || '—'}`,
+      `planeTilt: ${(state.floorPlane && isFinite(state.floorPlane.tiltDeg)) ? _fmt(state.floorPlane.tiltDeg, 2) : '—'}°`,
       `mode: ${mode}`,
     ];
 
@@ -3457,6 +3491,118 @@ const __tmpCamPos = new THREE.Vector3();
 const __tmpFwd = new THREE.Vector3();
 const __tmpHitPos = new THREE.Vector3();
 const __tmpHitQuat = new THREE.Quaternion();
+
+// ------------------------
+// Floor plane fitting (stable improvements)
+// Fit plane as y = a*x + b*z + c (least squares) from hit-test samples.
+// Produces a normal close to world up, preventing far-field lift when the XR world is slightly tilted.
+function _fitFloorPlaneFromSamples(samples, originHint, tiltMaxDeg = 2.5) {
+  try {
+    if (!Array.isArray(samples) || samples.length < 12) return null;
+    let n = 0;
+    let Sx = 0, Sz = 0, Sy = 0;
+    let Sxx = 0, Szz = 0, Sxz = 0;
+    let Sxy = 0, Szy = 0;
+    for (const p of samples) {
+      if (!p || !isFinite(p.x) || !isFinite(p.y) || !isFinite(p.z)) continue;
+      const x = p.x, y = p.y, z = p.z;
+      n++;
+      Sx += x; Sz += z; Sy += y;
+      Sxx += x * x; Szz += z * z; Sxz += x * z;
+      Sxy += x * y; Szy += z * y;
+    }
+    if (n < 12) return null;
+
+    // Solve normal equations for a,b,c:
+    // [Sxx Sxz Sx] [a] = [Sxy]
+    // [Sxz Szz Sz] [b]   [Szy]
+    // [Sx  Sz  n ] [c]   [Sy ]
+    const A = [
+      [Sxx, Sxz, Sx,  Sxy],
+      [Sxz, Szz, Sz, Szy],
+      [Sx,  Sz,  n,  Sy ],
+    ];
+    // Gaussian elimination (in-place)
+    for (let col = 0; col < 3; col++) {
+      // pivot
+      let pivot = col;
+      for (let r = col + 1; r < 3; r++) {
+        if (Math.abs(A[r][col]) > Math.abs(A[pivot][col])) pivot = r;
+      }
+      if (Math.abs(A[pivot][col]) < 1e-9) return null;
+      if (pivot !== col) { const tmp = A[col]; A[col] = A[pivot]; A[pivot] = tmp; }
+      const div = A[col][col];
+      for (let j = col; j < 4; j++) A[col][j] /= div;
+      for (let r = 0; r < 3; r++) {
+        if (r === col) continue;
+        const f = A[r][col];
+        for (let j = col; j < 4; j++) A[r][j] -= f * A[col][j];
+      }
+    }
+    const a = A[0][3];
+    const b = A[1][3];
+    const c = A[2][3];
+
+    // Plane: (-a)x + 1*y + (-b)z + (-c) = 0
+    const nn = new THREE.Vector3(-a, 1, -b);
+    const len = nn.length();
+    if (!(len > 1e-6)) return null;
+    nn.multiplyScalar(1 / len);
+    let d = (-c) / len;
+
+    // Clamp tilt vs world up (0,1,0) to avoid drifting to wrong surfaces.
+    const upDot = Math.max(-1, Math.min(1, nn.y));
+    let tilt = Math.acos(upDot) * 180 / Math.PI;
+    if (tilt > tiltMaxDeg) {
+      const targetY = Math.cos(tiltMaxDeg * Math.PI / 180);
+      const xzLen = Math.sqrt(nn.x * nn.x + nn.z * nn.z);
+      if (xzLen > 1e-6) {
+        const targetXZ = Math.sqrt(Math.max(0, 1 - targetY * targetY));
+        const scale = targetXZ / xzLen;
+        nn.x *= scale;
+        nn.z *= scale;
+        nn.y = targetY;
+        nn.normalize();
+      } else {
+        nn.set(0, 1, 0);
+      }
+      // Recompute d by projecting originHint (or centroid) onto plane.
+      const ref = originHint && isFinite(originHint.x) ? originHint : new THREE.Vector3(Sx / n, Sy / n, Sz / n);
+      d = -nn.dot(ref);
+      tilt = tiltMaxDeg;
+    }
+
+    // Choose a plane origin near the user's locked position (or centroid).
+    const origin = originHint && isFinite(originHint.x) ? originHint.clone() : new THREE.Vector3(Sx / n, Sy / n, Sz / n);
+    // Project origin onto plane
+    const od = nn.dot(origin) + d;
+    origin.addScaledVector(nn, -od);
+
+    // Build plane basis (u,v)
+    const u = new THREE.Vector3(1, 0, 0);
+    // project u onto plane
+    u.addScaledVector(nn, -nn.dot(u));
+    if (u.lengthSq() < 1e-6) {
+      u.set(0, 0, 1);
+      u.addScaledVector(nn, -nn.dot(u));
+    }
+    u.normalize();
+    const v = new THREE.Vector3().crossVectors(nn, u).normalize();
+
+    return { enabled: true, n: nn, d, origin, u, v, tiltDeg: tilt, a, b, c };
+  } catch (_) {
+    return null;
+  }
+}
+
+function _projectPointToPlane(p, plane) {
+  try {
+    const dist = plane.n.dot(p) + plane.d;
+    return p.addScaledVector(plane.n, -dist);
+  } catch (_) {
+    return p;
+  }
+}
 
 function updateXR(frame) {
   // Center hit test (used to estimate floor height and validate floor hits)
@@ -3517,6 +3663,20 @@ function updateXR(frame) {
       state.floorSamples.push(hitY);
       if (state.floorSamples.length > 40) state.floorSamples.shift();
 
+      // Collect samples for tilted floor plane fitting (close range only, floor-like hits)
+      try {
+        if (gotHitRaw && hitX != null && hitZ != null && __tmpUp.y >= 0.75) {
+          const dx = __tmpHitPos.x - __tmpCamPos.x;
+          const dy = __tmpHitPos.y - __tmpCamPos.y;
+          const dz = __tmpHitPos.z - __tmpCamPos.z;
+          const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+          if (dist > 0.15 && dist < 6.0) {
+            state.floorPlaneSamples.push({ x: __tmpHitPos.x, y: __tmpHitPos.y, z: __tmpHitPos.z });
+            if (state.floorPlaneSamples.length > 120) state.floorPlaneSamples.shift();
+          }
+        }
+      } catch (_) {}
+
       const sorted = state.floorSamples.slice().sort((a, b) => a - b);
       const p = (q) => {
         if (!sorted.length) return null;
@@ -3551,6 +3711,27 @@ function updateXR(frame) {
             pr.frozen = false;
           }
         } catch (_) {}
+
+        // Stable improvement: fit a slightly tilted floor plane from near-range samples.
+        // This keeps the reticle/contour/texture 'pinned to the floor' even at large distances.
+        try {
+          const originHint = new THREE.Vector3(
+            (hitX != null ? hitX : 0),
+            (state.floorY != null ? state.floorY : 0),
+            (hitZ != null ? hitZ : 0)
+          );
+          const fp = _fitFloorPlaneFromSamples(state.floorPlaneSamples, originHint, 2.5);
+          if (fp) {
+            state.floorPlane = fp;
+          } else {
+            // Fallback: perfectly horizontal plane at locked height.
+            const n = new THREE.Vector3(0, 1, 0);
+            const d = -state.floorY;
+            state.floorPlane = { enabled: true, n, d, origin: originHint.clone(), u: new THREE.Vector3(1, 0, 0), v: new THREE.Vector3(0, 0, 1), tiltDeg: 0 };
+          }
+        } catch (_) {
+          state.floorPlane = null;
+        }
 
         // Switch to drawing phase (match app: + appears after scanning/floor lock)
         state.phase = 'ar_draw';
@@ -3616,38 +3797,46 @@ function updateXR(frame) {
     }
   } catch (_) {}
 
-// Reticle placement: project to the active floor plane (prevents sticking to walls)
+// Reticle placement: project to the active floor model (tilted plane when available)
+  const fpActive = (state.floorLocked && state.floorPlane && state.floorPlane.enabled && state.floorPlane.n && isFinite(state.floorPlane.d)) ? state.floorPlane : null;
   const activeY = state.floorLocked ? state.floorY : (state.floorYEstimate != null ? state.floorYEstimate : hitY);
 
-  let reticleOk = false;
-  if (activeY != null && __tmpFwd.y < -0.02) {
-    // Prefer using the hit position (XZ) when it matches the floor height reference;
-    // otherwise fall back to ray ∩ plane (Y=activeY).
-    let useHit = false;
-    if (state.floorLocked) {
-      // Use refined reference height for matching, but keep geometry anchored to state.floorY.
-      const pr = state.planeRefine;
-      const yRef = (pr && pr.enabled && isFinite(pr.planeYRef)) ? pr.planeYRef : state.floorY;
-      const tol = (pr && pr.enabled) ? pr.heightTolMaxM : 0.08;
-      if (gotHitRaw && hitY != null && Math.abs(hitY - yRef) <= tol) {
-        useHit = true;
-      }
-    }
+  // Wall detection: if the best hit is clearly vertical, keep reticle grey and block commit.
+  const isFloorLikeHit = !!(gotHitRaw && hitY != null && __tmpUp.y >= 0.75);
+  const isWallLikeHit = !!(gotHitRaw && hitY != null && __tmpUp.y <= 0.55);
+  state.reticleWall = !!(state.floorLocked && isWallLikeHit);
+  state.reticleBlocked = !!state.reticleWall;
+  state.reticleBlockReason = state.reticleBlocked ? 'wall' : '';
 
-    if (useHit && hitX != null && hitZ != null) {
-      reticle.position.set(hitX, activeY, hitZ);
-      reticle.quaternion.set(0, 0, 0, 1);
-      reticle.visible = true;
-      reticleOk = true;
+  let reticleOk = false;
+  if ((fpActive || activeY != null) && __tmpFwd.y < -0.02) {
+    if (fpActive) {
+      // Intersect view ray with fitted plane: n·(o + t*d) + D = 0
+      const denom = fpActive.n.dot(__tmpFwd);
+      if (denom < -1e-4) {
+        const t = -(fpActive.n.dot(__tmpCamPos) + fpActive.d) / denom;
+        if (t > 0.05 && t < 12.0) {
+          reticle.position.copy(__tmpCamPos).addScaledVector(__tmpFwd, t);
+          // If we have a floor-like hit close to the plane, prefer its position (then project to plane).
+          if (isFloorLikeHit && hitX != null && hitZ != null && hitY != null) {
+            const hp = __tmpHitPos.clone();
+            const pd = Math.abs(fpActive.n.dot(hp) + fpActive.d);
+            if (pd <= 0.08 && viewAngleToPlane >= 10) {
+              _projectPointToPlane(hp, fpActive);
+              reticle.position.copy(hp);
+            }
+          }
+          // Always snap onto the plane exactly
+          _projectPointToPlane(reticle.position, fpActive);
+          reticle.quaternion.set(0, 0, 0, 1);
+          reticle.visible = true;
+          reticleOk = true;
+        }
+      }
     } else {
+      // Fallback: horizontal Y plane during scanning (keeps behavior identical to stable baseline)
       const t = (activeY - __tmpCamPos.y) / __tmpFwd.y;
-      // Dynamic distance cap: at shallow view angles the ray/plane intersection becomes unreliable for far aiming.
-      // Keep the reticle responsive, but limit far placement unless the user is looking sufficiently down at the floor.
-      let maxT = 12.0;
-      if (viewAngleToPlane < 10) maxT = 6.0;
-      else if (viewAngleToPlane < 12) maxT = 8.0;
-      else if (viewAngleToPlane < 15) maxT = 10.0;
-      if (t > 0.05 && t < maxT) {
+      if (t > 0.05 && t < 12.0) {
         reticle.position.copy(__tmpCamPos).addScaledVector(__tmpFwd, t);
         reticle.position.y = activeY;
         reticle.quaternion.set(0, 0, 0, 1);
@@ -3669,10 +3858,8 @@ function updateXR(frame) {
     scanGrid.visible = false;
   }
 
-  // If floor is locked, clamp reticle exactly to floorY (extra safety)
-  if (state.floorLocked && reticle.visible) {
-    reticle.position.y = state.floorY;
-  }
+  // NOTE: when a fitted plane is available, we do NOT clamp Y to a constant value;
+  // this is the core fix for 'far lift' (tilt accumulation) on perfectly flat floors.
 
 
   // AR debug sample (Patch 2): record hit-test stability without changing behavior
@@ -3683,7 +3870,7 @@ function updateXR(frame) {
       const dz = reticle.visible ? (reticle.position.z - __tmpCamPos.z) : 0;
       const dist = reticle.visible ? Math.sqrt(dx*dx + dy*dy + dz*dz) : NaN;
 
-      const mode = (reticle.visible ? ( (gotHitRaw && hitY != null) ? 'hit' : 'fallback_y_plane') : 'none');
+      const mode = (reticle.visible ? (fpActive ? (state.reticleWall ? 'plane_wall' : 'plane') : ((gotHitRaw && hitY != null) ? 'hit' : 'fallback_y_plane')) : 'none');
 
       _arDebugRecordSample({
         t: performance.now(),
@@ -3738,7 +3925,12 @@ function updateXR(frame) {
     state.snapArmed = d0 < SNAP_DIST_M;
   }
   if (reticle.material?.color) {
-    reticle.material.color.setHex(state.snapArmed ? 0x36d399 : 0x2f6cff);
+    if (state.reticleWall) {
+      // Grey when pointing at walls/vertical surfaces (blocked)
+      reticle.material.color.setHex(0x9ca3af);
+    } else {
+      reticle.material.color.setHex(state.snapArmed ? 0x36d399 : 0x2f6cff);
+    }
   }
   // "firstRing" теперь находится внутри флажка (вложенный объект)
   let firstRing = null;
