@@ -390,31 +390,36 @@ const state = {
     lastMode: "none",
     modeHoldUntil: 0,
     lastHitOkUntil: 0,
+
+    // Camera motion tracking (used to avoid "laggy" reticle while panning)
+    lastT: 0,
+    prevCamPos: null,
+    prevCamQuat: null,
+
+    // Adaptive smoothing (steady camera => smooth; moving camera => snap)
+    alphaStill: 0.22,
+    alphaMove: 0.95,
+    snapMotion: 0.80,
+    deadbandM: 0.01,
+
+    // Outlier handling: ignore big jumps when the camera is steady, but accept quickly if consistent
+    outlierMotionMax: 0.35,
+    outlierAcceptN: 3,
+    outlierAlpha: 0.35,
+    _outlierN: 0,
+
+    // Motion normalizers
+    motionAngNorm: 2.5, // rad/s
+    motionPosNorm: 1.5, // m/s
+
     history: [],
     maxHistoryMs: 350,
-    emaNearSlow: 0.30,
-    emaFarSlow: 0.16,
+    emaNear: 0.35,
+    emaFar: 0.18,
     jumpRejectNearM: 0.25,
     jumpRejectFarM: 0.60,
-    holdOnModeChangeMs: 90,
+    holdOnModeChangeMs: 140,
     hitLatchMs: 180,
-    // Adaptive responsiveness: reduce lag while keeping outlier protection
-    emaNearFast: 0.70,
-    emaFarFast: 0.50,
-    outlierAlpha: 0.08,
-    modeHoldAlphaMin: 0.18,
-    motionScoreMin: 0.08,
-    motionScoreMax: 0.90,
-    motionAngleWeight: 0.015, // adds ~0.9 to score at ~60 deg/s
-    jumpBoostMax: 6.0,
-
-    // Patch 7.3: One Euro filter for reticle (low jitter, minimal lag)
-    oneEuroEnabled: true,
-    oneEuroMinCutoffNear: 2.4,
-    oneEuroMinCutoffFar: 1.7,
-    oneEuroBetaNear: 0.02,
-    oneEuroBetaFar: 0.06,
-    oneEuroDCutoff: 1.0,
   },
 
   // Patch 7: AR hint throttling (uses existing contourHint UI)
@@ -3796,9 +3801,10 @@ function _arDebugUpdateOverlay() {
     const jitter = _arDebugJitter2D(jitterWin);
 
     const lines = [
-      `AR debug (Patch 7.3)`,
+      `AR debug (Patch 7.5)`,
       `state: ${_arDebugStateLabel()}`,
       `fps: ${_fmt(dbg.fps, 0)}`,
+      `motion: ${state.reticleStab && typeof state.reticleStab.lastMotion === 'number' ? _fmt(state.reticleStab.lastMotion, 2) : '—'}`,
       `hit-test: ${hitsPerSec} hits/s`,
       `hit success (2s): ${_fmt(hitPct2s, 0)}%`,
       `valid floor (2s): ${_fmt(validPct2s, 0)}%`,
@@ -3823,7 +3829,7 @@ function _arDebugUpdateOverlay() {
 
 
 // ------------------------
-// Adaptive gating helpers (Patch 7.2): reduces false 'red' and makes thresholds device-friendly
+// Adaptive gating helpers (Patch 7.1): reduces false 'red' and makes thresholds device-friendly
 // ------------------------
 function _clamp(v, a, b) {
   return Math.min(b, Math.max(a, v));
@@ -3980,7 +3986,7 @@ function updateXR(frame) {
   }
 
   // Patch 2: continuous refinement (reference plane tracking + freeze heuristics)
-  // Patch 7.2: adaptive gating thresholds to reduce false negatives ("grey" zone)
+  // Patch 7.1: adaptive gating thresholds to reduce false negatives ("grey" zone)
   let __minAFrame = (state.planeRefine?.minAngleDeg || 12);
   let __upThrFrame = 0.60;
   let __inWarmupFrame = false;
@@ -4105,7 +4111,11 @@ function updateXR(frame) {
   }
 
   if (reticleOk) {
-    // Patch 2.2.1: stabilize reticle to avoid sudden jumps while aiming
+    // Patch 7.5: stabilize reticle without "lag".
+    // Strategy:
+    // - when camera is moving fast: snap to target (behaves like stable baseline)
+    // - when camera is steady: smooth to suppress micro-jitter
+    // - big jumps while camera is steady are treated as outliers (ignore unless consistent)
     const rs = state.reticleStab;
     const nowT = performance.now();
     const mode = reticleUsedHit ? 'hit' : 'fallback_y_plane';
@@ -4113,91 +4123,69 @@ function updateXR(frame) {
     if (rs && rs.enabled) {
       if (!rs.pos) rs.pos = new THREE.Vector3(targetX, targetY, targetZ);
 
+      // init motion trackers
+      if (!rs.prevCamPos) rs.prevCamPos = new THREE.Vector3(__tmpCamPos.x, __tmpCamPos.y, __tmpCamPos.z);
+      if (!rs.prevCamQuat) rs.prevCamQuat = new THREE.Quaternion(cam.quaternion.x, cam.quaternion.y, cam.quaternion.z, cam.quaternion.w);
+
+      // motion score (0..1)
+      const dt = Math.max(1 / 120, (nowT - (rs.lastT || nowT)) / 1000);
+      rs.lastT = nowT;
+
+      // angular velocity from quaternion delta
+      let dot = rs.prevCamQuat.x * cam.quaternion.x + rs.prevCamQuat.y * cam.quaternion.y + rs.prevCamQuat.z * cam.quaternion.z + rs.prevCamQuat.w * cam.quaternion.w;
+      dot = Math.min(1, Math.max(-1, Math.abs(dot)));
+      const ang = 2 * Math.acos(dot);
+      const angVel = (dt > 0) ? (ang / dt) : 0;
+
+      // positional velocity
+      const dPos = rs.prevCamPos.distanceTo(__tmpCamPos);
+      const posVel = (dt > 0) ? (dPos / dt) : 0;
+
+      // update prev camera pose
+      rs.prevCamPos.copy(__tmpCamPos);
+      rs.prevCamQuat.copy(cam.quaternion);
+
+      const motion = Math.min(1, Math.max(angVel / (rs.motionAngNorm || 2.5), posVel / (rs.motionPosNorm || 1.5)));
+      rs.lastMotion = motion;
+
       if (mode !== rs.lastMode) {
         rs.lastMode = mode;
         rs.modeHoldUntil = nowT + rs.holdOnModeChangeMs;
       }
 
-      // Distance-based parameters (XZ only; Y clamped separately)
+      // Distance-based smoothing parameters (XZ only; Y clamped separately)
       const distXZ = Math.hypot(targetX - __tmpCamPos.x, targetZ - __tmpCamPos.z);
       const tD = (distXZ <= 3) ? 0 : (distXZ >= 8 ? 1 : (distXZ - 3) / 5);
+      const jumpThresh = rs.jumpRejectNearM + (rs.jumpRejectFarM - rs.jumpRejectNearM) * tD;
 
-      // Camera motion score: used only to detect "steady" vs "moving".
-      if (!rs._prevCamPos) rs._prevCamPos = new THREE.Vector3(__tmpCamPos.x, __tmpCamPos.y, __tmpCamPos.z);
-      if (!rs._prevFwd) rs._prevFwd = new THREE.Vector3(__tmpFwd.x, __tmpFwd.y, __tmpFwd.z);
-      const prevT = rs._prevT || nowT;
-      const dtS = Math.max(0.001, (nowT - prevT) / 1000);
-      const dCam = Math.hypot(
-        __tmpCamPos.x - rs._prevCamPos.x,
-        __tmpCamPos.y - rs._prevCamPos.y,
-        __tmpCamPos.z - rs._prevCamPos.z
-      );
-      const linSpeed = dCam / dtS;
-      let dot = rs._prevFwd.x * __tmpFwd.x + rs._prevFwd.y * __tmpFwd.y + rs._prevFwd.z * __tmpFwd.z;
-      if (dot > 1) dot = 1;
-      if (dot < -1) dot = -1;
-      const angDegS = (Math.acos(dot) * 57.29577951308232) / dtS;
-      const score = linSpeed + (rs.motionAngleWeight || 0.015) * angDegS;
-      const sMin = rs.motionScoreMin || 0.08;
-      const sMax = rs.motionScoreMax || 0.90;
-      const motion = Math.max(0, Math.min(1, (score - sMin) / Math.max(0.001, (sMax - sMin))));
+      const dx = targetX - rs.pos.x;
+      const dz = targetZ - rs.pos.z;
+      const jump = Math.hypot(dx, dz);
 
-      // Patch 7.3: One Euro filter (fast response when moving, smooth when steady).
-      const minCutNear = (rs.oneEuroMinCutoffNear != null ? rs.oneEuroMinCutoffNear : 2.4);
-      const minCutFar  = (rs.oneEuroMinCutoffFar  != null ? rs.oneEuroMinCutoffFar  : 1.7);
-      const betaNear   = (rs.oneEuroBetaNear     != null ? rs.oneEuroBetaNear     : 0.02);
-      const betaFar    = (rs.oneEuroBetaFar      != null ? rs.oneEuroBetaFar      : 0.06);
-      const dCutoff    = (rs.oneEuroDCutoff      != null ? rs.oneEuroDCutoff      : 1.0);
+      // deadband to remove tiny shimmer when camera is steady
+      if (jump <= (rs.deadbandM || 0.01)) {
+        rs._outlierN = 0;
+      } else {
+        // decide smoothing / snapping
+        let a = (rs.alphaStill || 0.22) + ((rs.alphaMove || 0.95) - (rs.alphaStill || 0.22)) * motion;
+        if (motion >= (rs.snapMotion || 0.80)) a = 1.0;
 
-      const minCutoff = minCutNear + (minCutFar - minCutNear) * tD;
-      const beta = betaNear + (betaFar - betaNear) * tD;
-
-      // Optional outlier clamp when phone is steady (prevents rare teleports without adding lag).
-      const dx0 = targetX - rs.pos.x;
-      const dz0 = targetZ - rs.pos.z;
-      const jump = Math.hypot(dx0, dz0);
-      const baseJump = (rs.jumpRejectNearM || 0.25) + ((rs.jumpRejectFarM || 0.60) - (rs.jumpRejectNearM || 0.25)) * tD;
-      if (motion < 0.18 && jump > baseJump * 2.2) {
-        const k = (baseJump * 2.2) / Math.max(0.00001, jump);
-        targetX = rs.pos.x + dx0 * k;
-        targetZ = rs.pos.z + dz0 * k;
+        // Avoid mode-flip "lag": do not artificially slow down; instead treat large deltas as outliers only when steady.
+        const treatAsOutlier = (jump > jumpThresh) && (motion <= (rs.outlierMotionMax || 0.35)) && (nowT >= rs.modeHoldUntil);
+        if (treatAsOutlier) {
+          rs._outlierN = (rs._outlierN || 0) + 1;
+          if (rs._outlierN >= (rs.outlierAcceptN || 3)) {
+            // accept after consistent outliers (prevents "stuck" reticle)
+            rs.pos.x += dx * (rs.outlierAlpha || 0.35);
+            rs.pos.z += dz * (rs.outlierAlpha || 0.35);
+            rs._outlierN = 0;
+          }
+        } else {
+          rs._outlierN = 0;
+          rs.pos.x = rs.pos.x + dx * a;
+          rs.pos.z = rs.pos.z + dz * a;
+        }
       }
-
-      // One Euro helper
-      const _alpha = (cutoff, dt) => {
-        const tau = 1.0 / (2.0 * Math.PI * Math.max(0.0001, cutoff));
-        return 1.0 / (1.0 + tau / Math.max(0.001, dt));
-      };
-
-      if (!rs._oe) {
-        rs._oe = { x: targetX, z: targetZ, dx: 0, dz: 0, t: nowT };
-      }
-
-      const dt = Math.max(0.001, (nowT - (rs._oe.t || nowT)) / 1000);
-      rs._oe.t = nowT;
-
-      // Derivative (velocity) low-pass
-      const dx = (targetX - rs._oe.x) / dt;
-      const dz = (targetZ - rs._oe.z) / dt;
-      const aD = _alpha(dCutoff, dt);
-      rs._oe.dx = rs._oe.dx + (dx - rs._oe.dx) * aD;
-      rs._oe.dz = rs._oe.dz + (dz - rs._oe.dz) * aD;
-
-      const cutoffX = minCutoff + beta * Math.abs(rs._oe.dx);
-      const cutoffZ = minCutoff + beta * Math.abs(rs._oe.dz);
-      const aX = _alpha(cutoffX, dt);
-      const aZ = _alpha(cutoffZ, dt);
-
-      rs._oe.x = rs._oe.x + (targetX - rs._oe.x) * aX;
-      rs._oe.z = rs._oe.z + (targetZ - rs._oe.z) * aZ;
-
-      // Store camera motion signals for next frame
-      rs._prevCamPos.set(__tmpCamPos.x, __tmpCamPos.y, __tmpCamPos.z);
-      rs._prevFwd.set(__tmpFwd.x, __tmpFwd.y, __tmpFwd.z);
-      rs._prevT = nowT;
-
-      rs.pos.x = rs._oe.x;
-      rs.pos.z = rs._oe.z;
       rs.pos.y = targetY;
 
       reticle.position.copy(rs.pos);
@@ -4297,7 +4285,7 @@ const __baseOk = !!(reticle.visible && viewAngleToPlane >= __minACommit && ((ret
 const __zoneOk = (state.commitZone !== 'red');
 state.canCommitPoint = !!(__baseOk && __zoneOk);
 
-// Patch 7.2: explicit block reason (debug + tuning). Values: angle|noHit|redZone|degraded|noReticle|ok
+// Patch 7.1: explicit block reason (debug + tuning). Values: angle|noHit|redZone|degraded|noReticle|ok
 try {
   let reason = 'ok';
   if (!reticle.visible) reason = 'noReticle';
