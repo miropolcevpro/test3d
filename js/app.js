@@ -373,6 +373,33 @@ const state = {
     frozen: false,
   },
 
+  // World-lock (Patch 3): improves perceived stability of the filled contour/texture by
+  // compensating tracking corrections using WebXR Anchors (when supported).
+  // Important: this is BEST-EFFORT and never blocks UX; if Anchors are unavailable,
+  // behavior remains identical to the baseline.
+  worldLock: {
+    enabled: true,
+
+    // runtime
+    pending: false,
+    active: false,
+    anchor: null,
+    baseM: null,          // THREE.Matrix4 (anchor pose at creation)
+    lastUpdateT: 0,
+
+    // cadence / smoothing
+    updateIntervalMs: 80, // ~12.5 Hz
+    posAlpha: 0.18,
+    rotAlpha: 0.18,
+
+    // current correction
+    corrPos: new THREE.Vector3(0, 0, 0),
+    corrQuat: new THREE.Quaternion(),
+
+    // anchor creation pose
+    wantPose: null,       // {x,y,z}
+  },
+
 };
 
 
@@ -2593,10 +2620,22 @@ async function startAR() {
   state.xrSession = session;
   // XR increases memory/decoder pressure; reduce parallelism while active.
   try { updateTexLoadMaxParallel(); } catch (_) {}
-  renderer.xr.setReferenceSpaceType('local');
+  // Prefer local-floor for better floor stability when supported (safe fallback to local)
+  let refType = 'local-floor';
+  try {
+    renderer.xr.setReferenceSpaceType(refType);
+  } catch (_) {
+    refType = 'local';
+    try { renderer.xr.setReferenceSpaceType(refType); } catch (_) {}
+  }
   await renderer.xr.setSession(session);
 
-  state.referenceSpace = await session.requestReferenceSpace('local');
+  try {
+    state.referenceSpace = await session.requestReferenceSpace(refType);
+  } catch (_) {
+    refType = 'local';
+    state.referenceSpace = await session.requestReferenceSpace(refType);
+  }
   state.viewerSpace = await session.requestReferenceSpace('viewer');
 
   state.hitTestSource = await session.requestHitTestSource({ space: state.viewerSpace });
@@ -2614,8 +2653,12 @@ async function startAR() {
   state.floorStable = false;
   state._onXRSelect = null;
 
-  // anchors
-  state.anchorsSupported = typeof session.requestAnchor === 'function';
+  // anchors (best-effort): actual creation is via XRFrame.createAnchor
+  state.anchorsSupported = false;
+  try {
+    const enabled = session.enabledFeatures ? Array.from(session.enabledFeatures) : [];
+    state.anchorsSupported = enabled.includes('anchors');
+  } catch (_) {}
 
   // depth
   state.depthSupported = false;
@@ -2682,6 +2725,9 @@ function cleanupXR() {
   state.floorY = 0;
   state.floorSamples = [];
   state.floorYEstimate = null;
+
+  // Patch 3: reset anchor-based correction when leaving AR.
+  try { arWorldLockReset(); } catch (_) {}
 
 
   reticle.visible = false;
@@ -2891,6 +2937,17 @@ function closeContour() {
   rebuildFill();
   updateAreaUI();
 
+  // Patch 3 (world-lock): request an anchor at the contour centroid to improve perceived
+  // stability against tracking corrections. Best-effort; if Anchors are unavailable,
+  // behavior remains unchanged.
+  try {
+    let cx = 0, cz = 0;
+    for (const p of state.points) { cx += p.x; cz += p.z; }
+    cx /= state.points.length;
+    cz /= state.points.length;
+    arWorldLockRequestAnchorAtPose({ x: cx, y: state.floorY, z: cz });
+  } catch (_) {}
+
   // UI
   // Once the contour is closed and the fill is built, enable the bottom menu.
   show(UI.contourHint, false);
@@ -2905,6 +2962,9 @@ function closeContour() {
 
 
 function resetAll(keepFloor = false) {
+  // Patch 3: always drop world-lock when restarting or editing.
+  try { arWorldLockReset(); } catch (_) {}
+
   state.points = [];
   state.holes = [];
   state.holePoints = [];
@@ -3404,6 +3464,129 @@ const __tmpFwd = new THREE.Vector3();
 const __tmpHitPos = new THREE.Vector3();
 const __tmpHitQuat = new THREE.Quaternion();
 
+// Patch 3 (world-lock): matrices for anchor-based correction
+const __wlM0 = new THREE.Matrix4();
+const __wlMt = new THREE.Matrix4();
+const __wlDelta = new THREE.Matrix4();
+const __wlCorr = new THREE.Matrix4();
+const __wlPos = new THREE.Vector3();
+const __wlQuat = new THREE.Quaternion();
+const __wlScale = new THREE.Vector3(1, 1, 1);
+
+function arWorldLockReset() {
+  const wl = state.worldLock;
+  if (!wl) return;
+  wl.pending = false;
+  wl.active = false;
+  wl.anchor = null;
+  wl.baseM = null;
+  wl.wantPose = null;
+  wl.lastUpdateT = 0;
+  wl.corrPos.set(0, 0, 0);
+  wl.corrQuat.identity();
+
+  // Ensure group is back to the baseline transform
+  try {
+    anchorGroup.position.set(0, 0, 0);
+    anchorGroup.quaternion.identity();
+    anchorGroup.scale.set(1, 1, 1);
+  } catch (_) {}
+}
+
+function arWorldLockRequestAnchorAtPose(pos) {
+  const wl = state.worldLock;
+  if (!wl || !wl.enabled) return;
+  if (!pos || !isFinite(pos.x) || !isFinite(pos.y) || !isFinite(pos.z)) return;
+
+  // Always reset previous lock before requesting a new anchor.
+  arWorldLockReset();
+  wl.wantPose = { x: pos.x, y: pos.y, z: pos.z };
+  wl.pending = true;
+}
+
+function arWorldLockUpdate(frame) {
+  const wl = state.worldLock;
+  if (!wl || !wl.enabled || !state.xrSession || !state.referenceSpace) return;
+
+  // Only apply world-lock after the contour is closed (never during point placement).
+  if (!state.closed) {
+    if (wl.active || wl.pending) arWorldLockReset();
+    return;
+  }
+
+  const now = performance.now();
+  if (wl.lastUpdateT && (now - wl.lastUpdateT) < wl.updateIntervalMs) {
+    // apply last known correction smoothly every frame (cheap)
+    try {
+      anchorGroup.position.lerp(wl.corrPos, wl.posAlpha);
+      anchorGroup.quaternion.slerp(wl.corrQuat, wl.rotAlpha);
+    } catch (_) {}
+    return;
+  }
+  wl.lastUpdateT = now;
+
+  // Try to create an anchor once, when requested.
+  if (wl.pending && !wl.anchor) {
+    try {
+      if (typeof frame.createAnchor === 'function' && wl.wantPose) {
+        // Create anchor at the requested pose (identity orientation)
+        const xf = new XRRigidTransform(
+          { x: wl.wantPose.x, y: wl.wantPose.y, z: wl.wantPose.z },
+          { x: 0, y: 0, z: 0, w: 1 }
+        );
+        // Note: createAnchor returns a Promise<XRAnchor>
+        frame.createAnchor(xf, state.referenceSpace).then((anchor) => {
+          wl.anchor = anchor;
+          wl.pending = false;
+          // Base pose will be captured on the next XR frame (never block on it here).
+          wl.baseM = null;
+          wl.active = true;
+        }).catch(() => {
+          // Silent fallback: keep baseline behavior.
+          wl.pending = false;
+        });
+      } else {
+        wl.pending = false;
+      }
+    } catch (_) {
+      wl.pending = false;
+    }
+  }
+
+  // If we have an anchor, capture base pose once (first good pose) and compute correction.
+  if (wl.anchor) {
+    try {
+      const pose = frame.getPose(wl.anchor.anchorSpace, state.referenceSpace);
+      if (!pose || !pose.transform || !pose.transform.matrix) return;
+
+      // First good pose becomes the base.
+      if (!wl.baseM) {
+        __wlM0.fromArray(pose.transform.matrix);
+        wl.baseM = __wlM0.clone();
+        wl.active = true;
+      }
+
+      __wlMt.fromArray(pose.transform.matrix);
+      __wlM0.copy(wl.baseM);
+
+      // delta = Mt * inv(M0)
+      __wlDelta.copy(__wlM0).invert();
+      __wlDelta.premultiply(__wlMt);
+
+      // correction = inv(delta)
+      __wlCorr.copy(__wlDelta).invert();
+      __wlCorr.decompose(__wlPos, __wlQuat, __wlScale);
+
+      // Save target correction and smoothly apply each frame.
+      wl.corrPos.copy(__wlPos);
+      wl.corrQuat.copy(__wlQuat);
+
+      anchorGroup.position.lerp(wl.corrPos, wl.posAlpha);
+      anchorGroup.quaternion.slerp(wl.corrQuat, wl.rotAlpha);
+    } catch (_) {}
+  }
+}
+
 function updateXR(frame) {
   // Center hit test (used to estimate floor height and validate floor hits)
   let gotHit = false;      // floor-like (for scanning)
@@ -3733,6 +3916,9 @@ function updateXR(frame) {
     }
   }
 
+  // Patch 3: anchor-based world-lock correction (best-effort)
+  try { arWorldLockUpdate(frame); } catch (_) {}
+
   // UI measure labels
   // Reuse XR camera computed at the beginning of updateXR(); do not redeclare.
   updateMeasureLabels(xrCam);
@@ -3799,6 +3985,9 @@ UI.btnArOk?.addEventListener('click', () => {
 });
 
 UI.btnEditShape?.addEventListener('click', () => {
+  // Patch 3: disable world-lock before returning to point placement.
+  try { arWorldLockReset(); } catch (_) {}
+
   // return to drawing mode, keep points
   show(UI.finalColors, false);
   // Do not re-show the initial contour hint: the user is already in the flow.
