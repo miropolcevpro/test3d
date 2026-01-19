@@ -53,33 +53,6 @@ const PLANE_REFINE_ENABLED = (() => {
   }
 })();
 
-// Floor plane lock + wall guard flags (Patch: floor pin + wall guard)
-const FLOOR_PLANE_LOCK_ENABLED = (() => {
-  try {
-    const q = new URLSearchParams(window.location.search);
-    if (!q.has('floorPlane')) return true;
-    const v = (q.get('floorPlane') || '').trim().toLowerCase();
-    if (v === '' || v === '1' || v === 'true' || v === 'yes' || v === 'on') return true;
-    if (v === '0' || v === 'false' || v === 'no' || v === 'off') return false;
-    return true;
-  } catch (_) {
-    return true;
-  }
-})();
-
-const WALL_GUARD_ENABLED = (() => {
-  try {
-    const q = new URLSearchParams(window.location.search);
-    if (!q.has('wallGuard')) return true;
-    const v = (q.get('wallGuard') || '').trim().toLowerCase();
-    if (v === '' || v === '1' || v === 'true' || v === 'yes' || v === 'on') return true;
-    if (v === '0' || v === 'false' || v === 'no' || v === 'off') return false;
-    return true;
-  } catch (_) {
-    return true;
-  }
-})();
-
 // ------------------------
 // UI
 // ------------------------
@@ -343,24 +316,6 @@ const state = {
   floorSamples: [],
   floorYEstimate: null,
   floorStable: false,
-
-  // Floor plane pinning samples (for removing far lift)
-  floorPosSamples: [],
-  floorUpSamples: [],
-  floorPlane: {
-    enabled: FLOOR_PLANE_LOCK_ENABLED,
-    // world-space anchor point on the floor
-    p0: new THREE.Vector3(0, 0, 0),
-    // world-space unit normal
-    n: new THREE.Vector3(0, 1, 0),
-    // whether plane is considered valid
-    valid: false,
-    tiltDeg: 0,
-  },
-
-  // Reticle commit gating (e.g., wall guard)
-  reticleCommitOk: true,
-  reticleBlockReason: '',
 
   reticleVisible: false,
   snapArmed: false,
@@ -2805,13 +2760,6 @@ function ensureFloorLocked() {
   state.floorLocked = true;
   state.floorY = reticle.position.y;
 
-  // Apply floor plane pinning on first user action
-  try {
-    if (state.floorPlane && state.floorPlane.enabled) {
-      _floorPlaneApplyAtWorldPoint(reticle.position.x, state.floorY, reticle.position.z);
-    }
-  } catch (_) {}
-
   // lock scanning grid to the floor (and then hide it — it is only for scanning)
   scanGrid.position.set(reticle.position.x, state.floorY + 0.001, reticle.position.z);
   scanGrid.visible = false;
@@ -2835,21 +2783,12 @@ function addPointAtWorld(worldPos) {
   ensureFloorLocked();
   if (!state.floorLocked) return;
 
-  // Clamp on floor / project to the locked floor plane
+  // Clamp on floor
   const hitWorld = worldPos.clone();
-  if (state.floorPlane && state.floorPlane.enabled && state.floorPlane.valid) {
-    _projectPointToFloorPlane(hitWorld);
-  } else {
-    hitWorld.y = state.floorY;
-  }
+  hitWorld.y = state.floorY;
 
   // Convert to local space (anchorGroup)
   const local = anchorGroup.worldToLocal(hitWorld);
-
-  // Keep contour strictly planar in local space
-  if (state.floorPlane && state.floorPlane.enabled && state.floorPlane.valid) {
-    local.y = 0;
-  }
 
   // If cutting a hole
   if (state.phase === 'ar_cut') {
@@ -2890,27 +2829,6 @@ function addPointFromReticle() {
   if (!state.xrSession) return;
   if (!state.floorLocked || state.phase === 'ar_scan') return;
   if (!reticle.visible) return;
-
-  // Wall guard: prevent accidental placement on walls
-  if (!state.reticleCommitOk) {
-    // Optional: a very light hint (no spam)
-    try {
-      const now = performance.now();
-      if (!state._wallHintT || (now - state._wallHintT) > 1200) {
-        state._wallHintT = now;
-        if (UI.scanHint && UI.scanHint.querySelector) {
-          const t = UI.scanHint.querySelector('.scanTitle');
-          const s = UI.scanHint.querySelector('.scanText');
-          if (t) t.textContent = 'НАВЕДИТЕ НА ПОЛ';
-          if (s) s.textContent = 'Точка ставится только по полу. Наведите камеру на пол и нажмите +.';
-          show(UI.scanHint, true);
-          setTimeout(() => { try { if (state.phase !== 'ar_scan') show(UI.scanHint, false); } catch (_) {} }, 900);
-        }
-      }
-    } catch (_) {}
-    return;
-  }
-
   addPointAtWorld(reticle.position);
 }
 
@@ -2999,7 +2917,6 @@ function resetAll(keepFloor = false) {
   if (!keepFloor) {
     state.floorLocked = false;
     state.floorY = 0;
-    _floorPlaneReset();
     // floor stabilization state (may exist depending on build)
     if ('floorSamples' in state) state.floorSamples = [];
     if ('floorYEstimate' in state) state.floorYEstimate = null;
@@ -3487,111 +3404,6 @@ const __tmpFwd = new THREE.Vector3();
 const __tmpHitPos = new THREE.Vector3();
 const __tmpHitQuat = new THREE.Quaternion();
 
-// Floor plane helpers (Patch: floor pin + wall guard)
-const __worldUp = new THREE.Vector3(0, 1, 0);
-const __tmpPlaneN = new THREE.Vector3();
-const __tmpPlaneP0 = new THREE.Vector3();
-const __tmpV3 = new THREE.Vector3();
-
-function _floorPlaneReset() {
-  try {
-    state.floorPosSamples.length = 0;
-    state.floorUpSamples.length = 0;
-    if (state.floorPlane) {
-      state.floorPlane.valid = false;
-      state.floorPlane.n.set(0, 1, 0);
-      state.floorPlane.p0.set(0, 0, 0);
-      state.floorPlane.tiltDeg = 0;
-    }
-  } catch (_) {}
-}
-
-function _floorPlaneComputeUpClamped(maxTiltDeg) {
-  // Average up vectors from samples and clamp tilt to maxTiltDeg.
-  __tmpPlaneN.set(0, 0, 0);
-  const ups = state.floorUpSamples;
-  for (let i = 0; i < ups.length; i++) {
-    const u = ups[i];
-    if (!u || !isFinite(u[0]) || !isFinite(u[1]) || !isFinite(u[2])) continue;
-    __tmpPlaneN.x += u[0];
-    __tmpPlaneN.y += u[1];
-    __tmpPlaneN.z += u[2];
-  }
-  if (__tmpPlaneN.lengthSq() < 1e-6) {
-    __tmpPlaneN.set(0, 1, 0);
-    return { n: __tmpPlaneN.clone(), tiltDeg: 0 };
-  }
-  __tmpPlaneN.normalize();
-  if (__tmpPlaneN.y < 0) __tmpPlaneN.multiplyScalar(-1);
-
-  let tiltDeg = 0;
-  try {
-    const dot = Math.max(-1, Math.min(1, __tmpPlaneN.dot(__worldUp)));
-    tiltDeg = Math.acos(dot) * 180 / Math.PI;
-  } catch (_) { tiltDeg = 0; }
-
-  if (tiltDeg > maxTiltDeg) {
-    // Slerp the normal back towards worldUp to clamp tilt.
-    const t = maxTiltDeg / Math.max(1e-6, tiltDeg);
-    __tmpPlaneN.lerp(__worldUp, 1 - t).normalize();
-    tiltDeg = maxTiltDeg;
-  }
-  return { n: __tmpPlaneN.clone(), tiltDeg };
-}
-
-function _floorPlaneApplyAtWorldPoint(p0x, p0y, p0z) {
-  try {
-    const fp = state.floorPlane;
-    if (!fp || !fp.enabled) return;
-
-    // Compute clamped normal from samples.
-    const { n, tiltDeg } = _floorPlaneComputeUpClamped(2.5);
-    fp.n.copy(n);
-    fp.p0.set(p0x, p0y, p0z);
-    fp.valid = true;
-    fp.tiltDeg = tiltDeg;
-
-    // Align anchorGroup so its local +Y matches the floor normal.
-    const q = new THREE.Quaternion().setFromUnitVectors(__worldUp, fp.n);
-    anchorGroup.position.copy(fp.p0);
-    anchorGroup.quaternion.copy(q);
-    anchorGroup.updateMatrixWorld(true);
-  } catch (_) {}
-}
-
-function _projectPointToFloorPlane(worldPoint) {
-  const fp = state.floorPlane;
-  if (!fp || !fp.enabled || !fp.valid) return worldPoint;
-  __tmpV3.copy(worldPoint).sub(fp.p0);
-  const dist = __tmpV3.dot(fp.n);
-  return worldPoint.addScaledVector(fp.n, -dist);
-}
-
-function _rayIntersectFloorPlane(outPoint, camPos, fwd) {
-  const fp = state.floorPlane;
-  if (!fp || !fp.enabled || !fp.valid) return false;
-  const denom = fp.n.dot(fwd);
-  if (Math.abs(denom) < 1e-4) return false;
-  __tmpV3.copy(fp.p0).sub(camPos);
-  const t = fp.n.dot(__tmpV3) / denom;
-  if (!isFinite(t) || t <= 0.05 || t >= 12.0) return false;
-  outPoint.copy(camPos).addScaledVector(fwd, t);
-  return true;
-}
-
-function _setReticleBlocked(isBlocked) {
-  try {
-    if (!reticle || !reticle.material) return;
-    if (isBlocked) {
-      reticle.material.color.setHex(0x808080);
-      reticle.material.opacity = 0.75;
-    } else {
-      reticle.material.color.setHex(0x2f6cff);
-      reticle.material.opacity = 0.9;
-    }
-  } catch (_) {}
-}
-
 function updateXR(frame) {
   // Center hit test (used to estimate floor height and validate floor hits)
   let gotHit = false;      // floor-like (for scanning)
@@ -3649,13 +3461,6 @@ function updateXR(frame) {
 
     if (__tmpFwd.y < -0.15) {
       state.floorSamples.push(hitY);
-      // collect position + up samples for floor plane pinning
-      try {
-        state.floorPosSamples.push([hitX, hitY, hitZ]);
-        state.floorUpSamples.push([__tmpUp.x, __tmpUp.y, __tmpUp.z]);
-        if (state.floorPosSamples.length > 80) state.floorPosSamples.shift();
-        if (state.floorUpSamples.length > 80) state.floorUpSamples.shift();
-      } catch (_) {}
       if (state.floorSamples.length > 40) state.floorSamples.shift();
 
       const sorted = state.floorSamples.slice().sort((a, b) => a - b);
@@ -3677,13 +3482,6 @@ function updateXR(frame) {
         state.floorLocked = true;
         state.floorStable = true;
         state.floorY = p20;
-
-        // Apply floor plane pinning (tilt-compensated) at lock moment
-        try {
-          if (state.floorPlane && state.floorPlane.enabled && reticle && reticle.visible) {
-            _floorPlaneApplyAtWorldPoint(reticle.position.x, state.floorY, reticle.position.z);
-          }
-        } catch (_) {}
 
         // Patch 2: initialize plane refinement reference height
         try {
@@ -3767,81 +3565,38 @@ function updateXR(frame) {
 // Reticle placement: project to the active floor plane (prevents sticking to walls)
   const activeY = state.floorLocked ? state.floorY : (state.floorYEstimate != null ? state.floorYEstimate : hitY);
 
-  // Wall guard: treat steep hits as walls (grey reticle + block commit), but keep reticle visible via floor plane intersection
-  let wallLike = false;
-  if (WALL_GUARD_ENABLED && gotHitRaw && hitY != null) {
-    try {
-      wallLike = (__tmpUp.y <= 0.60);
-    } catch (_) { wallLike = false; }
-  }
-
   let reticleOk = false;
-  state.reticleCommitOk = true;
-  state.reticleBlockReason = '';
-
-  // Use floor plane (tilt-compensated) once locked; otherwise use legacy Y-plane
-  if (state.floorLocked && state.floorPlane && state.floorPlane.enabled && state.floorPlane.valid) {
-    // Prefer projecting a valid hit onto the plane; otherwise ray ∩ plane
-    let usedHit = false;
-    if (gotHitRaw && !wallLike && hitX != null && hitY != null && hitZ != null) {
-      __tmpHitPos.set(hitX, hitY, hitZ);
-      _projectPointToFloorPlane(__tmpHitPos);
-      reticle.position.copy(__tmpHitPos);
-      usedHit = true;
-      reticleOk = true;
-    }
-    if (!usedHit) {
-      if (_rayIntersectFloorPlane(__tmpHitPos, __tmpCamPos, __tmpFwd)) {
-        reticle.position.copy(__tmpHitPos);
-        reticleOk = true;
+  if (activeY != null && __tmpFwd.y < -0.02) {
+    // Prefer using the hit position (XZ) when it matches the floor height reference;
+    // otherwise fall back to ray ∩ plane (Y=activeY).
+    let useHit = false;
+    if (state.floorLocked) {
+      // Use refined reference height for matching, but keep geometry anchored to state.floorY.
+      const pr = state.planeRefine;
+      const yRef = (pr && pr.enabled && isFinite(pr.planeYRef)) ? pr.planeYRef : state.floorY;
+      const tol = (pr && pr.enabled) ? pr.heightTolMaxM : 0.08;
+      if (gotHitRaw && hitY != null && Math.abs(hitY - yRef) <= tol) {
+        useHit = true;
       }
     }
-    if (reticleOk) {
+
+    if (useHit && hitX != null && hitZ != null) {
+      reticle.position.set(hitX, activeY, hitZ);
       reticle.quaternion.set(0, 0, 0, 1);
       reticle.visible = true;
-    }
-  } else {
-    if (activeY != null && __tmpFwd.y < -0.02) {
-      // Legacy behavior: hit XZ match + ray ∩ plane (Y=activeY)
-      let useHit = false;
-      if (state.floorLocked) {
-        // Use refined reference height for matching, but keep geometry anchored to state.floorY.
-        const pr = state.planeRefine;
-        const yRef = (pr && pr.enabled && isFinite(pr.planeYRef)) ? pr.planeYRef : state.floorY;
-        const tol = (pr && pr.enabled) ? pr.heightTolMaxM : 0.08;
-        if (gotHitRaw && hitY != null && Math.abs(hitY - yRef) <= tol) {
-          useHit = true;
-        }
-      }
-
-      if (useHit && hitX != null && hitZ != null) {
-        reticle.position.set(hitX, activeY, hitZ);
+      reticleOk = true;
+    } else {
+      const t = (activeY - __tmpCamPos.y) / __tmpFwd.y;
+      if (t > 0.05 && t < 12.0) {
+        reticle.position.copy(__tmpCamPos).addScaledVector(__tmpFwd, t);
+        reticle.position.y = activeY;
         reticle.quaternion.set(0, 0, 0, 1);
         reticle.visible = true;
         reticleOk = true;
-      } else {
-        const t = (activeY - __tmpCamPos.y) / __tmpFwd.y;
-        if (t > 0.05 && t < 12.0) {
-          reticle.position.copy(__tmpCamPos).addScaledVector(__tmpFwd, t);
-          reticle.position.y = activeY;
-          reticle.quaternion.set(0, 0, 0, 1);
-          reticle.visible = true;
-          reticleOk = true;
-        }
       }
     }
   }
-
   if (!reticleOk) reticle.visible = false;
-
-  // Apply wall guard: grey reticle + block commit
-  if (reticle.visible && wallLike) {
-    _setReticleBlocked(true);
-    state.reticleCommitOk = false;
-    state.reticleBlockReason = 'wall';
-  } else {
-    _setReticleBlocked(false);
-  }
 
   // Scan grid: show only while scanning AND only when we have a valid projected reticle
   if (!state.floorLocked && state.phase === 'ar_scan') {
@@ -3854,8 +3609,8 @@ function updateXR(frame) {
     scanGrid.visible = false;
   }
 
-  // If floor is locked and no floor plane is active, clamp reticle to floorY (legacy safety)
-  if (state.floorLocked && reticle.visible && !(state.floorPlane && state.floorPlane.enabled && state.floorPlane.valid)) {
+  // If floor is locked, clamp reticle exactly to floorY (extra safety)
+  if (state.floorLocked && reticle.visible) {
     reticle.position.y = state.floorY;
   }
 
