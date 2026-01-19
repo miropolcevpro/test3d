@@ -777,18 +777,50 @@ to   { transform: scale(1.12); }
   box-shadow: 0 0 0 2px rgba(90, 167, 255, 0.28);
 }
 
-
-/* Conversion block replacing technical parameters (detail screen only) */
-#detailTechCard .convBody{display:flex;flex-direction:column;gap:12px;padding:12px;}
-#detailTechCard .convBtn{display:flex;align-items:center;gap:10px;padding:14px 16px;border-radius:14px;text-decoration:none;user-select:none;-webkit-tap-highlight-color:transparent;}
-#detailTechCard .convIcon{width:24px;height:24px;flex:0 0 24px;opacity:0.95;}
-#detailTechCard .convText{font-weight:700;line-height:1.1;letter-spacing:0.1px;}
-#detailTechCard .convPrimary{background:rgba(33,150,243,0.55);color:#fff;}
-#detailTechCard .convPrimary:hover{background:rgba(33,150,243,0.68);}
-#detailTechCard .convSecondary{background:rgba(0,0,0,0.35);color:#fff;}
-#detailTechCard .convSecondary:hover{background:rgba(0,0,0,0.5);}
-
-#detailTechCard .convBtnPrimary{background:rgba(33,150,243,0.55);color:#fff;}
-#detailTechCard .convBtnPrimary:hover{background:rgba(33,150,243,0.68);}
-#detailTechCard .convBtnSecondary{background:rgba(0,0,0,0.35);color:#fff;}
-#detailTechCard .convBtnSecondary:hover{background:rgba(0,0,0,0.5);}
+/* Fix23: Compact conversion CTA replacing tech params (non-AR only) */
+#detailTechCard #btnTechToggle{display:none !important;}
+#detailTechCard .techHeader{align-items:center;}
+#detailTechCard .techTitle{font-weight:700;}
+#detailTechCard .convBody{
+  display:flex;
+  flex-direction:row;
+  gap:10px;
+  padding:10px 12px 12px;
+}
+#detailTechCard .convBtn{
+  flex:1 1 0;
+  min-width:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  padding:12px 10px;
+  border-radius:14px;
+  text-decoration:none;
+  color:#fff;
+  background:rgba(0,0,0,0.32);
+}
+#detailTechCard .convBtn:active,
+#detailTechCard .convBtn:hover{
+  background:rgba(0,0,0,0.46);
+}
+#detailTechCard .convBtn.convPrimary{
+  background:rgba(90, 170, 255, 0.65);
+}
+#detailTechCard .convBtn.convPrimary:active,
+#detailTechCard .convBtn.convPrimary:hover{
+  background:rgba(90, 170, 255, 0.82);
+}
+#detailTechCard .convIcon{width:20px;height:20px;flex:0 0 20px;}
+#detailTechCard .convText{
+  font-weight:700;
+  font-size:14px;
+  line-height:1.05;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+@media (max-width: 360px){
+  #detailTechCard .convText{font-size:13px;}
+  #detailTechCard .convBtn{padding:11px 8px;}
+}
