@@ -1661,6 +1661,7 @@ if (state && state.phase === 'ar_final') {
   aoTexCore = aoR.ok ? aoR.v : null;
   normalTex = normalR.ok ? normalR.v : null;
 }
+
   // Update / create tile material in-place (premium switching without using maps from other textures).
   if (!tileMaterial) {
     tileMaterial = makeTileMaterial({
@@ -1814,6 +1815,37 @@ if (state && state.phase === 'ar_final') {
 
   // Predictive prefetch for snappy native-like switching.
   schedulePrefetchAdjacentTiles(t);
+}
+
+// Select a tile for UI purposes only (no network / texture loads).
+// Used to keep the detail screen responsive on slow mobile connections.
+function setSelectedTileOnly(t) {
+  try {
+    if (!t) return;
+    state.selectedTile = t;
+
+    // Update hero image (if not a gallery-driven hero).
+    if (UI.detailHero) {
+      try {
+        const hasGallery = !!(state.selectedShape && Array.isArray(state.selectedShape.gallery) && state.selectedShape.gallery.length);
+        if (!hasGallery) {
+          const hero = t.preview || (t.maps && t.maps.albedo) || t.texture || '';
+          UI.detailHero.style.backgroundImage = hero ? `url(${hero})` : 'none';
+        }
+      } catch (_) {}
+    }
+
+    const tileKey = String(t.id);
+    const updateSwatches = (wrap) => {
+      wrap?.querySelectorAll('[data-tile-id]').forEach(el => {
+        el.classList.toggle('swatch--active', tileKey === el.dataset.tileId);
+      });
+    };
+    updateSwatches(UI.colorRow);
+    updateSwatches(UI.finalColors);
+
+    if (UI.arProductTitle) UI.arProductTitle.textContent = t.name || '—';
+  } catch (_) {}
 }
 
 // ------------------------
@@ -2164,18 +2196,26 @@ async function openDetail(shapeId) {
 
   state.currentAllowedTiles = allowed;
 
+  // Network-aware detail loading:
+  // - On slow connections, avoid eager heavy texture loads on initial detail open.
+  // - Keep the main product UX unchanged on fast networks.
+  const { eff: _eff, downlink: _dl, rtt: _rtt, saveData: _saveData } = _getConnInfo();
+  const _slowNet = !!_saveData || /slow-2g|2g|3g/i.test(String(_eff || '')) || (_dl && _dl < 2) || (_rtt && _rtt > 250);
+
   // Swatches. For per-shape palette: click -> apply + start AR.
-  renderColorRow(UI.colorRow, allowed, { startArOnClick: paletteActive });
+  renderColorRow(UI.colorRow, allowed, { startArOnClick: paletteActive, eagerCount: _slowNet ? 3 : 10 });
 
   // Prefetch (non-blocking): warm a small set of previews when the browser is idle.
   try {
     const idle = window.requestIdleCallback || ((fn) => setTimeout(() => fn({ timeRemaining: () => 0 }), 220));
-    idle(() => {
-      try {
-        const previewUrls = (allowed || []).slice(0, 8).map(getTilePreviewUrl).filter(Boolean);
-        prefetchImageUrls(previewUrls, 3);
-      } catch (_) {}
-    });
+    if (!_slowNet) {
+      idle(() => {
+        try {
+          const previewUrls = (allowed || []).slice(0, 8).map(getTilePreviewUrl).filter(Boolean);
+          prefetchImageUrls(previewUrls, 3);
+        } catch (_) {}
+      });
+    }
   } catch (_) {}
 
   // Show the screen immediately; texture maps will refine progressively.
@@ -2184,7 +2224,12 @@ async function openDetail(shapeId) {
 
   // Choose default surface/tile for this shape (apply albedo fast, secondary maps in background)
   const defaultTile = allowed[0] || state.tiles[0];
-  if (defaultTile) { selectTile(defaultTile); }
+  if (defaultTile) {
+    // Fast networks keep the old UX: pre-apply a default tile for immediate preview.
+    // Slow networks: only mark selection (no heavy map loads) to keep the detail screen responsive.
+    if (_slowNet) setSelectedTileOnly(defaultTile);
+    else selectTile(defaultTile);
+  }
 
   // Update AR entry UI (Chrome-only gating)
   updateArEntryUI();
@@ -4254,6 +4299,19 @@ UI.btnViewAR?.addEventListener('click', async (ev) => {
     showArHelp('NEED_CHROME');
     return;
   }
+  // Ensure the correct texture selection is applied before entering WebXR.
+  // On slow networks we avoid heavy loads during detail open, so we load on demand here.
+  try {
+    const allowed = Array.isArray(state.currentAllowedTiles) ? state.currentAllowedTiles : null;
+    if (allowed && allowed.length) {
+      const cur = state.selectedTile;
+      const hasCur = !!(cur && allowed.some(x => String(x.id) === String(cur.id)));
+      const wanted = hasCur ? cur : allowed[0];
+      if (wanted) await selectTile(wanted);
+    } else if (state.selectedTile) {
+      await selectTile(state.selectedTile);
+    }
+  } catch (_) {}
   await startAR();
 });
 
