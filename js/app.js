@@ -53,6 +53,38 @@ const PLANE_REFINE_ENABLED = (() => {
   }
 })();
 
+// Floor Lock 2.0 (experimental): enable with ?lock2=1
+// Goal: keep contour/fill maximally "nailed" to the floor plane (reduce hover) and improve tracking stability.
+const FLOOR_LOCK2_ENABLED = (() => {
+  try {
+    const q = new URLSearchParams(window.location.search);
+    if (!q.has('lock2')) return false;
+    const v = (q.get('lock2') || '').trim().toLowerCase();
+    if (v === '' || v === '1' || v === 'true' || v === 'yes' || v === 'on') return true;
+    if (v === '0' || v === 'false' || v === 'no' || v === 'off') return false;
+    return true;
+  } catch (_) {
+    return false;
+  }
+})();
+
+// World Lock via WebXR Anchors API (experimental): enable with ?anchors=1
+// Notes:
+// - Works only if the browser implements Anchors API.
+// - Must NOT affect default flow when disabled.
+const WORLD_ANCHORS_ENABLED = (() => {
+  try {
+    const q = new URLSearchParams(window.location.search);
+    if (!q.has('anchors')) return false;
+    const v = (q.get('anchors') || '').trim().toLowerCase();
+    if (v === '' || v === '1' || v === 'true' || v === 'yes' || v === 'on') return true;
+    if (v === '0' || v === 'false' || v === 'no' || v === 'off') return false;
+    return true;
+  } catch (_) {
+    return false;
+  }
+})();
+
 // ------------------------
 // UI
 // ------------------------
@@ -301,6 +333,21 @@ const state = {
   anchorsSupported: false,
   anchor: null,
 
+  // Patch: Floor Lock 2.0 + World Lock (anchors)
+  floorLock2Enabled: FLOOR_LOCK2_ENABLED,
+  worldAnchorsEnabled: WORLD_ANCHORS_ENABLED,
+  // Rolling reticle samples for gating (only used when floorLock2Enabled)
+  _lock2ReticleSamples: [],
+  _lock2LastGateMsgT: 0,
+  // WebXR Anchors API state (only used when worldAnchorsEnabled)
+  xrAnchorSpace: null,
+  anchorPending: false,
+  anchorFailed: false,
+  anchorStartT: 0,
+  _lastHitTestResult: null,
+  _lastHitPose: null,
+  _anchorInvMatrix: null,
+
   // depth
   depthSupported: false,
   depthInfoSize: null,
@@ -371,33 +418,6 @@ const state = {
     viewAngleDeg: NaN,
     validHit: false,
     frozen: false,
-  },
-
-  // World-lock (Patch 3): improves perceived stability of the filled contour/texture by
-  // compensating tracking corrections using WebXR Anchors (when supported).
-  // Important: this is BEST-EFFORT and never blocks UX; if Anchors are unavailable,
-  // behavior remains identical to the baseline.
-  worldLock: {
-    enabled: true,
-
-    // runtime
-    pending: false,
-    active: false,
-    anchor: null,
-    baseM: null,          // THREE.Matrix4 (anchor pose at creation)
-    lastUpdateT: 0,
-
-    // cadence / smoothing
-    updateIntervalMs: 80, // ~12.5 Hz
-    posAlpha: 0.18,
-    rotAlpha: 0.18,
-
-    // current correction
-    corrPos: new THREE.Vector3(0, 0, 0),
-    corrQuat: new THREE.Quaternion(),
-
-    // anchor creation pose
-    wantPose: null,       // {x,y,z}
   },
 
 };
@@ -2620,22 +2640,10 @@ async function startAR() {
   state.xrSession = session;
   // XR increases memory/decoder pressure; reduce parallelism while active.
   try { updateTexLoadMaxParallel(); } catch (_) {}
-  // Prefer local-floor for better floor stability when supported (safe fallback to local)
-  let refType = 'local-floor';
-  try {
-    renderer.xr.setReferenceSpaceType(refType);
-  } catch (_) {
-    refType = 'local';
-    try { renderer.xr.setReferenceSpaceType(refType); } catch (_) {}
-  }
+  renderer.xr.setReferenceSpaceType('local');
   await renderer.xr.setSession(session);
 
-  try {
-    state.referenceSpace = await session.requestReferenceSpace(refType);
-  } catch (_) {
-    refType = 'local';
-    state.referenceSpace = await session.requestReferenceSpace(refType);
-  }
+  state.referenceSpace = await session.requestReferenceSpace('local');
   state.viewerSpace = await session.requestReferenceSpace('viewer');
 
   state.hitTestSource = await session.requestHitTestSource({ space: state.viewerSpace });
@@ -2653,12 +2661,8 @@ async function startAR() {
   state.floorStable = false;
   state._onXRSelect = null;
 
-  // anchors (best-effort): actual creation is via XRFrame.createAnchor
-  state.anchorsSupported = false;
-  try {
-    const enabled = session.enabledFeatures ? Array.from(session.enabledFeatures) : [];
-    state.anchorsSupported = enabled.includes('anchors');
-  } catch (_) {}
+  // anchors
+  state.anchorsSupported = typeof session.requestAnchor === 'function';
 
   // depth
   state.depthSupported = false;
@@ -2698,6 +2702,9 @@ async function startAR() {
   show(UI.arBottomCenter, false);
   show(UI.btnArAdd, false);
   show(UI.btnArOk, false);
+
+  // Patch: optional experimental UI for FloorLock2
+  _ensureRecenterButton();
   } finally {
     state._startingAR = false;
   }
@@ -2713,6 +2720,14 @@ function cleanupXR() {
   state.transientHitTestSource = null;
   state.transientHitPoses = new Map();
 
+  // Patch: clear world anchor / lock2 state when leaving AR
+  _worldAnchorClear();
+  try { document.getElementById('btnArRecenter')?.remove(); } catch (_) {}
+  state._lock2ReticleSamples = [];
+  state._lock2LastGateMsgT = 0;
+  state._lastHitTestResult = null;
+  state._lastHitPose = null;
+
   // depth
   state.depthSupported = false;
   state.depthInfoSize = null;
@@ -2725,9 +2740,6 @@ function cleanupXR() {
   state.floorY = 0;
   state.floorSamples = [];
   state.floorYEstimate = null;
-
-  // Patch 3: reset anchor-based correction when leaving AR.
-  try { arWorldLockReset(); } catch (_) {}
 
 
   reticle.visible = false;
@@ -2800,11 +2812,244 @@ async function fullRestartAR() {
 // ------------------------
 // Floor lock + points
 // ------------------------
+
+function _lock2TrimSamples(arr, maxN) {
+  try {
+    while (arr.length > maxN) arr.shift();
+  } catch (_) {}
+}
+
+function _lock2RecordReticleSample() {
+  if (!state.floorLock2Enabled) return;
+  if (!reticle.visible) return;
+  const a = state._lock2ReticleSamples;
+  a.push({ t: performance.now(), x: reticle.position.x, z: reticle.position.z });
+  // ~0.7-1.0 sec window depending on fps
+  _lock2TrimSamples(a, 30);
+}
+
+function _lock2JitterCm() {
+  const a = state._lock2ReticleSamples;
+  if (!state.floorLock2Enabled || !a || a.length < 8) return null;
+  let mx = 0, mz = 0;
+  for (const s of a) { mx += s.x; mz += s.z; }
+  mx /= a.length; mz /= a.length;
+  let v = 0;
+  for (const s of a) {
+    const dx = s.x - mx;
+    const dz = s.z - mz;
+    v += dx*dx + dz*dz;
+  }
+  v /= Math.max(1, a.length - 1);
+  return Math.sqrt(v) * 100;
+}
+
+function _lock2GateOk() {
+  if (!state.floorLock2Enabled) return true;
+  // Basic prerequisites
+  if (!state.floorLocked) return false;
+  if (!reticle.visible) return false;
+
+  // Require the camera to be sufficiently pitched to the floor
+  const pr = state.planeRefine;
+  const ang = (pr && isFinite(pr.viewAngleDeg)) ? pr.viewAngleDeg : 0;
+  if (ang < 18) return false;
+
+  // Prefer a stable period (low jitter) once we have enough samples
+  const jitter = _lock2JitterCm();
+  if (jitter != null && jitter > 3.5) return false;
+
+  // If plane refinement is enabled, do not place points while it is frozen
+  if (pr && pr.enabled && pr.frozen) return false;
+
+  return true;
+}
+
+function _lock2GateNotifyOnce(msg) {
+  if (!state.floorLock2Enabled) return;
+  const now = performance.now();
+  if (now - (state._lock2LastGateMsgT || 0) < 650) return;
+  state._lock2LastGateMsgT = now;
+  try {
+    if (UI.scanHint) {
+      const t = UI.scanHint.querySelector('.scanTitle');
+      const s = UI.scanHint.querySelector('.scanText');
+      if (t) t.textContent = 'СТАБИЛИЗАЦИЯ AR';
+      if (s) s.textContent = msg || 'Подвигайте телефон и наведите камеру на пол.';
+      show(UI.scanHint, true);
+    }
+  } catch (_) {}
+}
+
+function _worldAnchorClear() {
+  try {
+    state.xrAnchorSpace = null;
+    state.anchorPending = false;
+    state.anchorFailed = false;
+    state.anchorStartT = 0;
+    state._anchorInvMatrix = null;
+  } catch (_) {}
+  try {
+    anchorGroup.matrixAutoUpdate = true;
+    anchorGroup.position.set(0, 0, 0);
+    anchorGroup.quaternion.set(0, 0, 0, 1);
+    anchorGroup.scale.set(1, 1, 1);
+    anchorGroup.updateMatrixWorld(true);
+  } catch (_) {}
+}
+
+function _worldAnchorStartFromLastHit() {
+  if (!state.worldAnchorsEnabled) return;
+  if (!state.xrSession) return;
+  if (state.xrAnchorSpace || state.anchorPending) return;
+  const hr = state._lastHitTestResult;
+  const can = !!(hr && typeof hr.createAnchor === 'function');
+  if (!can) {
+    state.anchorFailed = true;
+    return;
+  }
+
+  state.anchorPending = true;
+  state.anchorFailed = false;
+  state.anchorStartT = performance.now();
+
+  // Fire-and-forget: resolve anchor when available
+  try {
+    Promise.resolve(hr.createAnchor())
+      .then((a) => {
+        if (!a || !a.anchorSpace) throw new Error('anchorSpace missing');
+        state.xrAnchorSpace = a.anchorSpace;
+        state.anchorPending = false;
+        state.anchorFailed = false;
+      })
+      .catch((e) => {
+        console.warn('[AR] Anchors API createAnchor failed, fallback to non-anchor mode', e);
+        state.anchorPending = false;
+        state.anchorFailed = true;
+      });
+  } catch (e) {
+    state.anchorPending = false;
+    state.anchorFailed = true;
+  }
+}
+
+function _worldAnchorUpdateFromFrame(frame) {
+  if (!state.worldAnchorsEnabled) return;
+  if (!state.xrAnchorSpace || !state.referenceSpace) return;
+  try {
+    const pose = frame.getPose(state.xrAnchorSpace, state.referenceSpace);
+    if (!pose) return;
+
+    // Apply anchor pose directly to the group that contains contour/fill.
+    // This reduces drift when the user looks away and AR tracking refines its map.
+    anchorGroup.matrixAutoUpdate = false;
+    anchorGroup.matrix.fromArray(pose.transform.matrix);
+    anchorGroup.matrixWorldNeedsUpdate = true;
+    anchorGroup.updateMatrixWorld(true);
+
+    // Cache inverse for conversions if needed.
+    if (!state._anchorInvMatrix) state._anchorInvMatrix = new THREE.Matrix4();
+    state._anchorInvMatrix.copy(anchorGroup.matrix).invert();
+  } catch (e) {
+    // If pose lookup fails, do not break rendering.
+  }
+}
+
+function _ensureRecenterButton() {
+  // Only show in experimental Floor Lock 2.0 mode (lock2=1)
+  if (!state.floorLock2Enabled) {
+    try {
+      const old = document.getElementById('btnArRecenter');
+      old?.remove();
+    } catch (_) {}
+    return;
+  }
+
+  try {
+    if (document.getElementById('btnArRecenter')) return;
+    if (!UI.overlay) return;
+
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.id = 'btnArRecenter';
+    b.textContent = 'Recenter';
+    b.title = 'Пересканировать плоскость и заново зафиксировать контур';
+    // Inline style to avoid touching CSS bundle
+    b.style.position = 'absolute';
+    b.style.right = '12px';
+    b.style.top = '68px';
+    b.style.zIndex = '9999';
+    b.style.padding = '10px 12px';
+    b.style.borderRadius = '12px';
+    b.style.border = '1px solid rgba(255,255,255,0.25)';
+    b.style.background = 'rgba(20, 24, 34, 0.55)';
+    b.style.color = '#fff';
+    b.style.backdropFilter = 'blur(10px)';
+    b.style.webkitBackdropFilter = 'blur(10px)';
+    b.style.fontSize = '13px';
+
+    b.addEventListener('click', () => {
+      // Soft reset: drop floor lock, clear anchor (if any), return to scanning.
+      try {
+        resetAll(false);
+        state.phase = 'ar_scan';
+        show(UI.scanHint, true);
+        show(UI.contourHint, false);
+        show(UI.finalBar, false);
+        show(UI.finalColors, false);
+        show(UI.postCloseBar, false);
+        show(UI.arBottomCenter, false);
+        show(UI.btnArAdd, false);
+        show(UI.btnArOk, false);
+        if (typeof updateArBottomStripVar === 'function') updateArBottomStripVar();
+
+        // Restore default scan hint text
+        const t = UI.scanHint?.querySelector('.scanTitle');
+        const s = UI.scanHint?.querySelector('.scanText');
+        if (t) t.textContent = 'СКАНИРУЙТЕ ПОВЕРХНОСТЬ';
+        if (s) {
+          s.textContent = 'Плавно двигайте телефон влево-вправо и направляйте камеру на пол. Разметка работает после фиксации плоскости.';
+        }
+      } catch (_) {}
+    });
+
+    UI.overlay.appendChild(b);
+  } catch (_) {}
+}
 function ensureFloorLocked() {
   if (state.floorLocked) return;
   if (!reticle.visible) return;
   state.floorLocked = true;
   state.floorY = reticle.position.y;
+
+  // Patch: Floor Lock 2.0 small downward bias (up to 1.5 cm) if we have scan samples
+  // (reduces perceived "hover" when hit-test plane is estimated slightly above the real floor)
+  if (state.floorLock2Enabled && Array.isArray(state.floorSamples) && state.floorSamples.length >= 8) {
+    try {
+      const sorted = state.floorSamples.slice().sort((a, b) => a - b);
+      const q = (p) => {
+        const pos = (sorted.length - 1) * p;
+        const lo = Math.floor(pos), hi = Math.ceil(pos);
+        const t = pos - lo;
+        return sorted[lo] * (1 - t) + sorted[hi] * t;
+      };
+      const p20 = q(0.20);
+      const p10 = q(0.10);
+      if (isFinite(p20) && isFinite(p10)) {
+        const d = Math.max(0, p20 - p10);
+        state.floorY = p20 - Math.min(d, 0.015);
+      }
+    } catch (_) {}
+  }
+
+  // Reset lock2 gating window once floor is locked.
+  if (state.floorLock2Enabled) {
+    state._lock2ReticleSamples = [];
+    state._lock2LastGateMsgT = 0;
+  }
+
+  // Patch: attempt to start WebXR world anchor once the floor is locked (anchors=1)
+  _worldAnchorStartFromLastHit();
 
   // lock scanning grid to the floor (and then hide it — it is only for scanning)
   scanGrid.position.set(reticle.position.x, state.floorY + 0.001, reticle.position.z);
@@ -2828,6 +3073,40 @@ function addPointAtWorld(worldPos) {
   // auto-lock floor on first action
   ensureFloorLocked();
   if (!state.floorLocked) return;
+
+  // Patch: World Lock gating — avoid placing points before the anchor is ready (anchors=1)
+  if (state.worldAnchorsEnabled && !state.xrAnchorSpace && !state.anchorFailed) {
+    if (!state.anchorPending) _worldAnchorStartFromLastHit();
+    const dt = performance.now() - (state.anchorStartT || 0);
+    if (state.anchorPending && dt < 1200) {
+      // Inform the user without changing the default UI when the feature is disabled.
+      if (state.floorLock2Enabled) {
+        _lock2GateNotifyOnce('Фиксируем объект в пространстве… Подождите секунду и держите камеру на полу.');
+      } else {
+        try {
+          if (UI.scanHint) {
+            const t = UI.scanHint.querySelector('.scanTitle');
+            const s = UI.scanHint.querySelector('.scanText');
+            if (t) t.textContent = 'СТАБИЛИЗАЦИЯ AR';
+            if (s) s.textContent = 'Фиксируем объект в пространстве… Подождите секунду и держите камеру на полу.';
+            show(UI.scanHint, true);
+          }
+        } catch (_) {}
+      }
+      return;
+    }
+    // If anchors take too long or fail, fall back to normal (non-anchor) behavior.
+    if (state.anchorPending && dt >= 1500) {
+      state.anchorPending = false;
+      state.anchorFailed = true;
+    }
+  }
+
+  // Patch: Floor Lock 2.0 gating — require a stable reticle before placing points (lock2=1)
+  if (state.floorLock2Enabled && !_lock2GateOk()) {
+    _lock2GateNotifyOnce('Подвигайте телефон плавно и наведите камеру на пол. Дождитесь, когда прицел перестанет дрожать.');
+    return;
+  }
 
   // Clamp on floor
   const hitWorld = worldPos.clone();
@@ -2937,17 +3216,6 @@ function closeContour() {
   rebuildFill();
   updateAreaUI();
 
-  // Patch 3 (world-lock): request an anchor at the contour centroid to improve perceived
-  // stability against tracking corrections. Best-effort; if Anchors are unavailable,
-  // behavior remains unchanged.
-  try {
-    let cx = 0, cz = 0;
-    for (const p of state.points) { cx += p.x; cz += p.z; }
-    cx /= state.points.length;
-    cz /= state.points.length;
-    arWorldLockRequestAnchorAtPose({ x: cx, y: state.floorY, z: cz });
-  } catch (_) {}
-
   // UI
   // Once the contour is closed and the fill is built, enable the bottom menu.
   show(UI.contourHint, false);
@@ -2962,9 +3230,6 @@ function closeContour() {
 
 
 function resetAll(keepFloor = false) {
-  // Patch 3: always drop world-lock when restarting or editing.
-  try { arWorldLockReset(); } catch (_) {}
-
   state.points = [];
   state.holes = [];
   state.holePoints = [];
@@ -2981,6 +3246,13 @@ function resetAll(keepFloor = false) {
     if ('floorSamples' in state) state.floorSamples = [];
     if ('floorYEstimate' in state) state.floorYEstimate = null;
     if ('floorStable' in state) state.floorStable = false;
+
+    // Patch: reset world anchor + lock2 gating when restarting scan
+    _worldAnchorClear();
+    state._lock2ReticleSamples = [];
+    state._lock2LastGateMsgT = 0;
+    state._lastHitTestResult = null;
+    state._lastHitPose = null;
 
     state.phase = 'ar_scan';
     show(UI.scanHint, true);
@@ -3234,7 +3506,8 @@ function rebuildFill() {
 
   // lift a bit to avoid z-fighting
   const baseY = state.floorY;
-  geom.translate(0, baseY + 0.002, 0);
+  const lift = state.floorLock2Enabled ? 0.001 : 0.002;
+  geom.translate(0, baseY + lift, 0);
 
   const mat = (state.phase === 'ar_final') ? tileMaterial : maskMaterial;
   if (!mat) return;
@@ -3464,129 +3737,6 @@ const __tmpFwd = new THREE.Vector3();
 const __tmpHitPos = new THREE.Vector3();
 const __tmpHitQuat = new THREE.Quaternion();
 
-// Patch 3 (world-lock): matrices for anchor-based correction
-const __wlM0 = new THREE.Matrix4();
-const __wlMt = new THREE.Matrix4();
-const __wlDelta = new THREE.Matrix4();
-const __wlCorr = new THREE.Matrix4();
-const __wlPos = new THREE.Vector3();
-const __wlQuat = new THREE.Quaternion();
-const __wlScale = new THREE.Vector3(1, 1, 1);
-
-function arWorldLockReset() {
-  const wl = state.worldLock;
-  if (!wl) return;
-  wl.pending = false;
-  wl.active = false;
-  wl.anchor = null;
-  wl.baseM = null;
-  wl.wantPose = null;
-  wl.lastUpdateT = 0;
-  wl.corrPos.set(0, 0, 0);
-  wl.corrQuat.identity();
-
-  // Ensure group is back to the baseline transform
-  try {
-    anchorGroup.position.set(0, 0, 0);
-    anchorGroup.quaternion.identity();
-    anchorGroup.scale.set(1, 1, 1);
-  } catch (_) {}
-}
-
-function arWorldLockRequestAnchorAtPose(pos) {
-  const wl = state.worldLock;
-  if (!wl || !wl.enabled) return;
-  if (!pos || !isFinite(pos.x) || !isFinite(pos.y) || !isFinite(pos.z)) return;
-
-  // Always reset previous lock before requesting a new anchor.
-  arWorldLockReset();
-  wl.wantPose = { x: pos.x, y: pos.y, z: pos.z };
-  wl.pending = true;
-}
-
-function arWorldLockUpdate(frame) {
-  const wl = state.worldLock;
-  if (!wl || !wl.enabled || !state.xrSession || !state.referenceSpace) return;
-
-  // Only apply world-lock after the contour is closed (never during point placement).
-  if (!state.closed) {
-    if (wl.active || wl.pending) arWorldLockReset();
-    return;
-  }
-
-  const now = performance.now();
-  if (wl.lastUpdateT && (now - wl.lastUpdateT) < wl.updateIntervalMs) {
-    // apply last known correction smoothly every frame (cheap)
-    try {
-      anchorGroup.position.lerp(wl.corrPos, wl.posAlpha);
-      anchorGroup.quaternion.slerp(wl.corrQuat, wl.rotAlpha);
-    } catch (_) {}
-    return;
-  }
-  wl.lastUpdateT = now;
-
-  // Try to create an anchor once, when requested.
-  if (wl.pending && !wl.anchor) {
-    try {
-      if (typeof frame.createAnchor === 'function' && wl.wantPose) {
-        // Create anchor at the requested pose (identity orientation)
-        const xf = new XRRigidTransform(
-          { x: wl.wantPose.x, y: wl.wantPose.y, z: wl.wantPose.z },
-          { x: 0, y: 0, z: 0, w: 1 }
-        );
-        // Note: createAnchor returns a Promise<XRAnchor>
-        frame.createAnchor(xf, state.referenceSpace).then((anchor) => {
-          wl.anchor = anchor;
-          wl.pending = false;
-          // Base pose will be captured on the next XR frame (never block on it here).
-          wl.baseM = null;
-          wl.active = true;
-        }).catch(() => {
-          // Silent fallback: keep baseline behavior.
-          wl.pending = false;
-        });
-      } else {
-        wl.pending = false;
-      }
-    } catch (_) {
-      wl.pending = false;
-    }
-  }
-
-  // If we have an anchor, capture base pose once (first good pose) and compute correction.
-  if (wl.anchor) {
-    try {
-      const pose = frame.getPose(wl.anchor.anchorSpace, state.referenceSpace);
-      if (!pose || !pose.transform || !pose.transform.matrix) return;
-
-      // First good pose becomes the base.
-      if (!wl.baseM) {
-        __wlM0.fromArray(pose.transform.matrix);
-        wl.baseM = __wlM0.clone();
-        wl.active = true;
-      }
-
-      __wlMt.fromArray(pose.transform.matrix);
-      __wlM0.copy(wl.baseM);
-
-      // delta = Mt * inv(M0)
-      __wlDelta.copy(__wlM0).invert();
-      __wlDelta.premultiply(__wlMt);
-
-      // correction = inv(delta)
-      __wlCorr.copy(__wlDelta).invert();
-      __wlCorr.decompose(__wlPos, __wlQuat, __wlScale);
-
-      // Save target correction and smoothly apply each frame.
-      wl.corrPos.copy(__wlPos);
-      wl.corrQuat.copy(__wlQuat);
-
-      anchorGroup.position.lerp(wl.corrPos, wl.posAlpha);
-      anchorGroup.quaternion.slerp(wl.corrQuat, wl.rotAlpha);
-    } catch (_) {}
-  }
-}
-
 function updateXR(frame) {
   // Center hit test (used to estimate floor height and validate floor hits)
   let gotHit = false;      // floor-like (for scanning)
@@ -3614,12 +3764,26 @@ function updateXR(frame) {
     if (hits.length) {
       const pose = hits[0].getPose(state.referenceSpace);
       if (pose) {
+        // Keep last hit-test result for potential WebXR Anchors creation (Patch: World Lock)
+        state._lastHitTestResult = hits[0];
         gotHitRaw = true;
         __tmpHitPos.set(pose.transform.position.x, pose.transform.position.y, pose.transform.position.z);
         __tmpHitQuat.set(pose.transform.orientation.x, pose.transform.orientation.y, pose.transform.orientation.z, pose.transform.orientation.w);
         hitX = __tmpHitPos.x;
         hitY = __tmpHitPos.y;
         hitZ = __tmpHitPos.z;
+
+        // Last pose snapshot for diagnostics / future extensions
+        state._lastHitPose = {
+          t: performance.now(),
+          x: hitX,
+          y: hitY,
+          z: hitZ,
+          qx: __tmpHitQuat.x,
+          qy: __tmpHitQuat.y,
+          qz: __tmpHitQuat.z,
+          qw: __tmpHitQuat.w,
+        };
 
         // Diagnostic normal angle (do NOT rely on this as the only floor gate)
         __tmpUp.set(0, 1, 0).applyQuaternion(__tmpHitQuat);
@@ -3656,6 +3820,7 @@ function updateXR(frame) {
       };
 
       const p20 = p(0.20);
+      const p10 = p(0.10);
       const p80 = p(0.80);
       state.floorYEstimate = p20;
 
@@ -3664,7 +3829,20 @@ function updateXR(frame) {
       if ((sorted.length >= 12 && spread < 0.04) || sorted.length >= 25) {
         state.floorLocked = true;
         state.floorStable = true;
-        state.floorY = p20;
+        // Patch: Floor Lock 2.0 may slightly bias the locked Y downward (up to 1.5 cm)
+        // to reduce the perceived "hover" without breaking the default pipeline.
+        let yLock = p20;
+        if (state.floorLock2Enabled && p10 != null && isFinite(p10)) {
+          const d = Math.max(0, yLock - p10);
+          yLock = yLock - Math.min(d, 0.015);
+        }
+        state.floorY = yLock;
+
+        // Reset lock2 gating samples once we have a locked floor.
+        if (state.floorLock2Enabled) {
+          state._lock2ReticleSamples = [];
+          state._lock2LastGateMsgT = 0;
+        }
 
         // Patch 2: initialize plane refinement reference height
         try {
@@ -3691,6 +3869,9 @@ function updateXR(frame) {
         show(UI.arBottomCenter, true);
         show(UI.btnArAdd, true);
         show(UI.btnArOk, false);
+
+        // Patch: attempt to start WebXR world anchor once the floor is locked (anchors=1)
+        _worldAnchorStartFromLastHit();
       }
     }
   }
@@ -3796,6 +3977,12 @@ function updateXR(frame) {
   if (state.floorLocked && reticle.visible) {
     reticle.position.y = state.floorY;
   }
+
+  // Patch: record reticle stability samples for Floor Lock 2.0 gating
+  _lock2RecordReticleSample();
+
+  // Patch: record reticle samples for Floor Lock 2.0 gating (does not affect default flow)
+  _lock2RecordReticleSample();
 
 
   // AR debug sample (Patch 2): record hit-test stability without changing behavior
@@ -3916,11 +4103,9 @@ function updateXR(frame) {
     }
   }
 
-  // Patch 3: anchor-based world-lock correction (best-effort)
-  try { arWorldLockUpdate(frame); } catch (_) {}
-
   // UI measure labels
   // Reuse XR camera computed at the beginning of updateXR(); do not redeclare.
+  _worldAnchorUpdateFromFrame(frame);
   updateMeasureLabels(xrCam);
 }
 
@@ -3985,9 +4170,6 @@ UI.btnArOk?.addEventListener('click', () => {
 });
 
 UI.btnEditShape?.addEventListener('click', () => {
-  // Patch 3: disable world-lock before returning to point placement.
-  try { arWorldLockReset(); } catch (_) {}
-
   // return to drawing mode, keep points
   show(UI.finalColors, false);
   // Do not re-show the initial contour hint: the user is already in the flow.
