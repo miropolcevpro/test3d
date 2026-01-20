@@ -3348,10 +3348,9 @@ function disposeObject3D(obj) {
 
 // "Флажок" как в OZON: заметный маркер на полу (с большой hit-зоной)
 function createFlagMarker({
-  // Marker (disk + pole) color tuned for outdoor visibility. Keep ringColor unchanged.
-  baseColor = 0xED2DFF,
+  baseColor = 0x00e5ff,
   ringColor = 0x2f6cff,
-  poleColor = 0xED2DFF,
+  poleColor = 0x00e5ff,
   withRing = false,
 } = {}) {
   const g = new THREE.Group();
@@ -3879,7 +3878,15 @@ function updateFlagMarkerVisibilityScale() {
       const maxScale = baseScale * FLAG_MARKER_MAX_SCALE_MULT;
       const finalScale = Math.max(baseScale, Math.min(maxScale, needScale));
       o.scale.setScalar(finalScale);
-    });
+
+      // Visual-only: help the bottom ring remain readable at long distances.
+      // The group scale already affects the ring, but we gently boost ring size as distance grows.
+      // This does NOT affect AR logic or point positions.
+      const ratio = finalScale / Math.max(1e-6, baseScale);
+      const ringExtra = Math.min(1.6, Math.max(1.0, 1.0 + (ratio - 1.0) * 0.35)); // +0..~60%
+      const ring = o.getObjectByName && o.getObjectByName('firstRing');
+      if (ring && ring.scale) ring.scale.setScalar(ringExtra);
+});
   } catch (_) {
     // best-effort only
   }
