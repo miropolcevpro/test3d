@@ -815,7 +815,7 @@ to   { transform: scale(1.12); }
   background:rgba(90, 170, 255, 0.82);
 }
 #detailTechCard .convIcon{width:20px;height:20px;flex:0 0 20px;}
-#detailTechCard .convIconCart{width:18px;height:18px;flex:0 0 18px;}
+#detailTechCard .convIconCart{width:22px;height:22px;flex:0 0 22px;}
 #detailTechCard .convText{
   font-weight:700;
   /* Responsive sizing: keep on one line without truncation */
@@ -829,5 +829,5 @@ to   { transform: scale(1.12); }
   #detailTechCard .convBody{gap:8px;}
   #detailTechCard .convBtn{padding:11px 8px;}
   #detailTechCard .convIcon{width:18px;height:18px;flex:0 0 18px;}
-  #detailTechCard .convIconCart{width:16px;height:16px;flex:0 0 16px;}
+  #detailTechCard .convIconCart{width:22px;height:22px;flex:0 0 22px;}
 }
