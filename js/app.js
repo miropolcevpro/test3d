@@ -899,6 +899,9 @@ const reticle = new THREE.Mesh(
   new THREE.RingGeometry(0.06, 0.085, 40, 1).rotateX(-Math.PI / 2),
   new THREE.MeshBasicMaterial({ color: 0x2f6cff, transparent: true, opacity: 0.9 })
 );
+// Visual-only baseline scale for distance-aware visibility.
+reticle.userData.baseScale = 1.0;
+reticle.scale.setScalar(1.0);
 reticle.visible = false;
 world.add(reticle);
 
@@ -3846,6 +3849,7 @@ const __tmpFwd = new THREE.Vector3();
 const __tmpHitPos = new THREE.Vector3();
 const __tmpHitQuat = new THREE.Quaternion();
 const __tmpMarkerWorldPos = new THREE.Vector3();
+const __tmpReticleWorldPos = new THREE.Vector3();
 
 // AR contour marker visibility (visual-only): keep markers readable at long distances.
 // We scale markers by distance to maintain a roughly constant angular size.
@@ -3853,6 +3857,42 @@ const __tmpMarkerWorldPos = new THREE.Vector3();
 const FLAG_MARKER_RAW_DIAMETER_M = 0.0285 * 2; // outer ring diameter before baseScale
 const FLAG_MARKER_TARGET_ANGULAR_DEG = 1.6;    // ~constant apparent size (tuned for outdoor use)
 const FLAG_MARKER_MAX_SCALE_MULT = 8.0;        // cap to avoid absurdly large markers
+
+// Floor scanning reticle visibility (visual-only): keep the center reticle readable when projecting far away.
+// IMPORTANT: this must not change hit-test / floor-lock logic (only visuals).
+const RETICLE_RAW_DIAMETER_M = 0.085 * 2;       // outer ring diameter in meters (RingGeometry outer radius = 0.085)
+const RETICLE_TARGET_ANGULAR_DEG = 2.4;         // tuned so the reticle stays visible at ~8–12 m
+const RETICLE_MAX_SCALE_MULT = 4.0;             // cap to avoid covering too much floor
+
+function updateReticleVisibilityScale() {
+  try {
+    if (!state.xrSession) return;
+    if (!reticle || !reticle.visible) return;
+
+    const theta = THREE.MathUtils.degToRad(RETICLE_TARGET_ANGULAR_DEG);
+    const tanHalf = Math.tan(theta * 0.5);
+
+    // Reticle is directly under `world`, so matrixWorld is stable once updated.
+    reticle.updateMatrixWorld(true);
+    __tmpReticleWorldPos.setFromMatrixPosition(reticle.matrixWorld);
+    const dist = __tmpCamPos.distanceTo(__tmpReticleWorldPos);
+    if (!isFinite(dist) || dist <= 0) return;
+
+    // Desired diameter grows linearly with distance to keep constant angular size.
+    const desiredDiameter = 2 * dist * tanHalf;
+    const needScale = desiredDiameter / RETICLE_RAW_DIAMETER_M;
+    const baseScale = (reticle.userData && isFinite(reticle.userData.baseScale)) ? reticle.userData.baseScale : 1.0;
+    const maxScale = baseScale * RETICLE_MAX_SCALE_MULT;
+    const finalScale = Math.max(baseScale, Math.min(maxScale, needScale));
+
+    // Best-effort smoothing to reduce visible popping on unstable hit-test.
+    const cur = (reticle.scale && isFinite(reticle.scale.x)) ? reticle.scale.x : baseScale;
+    const smoothed = cur + (finalScale - cur) * 0.25;
+    reticle.scale.setScalar(smoothed);
+  } catch (_) {
+    // best-effort only
+  }
+}
 
 function updateFlagMarkerVisibilityScale() {
   try {
@@ -4132,6 +4172,10 @@ function updateXR(frame) {
   if (state.floorLocked && reticle.visible) {
     reticle.position.y = state.floorY;
   }
+
+  // Visual-only: keep the scanning reticle readable when projecting far away.
+  // This does not affect hit-test, floor lock, or point placement.
+  updateReticleVisibilityScale();
 
   // Patch: record reticle stability samples for Floor Lock 2.0 gating
   _lock2RecordReticleSample();
