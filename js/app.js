@@ -3356,6 +3356,10 @@ function createFlagMarker({
   const g = new THREE.Group();
   g.name = 'flagMarker';
 
+  // Store baseline scale for dynamic visibility scaling (used in XR render loop).
+  // IMPORTANT: this is a pure visual tweak and must not affect AR logic.
+  g.userData.baseScale = 1.3;
+
   // --- Визуал маркера ближе к OZON: ободок + белый центр + короткий шток ---
   // Лёгкая тень на полу (чтобы было читаемо на светлой поверхности)
   const shadow = new THREE.Mesh(
@@ -3418,8 +3422,8 @@ function createFlagMarker({
   hit.position.y = 0.06;
   g.add(hit);
 
-  // Visibility tweak: enlarge marker by 30% (no AR logic changes)
-  g.scale.setScalar(1.3);
+  // Baseline visibility tweak: enlarge marker by 30% (no AR logic changes)
+  g.scale.setScalar(g.userData.baseScale);
 
   return g;
 }
@@ -3841,6 +3845,44 @@ const __tmpCamPos = new THREE.Vector3();
 const __tmpFwd = new THREE.Vector3();
 const __tmpHitPos = new THREE.Vector3();
 const __tmpHitQuat = new THREE.Quaternion();
+const __tmpMarkerWorldPos = new THREE.Vector3();
+
+// AR contour marker visibility (visual-only): keep markers readable at long distances.
+// We scale markers by distance to maintain a roughly constant angular size.
+// IMPORTANT: this must not change the AR pipeline logic (only visuals).
+const FLAG_MARKER_RAW_DIAMETER_M = 0.0285 * 2; // outer ring diameter before baseScale
+const FLAG_MARKER_TARGET_ANGULAR_DEG = 1.6;    // ~constant apparent size (tuned for outdoor use)
+const FLAG_MARKER_MAX_SCALE_MULT = 8.0;        // cap to avoid absurdly large markers
+
+function updateFlagMarkerVisibilityScale() {
+  try {
+    if (!state.xrSession) return;
+    if (!pointsGroup || !pointsGroup.visible) return;
+
+    // Ensure matrices are up-to-date for distance estimation.
+    pointsGroup.updateMatrixWorld(true);
+
+    const theta = THREE.MathUtils.degToRad(FLAG_MARKER_TARGET_ANGULAR_DEG);
+    const tanHalf = Math.tan(theta * 0.5);
+
+    pointsGroup.traverse((o) => {
+      if (o?.name !== 'flagMarker' && o?.name !== 'holeFlagMarker') return;
+      __tmpMarkerWorldPos.setFromMatrixPosition(o.matrixWorld);
+      const dist = __tmpCamPos.distanceTo(__tmpMarkerWorldPos);
+      if (!isFinite(dist) || dist <= 0) return;
+
+      // Desired diameter grows linearly with distance to keep constant angular size.
+      const desiredDiameter = 2 * dist * tanHalf;
+      const needScale = desiredDiameter / FLAG_MARKER_RAW_DIAMETER_M;
+      const baseScale = (o.userData && isFinite(o.userData.baseScale)) ? o.userData.baseScale : 1.3;
+      const maxScale = baseScale * FLAG_MARKER_MAX_SCALE_MULT;
+      const finalScale = Math.max(baseScale, Math.min(maxScale, needScale));
+      o.scale.setScalar(finalScale);
+    });
+  } catch (_) {
+    // best-effort only
+  }
+}
 
 function updateXR(frame) {
   // Center hit test (used to estimate floor height and validate floor hits)
@@ -4163,6 +4205,9 @@ function updateXR(frame) {
   if (firstRing?.material?.color) {
     firstRing.material.color.setHex(state.snapArmed ? 0x36d399 : 0x2f6cff);
   }
+
+  // Visual-only: keep contour markers readable at long distances (especially outdoors).
+  updateFlagMarkerVisibilityScale();
 
   // Patch 2: keep reticle visibility based on projected placement (hit or fallback), not raw hit-test.
   state.reticleVisible = !!reticle.visible;
