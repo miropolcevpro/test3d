@@ -815,7 +815,8 @@ to   { transform: scale(1.12); }
   background:rgba(90, 170, 255, 0.82);
 }
 #detailTechCard .convIcon{width:20px;height:20px;flex:0 0 20px;}
-#detailTechCard .convIconCart{width:22px;height:22px;flex:0 0 22px;}
+#detailTechCard .convIconCart{width:auto;height:40px;flex:0 0 22pxmargin-left:6px;}
+
 #detailTechCard .convText{
   font-weight:700;
   /* Responsive sizing: keep on one line without truncation */
