@@ -3347,27 +3347,10 @@ function disposeObject3D(obj) {
 }
 
 // "Флажок" как в OZON: заметный маркер на полу (с большой hit-зоной)
-
-let __flagLogoTex = null;
-function getFlagLogoTexture() {
-  try {
-    if (__flagLogoTex) return __flagLogoTex;
-    const tex = new THREE.TextureLoader().load('assets/icons/flag_logo.webp');
-    // Treat as color texture (sRGB) with backward-compatible guards
-    try { if ('colorSpace' in tex && THREE.SRGBColorSpace) tex.colorSpace = THREE.SRGBColorSpace; } catch (_) {}
-    try { if ('encoding' in tex && THREE.sRGBEncoding) tex.encoding = THREE.sRGBEncoding; } catch (_) {}
-    tex.needsUpdate = true;
-    __flagLogoTex = tex;
-    return __flagLogoTex;
-  } catch (_) {
-    return null;
-  }
-}
-
 function createFlagMarker({
-  baseColor = 0x0083ff,
+  baseColor = 0x00e5ff,
   ringColor = 0x2f6cff,
-  poleColor = 0x0083ff,
+  poleColor = 0x00e5ff,
   withRing = false,
 } = {}) {
   const g = new THREE.Group();
@@ -3393,17 +3376,15 @@ function createFlagMarker({
   );
   disk.position.y = 0.001;
   g.add(disk);
-  // Нижняя метка (вместо обводки): логотип компании (визуально, не влияет на AR логику)
-  const logoTex = getFlagLogoTexture();
-  const logo = new THREE.Mesh(
-    new THREE.CircleGeometry(0.0305, 44).rotateX(-Math.PI / 2),
-    new THREE.MeshBasicMaterial({ map: logoTex || null, transparent: true, opacity: 0.95, depthWrite: false })
+
+  // Синий ободок (всегда присутствует)
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.0188, 0.0285, 40).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({ color: ringColor, transparent: true, opacity: 0.95, depthWrite: false })
   );
-  logo.name = 'baseRing';
-  logo.position.y = 0.0011;
-  // Slight alphaTest helps avoid halo edges on some GPUs
-  try { logo.material.alphaTest = 0.01; } catch (_) {}
-  g.add(logo);
+  ring.name = 'baseRing';
+  ring.position.y = 0.0011;
+  g.add(ring);
 
   // Дополнительное подсвечивающее кольцо (для первой точки/«магнита»)
   if (withRing) {
@@ -3898,23 +3879,14 @@ function updateFlagMarkerVisibilityScale() {
       const finalScale = Math.max(baseScale, Math.min(maxScale, needScale));
       o.scale.setScalar(finalScale);
 
-      // Visual-only: keep ring/logo readable at long distances.
-      // Does NOT affect AR logic or point positions.
+      // Visual-only: help the bottom ring remain readable at long distances.
+      // The group scale already affects the ring, but we gently boost ring size as distance grows.
+      // This does NOT affect AR logic or point positions.
       const ratio = finalScale / Math.max(1e-6, baseScale);
-
-      const firstRing = o.getObjectByName && o.getObjectByName('firstRing');
-      if (firstRing && firstRing.scale) {
-        const ringExtra = Math.min(1.8, Math.max(1.0, 1.0 + (ratio - 1.0) * 0.45)); // +0..~80%
-        firstRing.scale.setScalar(ringExtra);
-      }
-
-      const baseRing = o.getObjectByName && o.getObjectByName('baseRing');
-      if (baseRing && baseRing.scale) {
-        // Logo gets a slightly stronger boost than the marker itself (still capped).
-        const logoExtra = Math.min(2.4, Math.max(1.0, 1.0 + (ratio - 1.0) * 0.75)); // +0..~140%
-        baseRing.scale.setScalar(logoExtra);
-      }
-    });
+      const ringExtra = Math.min(1.6, Math.max(1.0, 1.0 + (ratio - 1.0) * 0.35)); // +0..~60%
+      const ring = o.getObjectByName && o.getObjectByName('firstRing');
+      if (ring && ring.scale) ring.scale.setScalar(ringExtra);
+});
   } catch (_) {
     // best-effort only
   }
