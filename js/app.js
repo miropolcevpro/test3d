@@ -3348,9 +3348,10 @@ function disposeObject3D(obj) {
 
 // "Флажок" как в OZON: заметный маркер на полу (с большой hit-зоной)
 function createFlagMarker({
-  baseColor = 0xffffff,
+  // Marker (disk + pole) color tuned for outdoor visibility. Keep ringColor unchanged.
+  baseColor = 0xED2DFF,
   ringColor = 0x2f6cff,
-  poleColor = 0xffffff,
+  poleColor = 0xED2DFF,
   withRing = false,
 } = {}) {
   const g = new THREE.Group();
