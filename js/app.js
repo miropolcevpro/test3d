@@ -652,9 +652,11 @@ function fillShapeDetailUI(shape) {
   renderDetailHero(UI.detailHero, shape);
   renderDetailTech(UI.detailTech, UI.techBody, UI.btnTechToggle, shape);
 
-  UI.layoutRow.querySelectorAll('.layoutCard').forEach(btn => {
-    btn.onclick = () => setLayout(btn.dataset.layout);
-  });
+  if (UI.layoutRow) {
+    UI.layoutRow.querySelectorAll('.layoutCard').forEach(btn => {
+      btn.onclick = () => setLayout(btn.dataset.layout);
+    });
+  }
   setLayout(state.layout);
 }
 
