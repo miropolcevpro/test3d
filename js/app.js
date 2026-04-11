@@ -1944,6 +1944,8 @@ UI.overlay?.addEventListener('pointerdown', (e) => {
   state.lastUiTapTs = performance.now();
 }, true);
 
+ensureArFinalControlsBound();
+
 UI.catalogSearch?.addEventListener('input', () => {
   const q = UI.catalogSearch.value.trim().toLowerCase();
   if (!q) renderCatalog(state.shapes, { UI, onShapeSelect: (shapeId) => openDetail(shapeId) });
@@ -2054,6 +2056,44 @@ UI.btnCutout?.addEventListener('click', () => {
   if (UI.measureLayer) UI.measureLayer.style.display = 'block';
 });
 
+function ensureArFinalControlsBound() {
+  if (UI.btnLayoutCycle && !UI.btnLayoutCycle.__arBound) {
+    UI.btnLayoutCycle.addEventListener('click', () => {
+      const nextLayout = state.layout === 'diagonal' ? 'straight' : 'diagonal';
+      setLayout(nextLayout);
+    });
+    UI.btnLayoutCycle.__arBound = true;
+  }
+
+  if (UI.btnShapePicker && !UI.btnShapePicker.__arBound) {
+    UI.btnShapePicker.addEventListener('click', () => {
+      if (!UI.shapePickerPanel || !UI.shapePickerList) return;
+      if (!UI.shapePickerPanel.hasAttribute('data-built')) {
+        try {
+          buildShapePickerList({
+            UI,
+            state,
+            setShapePickerOpen: (open) => setShapePickerOpen(open, { UI, updateArTopStripVar, updateArBottomStripVar }),
+            onShapeSelect: handleShapePickerSelection,
+          });
+        } catch (e) {
+          console.warn('shape picker build failed', e);
+          return;
+        }
+        UI.shapePickerPanel.setAttribute('data-built', '1');
+      }
+      const isOpen = !UI.shapePickerPanel.hidden && UI.shapePickerPanel.classList.contains('open');
+      setShapePickerOpen(!isOpen, { UI, updateArTopStripVar, updateArBottomStripVar });
+    });
+    UI.btnShapePicker.__arBound = true;
+  }
+
+  if (UI.shapePickerBackdrop && !UI.shapePickerBackdrop.__arBound) {
+    UI.shapePickerBackdrop.addEventListener('click', () => setShapePickerOpen(false, { UI, updateArTopStripVar, updateArBottomStripVar }));
+    UI.shapePickerBackdrop.__arBound = true;
+  }
+}
+
 UI.btnDone?.addEventListener('click', async () => {
   state.phase = 'ar_final';
   show(UI.contourHint, false);
@@ -2073,46 +2113,18 @@ UI.btnDone?.addEventListener('click', async () => {
   updateAreaUI();
 
   // Atomic Texture Apply (optional): hide fill until core maps are ready (fixes "pale first fill").
-  if (state.atomicTexEnabled) {
+  if (state.atomicTexEnabled && typeof atomicEnsureFinalMaterialReady === 'function') {
     await atomicEnsureFinalMaterialReady();
   }
 
-  // Build bottom controls (layout): single cycle button
-  state.layoutCycleInitial = state.layout;
-  state.layoutCycleStep = 0;
-  if (UI.btnLayoutCycle) {
-    UI.btnLayoutCycle.onclick = () => {
-      const step = state.layoutCycleStep % 3;
-      if (step === 0) {
-        setLayout('straight');
-        state.layoutCycleStep = 1;
-      } else if (step === 1) {
-        setLayout('diagonal');
-        state.layoutCycleStep = 2;
-      } else {
-        setLayout(state.layoutCycleInitial);
-        state.layoutCycleStep = 0;
-      }
-    };
-  }
+  ensureArFinalControlsBound();
   setLayout(state.layout);
 
-  // Shape picker (open side menu to switch shape)
-  if (UI.btnShapePicker) {
-    UI.btnShapePicker.onclick = () => {
-      if (!UI.shapePickerPanel || !UI.shapePickerList) return;
-      if (!UI.shapePickerPanel.hasAttribute('data-built')) {
-        try { buildShapePickerList({ UI, state, setShapePickerOpen: (open) => setShapePickerOpen(open, { UI, updateArTopStripVar, updateArBottomStripVar }), onShapeSelect: handleShapePickerSelection }); } catch (e) { console.warn('shape picker build failed', e); }
-        UI.shapePickerPanel.setAttribute('data-built', '1');
-      }
-      setShapePickerOpen(UI.shapePickerPanel.hidden, { UI, updateArTopStripVar, updateArBottomStripVar });
-    };
-  }
-  if (UI.shapePickerBackdrop) {
-    UI.shapePickerBackdrop.onclick = () => setShapePickerOpen(false, { UI, updateArTopStripVar, updateArBottomStripVar });
-  }
-
-  renderColorRow(UI.finalColors, (Array.isArray(state.currentAllowedTiles) && state.currentAllowedTiles.length ? state.currentAllowedTiles : state.tiles.slice(0, 8)));
+  renderColorRow(UI.finalColors, (Array.isArray(state.currentAllowedTiles) && state.currentAllowedTiles.length ? state.currentAllowedTiles : state.tiles.slice(0, 8)), {
+    onTileClick: async (tile) => {
+      await selectTile(tile);
+    }
+  });
 
   // hide hint
   show(UI.scanHint, false);
