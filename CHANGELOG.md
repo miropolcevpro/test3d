@@ -4,7 +4,10 @@ All notable project stabilization work is recorded here.
 
 ## Unreleased
 
-Release token: `20260411-f22d`
+Release token: `20260411-f23a`
+
+- **F23a**: kept AR session alive when switching forms from the in-AR shape picker by loading the new shape's textures and swatches in place instead of routing back through the detail screen.
+
 
 - **F22d**: stabilized AR map loading with a strict 1k-ready-first path, optional 2k refinement, per-map timeouts, and faster downgrade when 2k assets are slow or missing.
 
@@ -12,7 +15,7 @@ Release token: `20260411-f22d`
 
 - **F20a**: fixed real service worker metadata chain by importing `js/runtime-config.js` before `js/sw-meta.js` in `sw.js`, made `runtime-config.js` worker-safe, and strengthened release-check to validate the SW import chain and current runtime/SW token.
 
-- Release token: `20260411-f22d`
+- Release token: `20260411-f23a`
 
 - **F22d**: stabilized AR map loading with a strict 1k-ready-first path, optional 2k refinement, per-map timeouts, and faster downgrade when 2k assets are slow or missing.
 

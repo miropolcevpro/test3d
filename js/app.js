@@ -367,6 +367,7 @@ const state = {
   // internal guards
   _restartingAR: false,
   _startingAR: false,
+  _switchingShapeInAr: false,
 
   // WebXR
   xrSession: null,
@@ -637,33 +638,34 @@ const computeAreaM2 = () => computeAreaM2FromContours(state.points, state.holes)
 // Catalog + Detail rendering (Формы -> деталка формы -> выбор цветов/текстур)
 // ------------------------
 
-async function openDetail(shapeId) {
-  const s = state.shapes.find(x => x.id === shapeId);
-  if (!s) return;
-  state.selectedShape = s;
+function fillShapeDetailUI(shape) {
+  if (!shape) return;
+  UI.detailTitle.textContent = shape.name;
+  UI.detailName.textContent = shape.name;
+  UI.detailSub.textContent = shape.subtitle || 'Тротуарная плитка';
+  renderDetailHero(UI.detailHero, shape);
+  renderDetailTech(UI.detailTech, UI.techBody, UI.btnTechToggle, shape);
 
-  // Fill UI
-  UI.detailTitle.textContent = s.name;
-  UI.detailName.textContent = s.name;
-  UI.detailSub.textContent = s.subtitle || 'Тротуарная плитка';
-  renderDetailHero(UI.detailHero, s);
-  renderDetailTech(UI.detailTech, UI.techBody, UI.btnTechToggle, s);
-
-  // Layout buttons
   UI.layoutRow.querySelectorAll('.layoutCard').forEach(btn => {
     btn.onclick = () => setLayout(btn.dataset.layout);
   });
   setLayout(state.layout);
+}
 
-  // --- Colors & Surfaces (per-shape palette support) ---
+async function resolveAllowedTilesForShape(shape) {
+  if (!shape) return { allowed: state.tiles.slice(0, 8), paletteActive: false };
+
   let allowed = null;
   let paletteActive = false;
-
-  const paletteCandidates = getPaletteCandidateUrlsForShape(s, { apiBaseUrl: API_BASE_URL, surfacePaletteBaseUrl: SURFACE_PALETTE_BASE_URL });
+  const paletteCandidates = getPaletteCandidateUrlsForShape(shape, { apiBaseUrl: API_BASE_URL, surfacePaletteBaseUrl: SURFACE_PALETTE_BASE_URL });
 
   if (paletteCandidates.length) {
-    // Optional defaults file: palette_settings/<shapeId>.json
-    const paletteDefaults = await loadPaletteDefaultsForShape(s.id, { paletteSettingsBaseUrl: PALETTE_SETTINGS_BASE_URL, enabled: ENABLE_PALETTE_SETTINGS, cache: state._paletteDefaultsCache, warnOnce: warnNetworkFallbackOnce });
+    const paletteDefaults = await loadPaletteDefaultsForShape(shape.id, {
+      paletteSettingsBaseUrl: PALETTE_SETTINGS_BASE_URL,
+      enabled: ENABLE_PALETTE_SETTINGS,
+      cache: state._paletteDefaultsCache,
+      warnOnce: warnNetworkFallbackOnce,
+    });
     let items = null;
 
     for (const candidate of paletteCandidates) {
@@ -677,7 +679,7 @@ async function openDetail(shapeId) {
     }
 
     if (API_BASE_URL && Array.isArray(items) && items.length) {
-      items = await filterPaletteItemsBySurfaces(s.id, items, { apiBaseUrl: API_BASE_URL, warnOnce: warnNetworkFallbackOnce });
+      items = await filterPaletteItemsBySurfaces(shape.id, items, { apiBaseUrl: API_BASE_URL, warnOnce: warnNetworkFallbackOnce });
     }
     if (Array.isArray(items) && items.length) {
       allowed = paletteItemsToTiles(items, paletteDefaults);
@@ -685,16 +687,27 @@ async function openDetail(shapeId) {
     }
   }
 
-  // fallback: old behavior
   if (!Array.isArray(allowed) || !allowed.length) {
-    allowed = (Array.isArray(s.tileIds) && s.tileIds.length
-      ? s.tileIds.map(id => state.tiles.find(t => t.id === id)).filter(Boolean)
+    allowed = (Array.isArray(shape.tileIds) && shape.tileIds.length
+      ? shape.tileIds.map(id => state.tiles.find(t => t.id === id)).filter(Boolean)
       : state.tiles.slice(0, 8));
   }
 
+  return { allowed, paletteActive };
+}
+
+async function openDetail(shapeId, opts = {}) {
+  const s = state.shapes.find(x => x.id === shapeId);
+  if (!s) return null;
+  state.selectedShape = s;
+  fillShapeDetailUI(s);
+
+  const preserveScreen = !!opts.preserveScreen;
+  const keepCurrentTile = !!opts.keepCurrentTile;
+
+  const { allowed, paletteActive } = await resolveAllowedTilesForShape(s);
   state.currentAllowedTiles = allowed;
 
-  // Swatches. For per-shape palette: click -> apply + start AR.
   renderColorRow(UI.colorRow, allowed, {
     onTileClick: async (tile) => {
       await selectTile(tile);
@@ -702,7 +715,6 @@ async function openDetail(shapeId) {
     }
   });
 
-  // Prefetch (non-blocking): warm a small set of previews when the browser is idle.
   try {
     const idle = window.requestIdleCallback || ((fn) => setTimeout(() => fn({ timeRemaining: () => 0 }), 220));
     idle(() => {
@@ -713,16 +725,19 @@ async function openDetail(shapeId) {
     });
   } catch (_) {}
 
-  // Show the screen immediately; texture maps will refine progressively.
-  setActiveScreen('detail', UI);
-  state.phase = 'detail';
+  if (!preserveScreen) {
+    setActiveScreen('detail', UI);
+    state.phase = 'detail';
+  }
 
-  // Choose default surface/tile for this shape (apply albedo fast, secondary maps in background)
-  const defaultTile = allowed[0] || state.tiles[0];
-  if (defaultTile) { selectTile(defaultTile); }
+  const retainedTile = keepCurrentTile && state.selectedTile
+    ? allowed.find((tile) => tile && state.selectedTile && tile.id === state.selectedTile.id)
+    : null;
+  const defaultTile = retainedTile || allowed[0] || state.tiles[0] || null;
+  if (defaultTile) await selectTile(defaultTile);
 
-  // Update AR entry UI (Chrome-only gating)
-  updateArEntryUI(UI);
+  if (!preserveScreen) updateArEntryUI(UI);
+  return { shape: s, allowed, paletteActive, defaultTile };
 }
 
 
@@ -2269,10 +2284,31 @@ async function handleShapePickerSelection(shapeId) {
 
   if (state.selectedShape && state.selectedShape.id === shapeId) return;
 
-  try {
-    if (state.xrSession) await stopAR();
-  } catch (e) {
-    console.warn('stopAR failed', e);
+  if (state.xrSession) {
+    if (state._switchingShapeInAr) return;
+    state._switchingShapeInAr = true;
+    const prevTileId = state.selectedTile ? state.selectedTile.id : null;
+    try {
+      const result = await openDetail(shapeId, { preserveScreen: true, keepCurrentTile: true });
+      if (state.phase === 'ar_final') {
+        show(UI.finalBar, true);
+        show(UI.finalColors, true);
+        renderColorRow(UI.finalColors, (Array.isArray(state.currentAllowedTiles) && state.currentAllowedTiles.length ? state.currentAllowedTiles : state.tiles.slice(0, 8)), {
+          onTileClick: async (tile) => {
+            await selectTile(tile);
+          }
+        });
+        updateArBottomStripVar(UI);
+      }
+      if (result && result.defaultTile && prevTileId && result.defaultTile.id !== prevTileId) {
+        // openDetail already applied the fallback/default tile; this branch only documents intent.
+      }
+    } catch (e) {
+      console.error('in-AR shape switch failed', e);
+    } finally {
+      state._switchingShapeInAr = false;
+    }
+    return;
   }
 
   try {
