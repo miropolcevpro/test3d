@@ -1,0 +1,33 @@
+Top files:
+   2.51 MB  assets/surfaces/klassika/paver_115x115_multitone_01/1k/paver_115x115_multitone_01_normal.png
+   1.04 MB  assets/stonemix_palette/stonemix_palette_14.webp
+1022.10 KB  assets/stonemix_palette/stonemix_palette_05.webp
+1018.16 KB  assets/stonemix_palette/stonemix_palette_09.webp
+ 985.65 KB  assets/stonemix_palette/stonemix_palette_06.webp
+ 971.32 KB  assets/stonemix_palette/stonemix_palette_04.webp
+ 958.82 KB  assets/stonemix_palette/stonemix_palette_03.webp
+ 957.29 KB  assets/stonemix_palette/stonemix_palette_10.webp
+ 941.04 KB  assets/stonemix_palette/stonemix_palette_13.webp
+ 937.00 KB  assets/stonemix_palette/stonemix_palette_11.webp
+ 886.51 KB  assets/stonemix_palette/stonemix_palette_01.webp
+ 783.65 KB  assets/colormix_palette/colormix_palette_11.webp
+ 779.54 KB  assets/gallery/antika/3.webp
+ 765.87 KB  assets/stonemix_palette/stonemix_palette_12.webp
+ 759.36 KB  assets/colormix_palette/colormix_palette_12.webp
+
+Top directories:
+  35.66 MB  assets
+  13.55 MB  assets/stonemix_palette
+   6.64 MB  assets/forms
+   5.79 MB  assets/colormix_palette
+   3.72 MB  assets/surfaces
+   3.72 MB  assets/surfaces/klassika
+   3.72 MB  assets/surfaces/klassika/paver_115x115_multitone_01
+   3.72 MB  assets/surfaces/klassika/paver_115x115_multitone_01/1k
+   2.75 MB  assets/monotone_palette
+   1.76 MB  assets/gallery
+   1.49 MB  assets/gallery/antika
+ 489.38 KB  assets/icons
+ 415.38 KB  assets/ui
+ 360.06 KB  assets/textures
+ 146.09 KB  assets/gallery/klassika

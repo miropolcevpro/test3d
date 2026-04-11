@@ -1,10 +1,12 @@
 // BUILD: v28 2026-01-16f (runtime-config)
-const __BUILD_ID__ = "v28-20260116f";
+const __BUILD_ID__ = "20260411-f20a";
 console.log("[Admin] build", __BUILD_ID__);
 /* Admin (Step 3 start) — shapes list + shape details (read-only palette), router scaffold */
 (async () => {
+  const runtimeConfig = (typeof window !== 'undefined' && window.__RUNTIME_CONFIG__) ? window.__RUNTIME_CONFIG__ : null;
   const API_BASE_URL = (window.API_BASE_URL || '').replace(/\/+$/, '');
   const TOKEN_KEY = 'admin_jwt';
+  const contentIdentity = (typeof window !== 'undefined' && window.__CONTENT_IDENTITY__) ? window.__CONTENT_IDENTITY__ : null;
 
   // Remote runtime config (safe, non-breaking):
   // - Tries to GET ${API_BASE_URL}/api/config
@@ -66,12 +68,16 @@ console.log("[Admin] build", __BUILD_ID__);
   // In GitHub Pages the admin lives under /<repo>/admin/, while site assets are under /<repo>/assets/.
   // Resolve any relative asset paths (e.g. "assets/forms/klassika.png") against the site root ("/<repo>/").
   const SITE_BASE_URL = (() => {
+    const siteEnv = (typeof window !== 'undefined' && window.__SITE_ENV__) ? window.__SITE_ENV__ : null;
+    if (siteEnv && siteEnv.siteBaseUrl) return siteEnv.siteBaseUrl;
     const basePath = window.location.pathname.replace(/\/admin\/.*$/, '/');
     return window.location.origin + basePath;
   })();
 
   function resolveSiteUrl(u) {
     if (!u) return '';
+    const siteEnv = (typeof window !== 'undefined' && window.__SITE_ENV__) ? window.__SITE_ENV__ : null;
+    if (siteEnv && typeof siteEnv.resolveSiteUrl === 'function') return siteEnv.resolveSiteUrl(u);
     try {
       return new URL(u, SITE_BASE_URL).toString();
     } catch {
@@ -81,7 +87,7 @@ console.log("[Admin] build", __BUILD_ID__);
 
   // Bucket base for palette assets (maps, previews). Can be overridden in admin/config.js:
   //   window.BUCKET_BASE_URL = "https://storage.yandexcloud.net/webar3dtexture/";
-  const BUCKET_BASE_URL = (window.BUCKET_BASE_URL || 'https://storage.yandexcloud.net/webar3dtexture/').replace(/\/+$/, '/') ;
+  const BUCKET_BASE_URL = (window.BUCKET_BASE_URL || (runtimeConfig && runtimeConfig.defaults && runtimeConfig.defaults.bucketBaseUrl) || 'https://storage.yandexcloud.net/webar3dtexture/').replace(/\/+$/, '/') ;
 
   // Canonical textureId handling
   // Bucket folder naming convention: surfaces/<shapeId>/<textureId>/...
@@ -91,43 +97,21 @@ console.log("[Admin] build", __BUILD_ID__);
   //   - "klassika_paver_..." -> "paver_..."
   // and sanitize any remaining ":" to "_".
   function canonicalTextureId(shapeId, anyId) {
-    if (!anyId) return '';
-    let s = String(anyId).trim();
-    if (!s) return '';
-    try { s = decodeURIComponent(s); } catch {}
-
-    const sid = String(shapeId || '').trim();
-    if (sid) {
-      const pColon = sid + ':';
-      const pUnd = sid + '_';
-      // Some legacy data ended up with repeated prefixes, e.g. "klassika:klassika_kara_dag".
-      // Strip prefixes repeatedly until stable.
-      // Also trim in-between to be robust against accidental spaces.
-      for (let i = 0; i < 3; i++) {
-        if (s.startsWith(pColon)) { s = s.slice(pColon.length).trim(); continue; }
-        if (s.startsWith(pUnd)) { s = s.slice(pUnd.length).trim(); continue; }
-        break;
-      }
+    if (contentIdentity && typeof contentIdentity.canonicalStorageTextureId === 'function') {
+      return normalizeTextureId(contentIdentity.canonicalStorageTextureId(shapeId, anyId), shapeId);
     }
-
-    if (s.includes(':')) s = s.replace(/:/g, '_');
-    return s;
+    return normalizeTextureId(anyId, shapeId);
   }
 
   function normalizePathLike(shapeId, v) {
     if (!v) return v;
-    let s = String(v).trim();
-    if (!s) return s;
-    try { s = decodeURIComponent(s); } catch {}
     const sid = String(shapeId || '').trim();
-
-    // If someone stored preview as "klassika:..._albedo.png" (no slashes) — treat as invalid to avoid ORB/CORB.
+    let s = contentIdentity && typeof contentIdentity.normalizeContentPath === 'function'
+      ? contentIdentity.normalizeContentPath(v)
+      : String(v).trim();
+    if (!s) return s;
     if (!s.includes('/') && s.includes(':')) return '';
     if (!sid) return s;
-
-    // Fix common legacy prefixing mistakes inside bucket-relative paths:
-    //   surfaces/<sid>/<sid>_foo/...  -> surfaces/<sid>/foo/...
-    //   surfaces/<sid>/<sid>:foo/...  -> surfaces/<sid>/foo/...
     s = s.replace(new RegExp('surfaces/' + sid + '/' + sid + '[_:]', 'g'), 'surfaces/' + sid + '/');
     return s;
   }
@@ -509,15 +493,22 @@ function normalizeTextureId(v, shapeId) {
   const raw0 = String(v || '').trim();
   if (!raw0) return '';
 
-  // If a shape is selected, strip accidental shape prefixes:
+  // If a shape is selected, strip accidental shape prefixes case-insensitively:
   // - "klassika:paver_..." -> "paver_..."
   // - "klassika_paver_..." -> "paver_..."
+  // - "klassika-paver_..." -> "paver_..."
   let raw = raw0;
   if (shapeId) {
-    const s1 = `${shapeId}:`;
-    const s2 = `${shapeId}_`;
-    if (raw.startsWith(s1)) raw = raw.slice(s1.length);
-    else if (raw.startsWith(s2)) raw = raw.slice(s2.length);
+    const sid = String(shapeId).trim();
+    const rawLower = raw.toLowerCase();
+    const sidLower = sid.toLowerCase();
+    const prefixes = [`${sidLower}:`, `${sidLower}_`, `${sidLower}-`];
+    for (const prefix of prefixes) {
+      if (rawLower.startsWith(prefix)) {
+        raw = raw.slice(prefix.length);
+        break;
+      }
+    }
   }
 
   // Bucket-safe textureId:
@@ -530,7 +521,7 @@ function normalizeTextureId(v, shapeId) {
     .replace(/_+/g, '_')
     .replace(/^_+|_+$/g, '');
 
-  // We recommend lowercase for consistency across tools/OS.
+  // Always lowercase for stable object-storage keys and consistent admin behavior.
   return s.toLowerCase();
 }
 
@@ -1244,6 +1235,15 @@ try {
     return need.some(k => !q1.maps[k]?.key);
   }
 
+
+  function hasCompleteBucketTexture1k(shapeId, textureId) {
+    const idx = state.bucketIndexByShapeId.get(shapeId) || { textures: [] };
+    const textures = Array.isArray(idx?.textures) ? idx.textures : [];
+    const targetId = canonicalTextureId(shapeId, textureId);
+    const hit = textures.find(t => canonicalTextureId(shapeId, t?.textureId || t?.id || '') === targetId);
+    return !!(hit && !isBucketTextureBroken(hit));
+  }
+
   function buildPaletteItemFromBucket(shapeId, textureId, bucketTex) {
     const q1 = bucketTex?.qualities?.['1k'];
     const maps = {};
@@ -1438,9 +1438,9 @@ try {
     setStatus(elStatus, 'ok', `Загружено форм: ${shapes.length}`);
   }
 
-  async function ensurePaletteLoaded(shapeId) {
+  async function ensurePaletteLoaded(shapeId, { forceReload = false } = {}) {
     if (!shapeId) return null;
-    if (state.paletteByShapeId.has(shapeId)) return state.paletteByShapeId.get(shapeId);
+    if (!forceReload && state.paletteByShapeId.has(shapeId)) return state.paletteByShapeId.get(shapeId);
     setStatus(elStatus, '', `Загружаем палитру формы: ${shapeId} …`);
     const payload = await apiFetch('/api/palettes/' + encodeURIComponent(shapeId));
 
@@ -2105,7 +2105,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
     elTexPreview.src = previewUrl;
       elTexPreviewHint.textContent = 'Превью: albedo (из палитры)';
     } else {
-      elTexPreviewHint.textContent = 'Превью недоступно (в palletes/*.json нет preview/albedo)';
+      elTexPreviewHint.textContent = 'Превью недоступно (в palettes/*.json нет preview/albedo)';
     }
 
     const defaults = getDefaultsForShape(shapeId);
@@ -2933,6 +2933,26 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
                 throw new Error('Не найдено подходящих файлов в ZIP. Ожидается структура surfaces/<shapeId>/<textureId>/<quality>/... (или выберите сопоставление карт в окне).');
               }
 
+              const texturesWith2k = [];
+              if (parsed?.textures && typeof parsed.textures.entries === 'function') {
+                for (const [texId, info] of parsed.textures.entries()) {
+                  if (!texId || !info?.qualities?.has || !info.qualities.has('2k')) continue;
+                  texturesWith2k.push(texId);
+                }
+              }
+              if (texturesWith2k.length) {
+                try {
+                  await ensureBucketIndexLoaded(shapeId, { forceReload: true });
+                } catch (e) {
+                  console.warn(e);
+                  throw new Error('Не удалось проверить базовую 1k-текстуру перед structured ZIP загрузкой 2k. Проверьте доступ к индексу бакета и повторите попытку.');
+                }
+                const missingBase1k = texturesWith2k.filter(texId => !hasCompleteBucketTexture1k(shapeId, texId));
+                if (missingBase1k.length) {
+                  throw new Error(`Structured ZIP содержит 2k для текстур без уже существующей полной 1k: ${missingBase1k.join(', ')}. Сначала загрузите и сохраните полный набор 1k (albedo, normal, roughness, height), затем повторите загрузку 2k.`);
+                }
+              }
+
               state.uploadTasks = parsed.tasks;
               renderUploadQueue();
 
@@ -2991,22 +3011,29 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
                 } catch {}
               }
 
-              // Sync palette item maps from bucket (guards against mixed formats / custom file names).
-              // In "update" mode it is mandatory; in "new" mode it is also useful after structured ZIP.
-              try {
-                const toSync = (parsed?.textures && typeof parsed.textures.keys === 'function')
-                  ? Array.from(parsed.textures.keys())
-                  : [];
-                for (const tid of toSync) {
-                  if (!tid) continue;
-                  await apiSyncTexture(shapeId, tid);
+              if (elUploadAutoAdd?.checked) {
+                // Sync palette item maps from bucket (guards against mixed formats / custom file names)
+                // only when palette mutation is explicitly enabled via auto-add.
+                try {
+                  const toSync = (parsed?.textures && typeof parsed.textures.keys === 'function')
+                    ? Array.from(parsed.textures.keys())
+                    : [];
+                  for (const tid of toSync) {
+                    if (!tid) continue;
+                    await apiSyncTexture(shapeId, tid);
+                  }
+                  state.paletteByShapeId.delete(shapeId);
+                  const fresh2 = await ensurePaletteLoaded(shapeId, { forceReload: true });
+                  if (parseRoute().name === 'shape') renderTextures(shapeId, Array.isArray(fresh2?.items) ? fresh2.items : []);
+                } catch (e) {
+                  console.warn(e);
+                  setStatus(elUploadStatus, 'warn', 'Файлы загружены, но синхронизация палитры по бакету не удалась. Проверьте backend / доступы S3.');
                 }
-                state.paletteByShapeId.delete(shapeId);
-                const fresh2 = await ensurePaletteLoaded(shapeId, { forceReload: true });
-                if (parseRoute().name === 'shape') renderTextures(shapeId, Array.isArray(fresh2?.items) ? fresh2.items : []);
-              } catch (e) {
-                console.warn(e);
-                setStatus(elUploadStatus, 'warn', 'Файлы загружены, но синхронизация палитры по бакету не удалась. Проверьте backend / доступы S3.');
+              } else {
+                try {
+                  await ensureBucketIndexLoaded(shapeId, { forceReload: true });
+                } catch {}
+                setStatus(elUploadStatus, 'ok', 'Готово: файлы загружены. Палитра не изменялась, так как auto-add выключен.');
               }
 
               return;
@@ -3034,6 +3061,20 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
               return;
             }
 
+            if (quality === '2k') {
+              try {
+                await ensureBucketIndexLoaded(shapeId, { forceReload: true });
+              } catch (e) {
+                console.warn(e);
+                setStatus(elUploadStatus, 'err', 'Не удалось проверить базовую 1k-текстуру перед загрузкой 2k. Проверьте доступ к индексу бакета и повторите попытку.');
+                return;
+              }
+              if (!hasCompleteBucketTexture1k(shapeId, textureId)) {
+                setStatus(elUploadStatus, 'err', 'Загрузка 2k разрешена только после полной 1k-текстуры (albedo, normal, roughness, height). Сначала загрузите полный набор 1k.');
+                return;
+              }
+            }
+
             // If ZIP contains a different textureId, warn but continue with user-provided textureId.
             if (meta?.textureIds?.length === 1 && meta.textureIds[0] && meta.textureIds[0] !== textureId) {
               setStatus(elUploadStatus, 'warn', `ZIP содержит textureId="${meta.textureIds[0]}", но будет использовано значение из формы: "${textureId}".`);
@@ -3054,36 +3095,43 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
             setStatus(elUploadStatus, 'ok', 'Файлы загружены.');
 
             if (elUploadAutoAdd?.checked) {
-              setStatus(elUploadStatus, '', 'Обновляем палитру…');
+              setStatus(elUploadStatus, '', quality === '2k' ? 'Синхронизируем палитру после загрузки 2k…' : 'Обновляем палитру…');
 
               let tileSizeM = null;
-              const wMm = num(elUploadTileW?.value, null);
-              const hMm = num(elUploadTileH?.value, null);
-              if (wMm && hMm) {
-                tileSizeM = { w: Math.max(1, wMm) / 1000, h: Math.max(1, hMm) / 1000 };
-              } else {
-                try {
-                  const ps = await ensurePaletteSettingsLoaded(shapeId);
-                  const d = ps?.defaults;
-                  if (d?.tileSizeM && typeof d.tileSizeM.w === 'number' && typeof d.tileSizeM.h === 'number') {
-                    tileSizeM = { w: d.tileSizeM.w, h: d.tileSizeM.h };
+              if (quality === '1k') {
+                const wMm = num(elUploadTileW?.value, null);
+                const hMm = num(elUploadTileH?.value, null);
+                if (wMm && hMm) {
+                  tileSizeM = { w: Math.max(1, wMm) / 1000, h: Math.max(1, hMm) / 1000 };
+                } else {
+                  try {
+                    const ps = await ensurePaletteSettingsLoaded(shapeId);
+                    const d = ps?.defaults;
+                    if (d?.tileSizeM && typeof d.tileSizeM.w === 'number' && typeof d.tileSizeM.h === 'number') {
+                      tileSizeM = { w: d.tileSizeM.w, h: d.tileSizeM.h };
+                    }
+                  } catch {
+                    // ignore
                   }
-                } catch {
-                  // ignore
                 }
               }
 
-              const item = buildPaletteItemFromUpload(shapeId, textureId, displayName, quality, tasks, tileSizeM);
-              await upsertItemAndSavePalette(shapeId, item);
+              if (quality === '1k') {
+                const item = buildPaletteItemFromUpload(shapeId, textureId, displayName, quality, tasks, tileSizeM);
+                await upsertItemAndSavePalette(shapeId, item);
+              }
 
-              // Sync from bucket to ensure correct extensions/paths (png/webp mix, non-standard names).
+              // Sync from bucket to ensure correct extensions/paths (png/webp mix, non-standard names)
+              // and to keep palette items anchored to the canonical 1k representation.
               try {
                 await apiSyncTexture(shapeId, textureId);
               } catch (e) {
                 console.warn(e);
                 setStatus(elUploadStatus, 'warn', 'Палитра обновлена, но синхронизация по бакету не удалась. Проверьте backend / доступы S3.');
               }
-              setStatus(elUploadStatus, 'ok', 'Готово: файлы загружены, палитра обновлена и сохранена.');
+              setStatus(elUploadStatus, 'ok', quality === '2k'
+                ? 'Готово: 2k-файлы загружены, палитра синхронизирована с существующей 1k-текстурой.'
+                : 'Готово: файлы загружены, палитра обновлена и сохранена.');
               try {
                 await ensureBucketIndexLoaded(shapeId, { forceReload: true });
               } catch {}

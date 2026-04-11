@@ -5,7 +5,7 @@
   <link rel="icon" href="../favicon.ico" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Админка контента — WebAR плитка</title>
-  <link rel="stylesheet" href="./admin.css?v=20260114" />
+  <link rel="stylesheet" href="./admin.css?v=20260411-f20a" />
 </head>
 <body>
   <header class="topbar">
@@ -13,7 +13,7 @@
       <div class="dot"></div>
       <div>
         <div class="title">Админка контента</div>
-        <div class="subtitle">Шаг 3 (начало) — формы, навигация, подготовка к загрузкам</div>
+        <div class="subtitle">Управление формами, текстурами и палитрами</div>
       </div>
     </div>
     <div class="links">
@@ -41,7 +41,7 @@
       </div>
       <div class="status" id="loginStatus"></div>
       <p class="muted mt">
-        Backend URL задаётся в <code>admin/config.js</code> (переменная <code>API_BASE_URL</code>).
+        Backend URL централизован в <code>js/runtime-config.js</code> и применяется через <code>admin/config.js</code>.
       </p>
     </section>
 
@@ -173,7 +173,7 @@
                   <span>Качество</span>
                   <select id="uploadQuality">
                     <option value="1k">1k (обязательно)</option>
-                    <option value="2k">2k (опционально)</option>
+                    <option value="2k">2k (только после полной 1k)</option>
                   </select>
                 </label>
                 <label class="field">
@@ -186,6 +186,7 @@
                   <span>Размер модуля (мм), ширина (опционально)</span>
                   <input id="uploadTileW" type="number" min="1" step="1" placeholder="115" />
                 </label>
+                <div class="hint">Сначала загрузите полный набор 1k (albedo, normal, roughness, height). Загрузка 2k разрешена только после уже существующей полной 1k-текстуры с тем же textureId.</div>
                 <label class="field">
                   <span>Размер модуля (мм), высота (опционально)</span>
                   <input id="uploadTileH" type="number" min="1" step="1" placeholder="115" />
@@ -497,7 +498,10 @@
     We intentionally do NOT register SW here.
     Cache-busting query params force browsers/CDN to fetch the latest scripts after deploy.
   -->
-  <script src="./config.js?v=20260114"></script>
-  <script src="./admin.js?v=20260116e"></script>
+  <script src="../js/runtime-config.js?v=20260411-f20a"></script>
+  <script src="../js/site-env.js?v=20260411-f20a"></script>
+  <script src="../js/content-identity.js?v=20260411-f20a"></script>
+  <script src="./config.js?v=20260411-f20a"></script>
+  <script src="./admin.js?v=20260411-f20a"></script>
 </body>
 </html>

@@ -13,12 +13,22 @@ const $ = (id) => document.getElementById(id);
 //  1) window.__SURFACE_PALETTE_BASE_URL__ (if injected)
 //  2) backend runtime config: GET <API_BASE_URL>/config -> public.palettesBaseUrl
 //  3) fallback: YC Object Storage public URL
-const FALLBACK_BASE_URL = 'https://storage.yandexcloud.net/webar3dtexture/palettes/';
-let DEFAULT_BASE_URL = (typeof window !== 'undefined' && window.__SURFACE_PALETTE_BASE_URL__)
-  ? String(window.__SURFACE_PALETTE_BASE_URL__).replace(/\/+$/, '') + '/'
-  : FALLBACK_BASE_URL;
+const runtimeConfig = (typeof window !== 'undefined' && window.__RUNTIME_CONFIG__) ? window.__RUNTIME_CONFIG__ : null;
+const FALLBACK_BASE_URL = (runtimeConfig && runtimeConfig.defaults && runtimeConfig.defaults.surfacePaletteBaseUrl)
+  ? String(runtimeConfig.defaults.surfacePaletteBaseUrl).replace(/\/+$/, '') + '/'
+  : 'https://storage.yandexcloud.net/webar3dtexture/palettes/';
+const contentIdentity = (typeof window !== 'undefined' && window.__CONTENT_IDENTITY__) ? window.__CONTENT_IDENTITY__ : null;
+let DEFAULT_BASE_URL = (runtimeConfig && typeof runtimeConfig.resolveSurfacePaletteBaseUrl === 'function')
+  ? runtimeConfig.resolveSurfacePaletteBaseUrl()
+  : ((typeof window !== 'undefined' && window.__SURFACE_PALETTE_BASE_URL__)
+    ? String(window.__SURFACE_PALETTE_BASE_URL__).replace(/\/+$/, '') + '/'
+    : FALLBACK_BASE_URL);
 
 function getApiBaseUrl() {
+  if (runtimeConfig && typeof runtimeConfig.resolveAdminApiBaseUrl === 'function') {
+    const v = runtimeConfig.resolveAdminApiBaseUrl();
+    return v ? String(v).replace(/\/+$/, '') : '';
+  }
   const v = (typeof window !== 'undefined' && (window.API_BASE_URL || window.__API_BASE_URL__))
     ? String(window.API_BASE_URL || window.__API_BASE_URL__).trim()
     : '';
@@ -175,7 +185,8 @@ function isSpecial(p) {
 function buildResolver(paletteUrl, data) {
   const paletteURL = new URL(paletteUrl);
   const paletteDir = new URL('./', paletteURL).toString();
-  const siteRoot = new URL('/', window.location.href).toString();
+  const siteEnv = (typeof window !== 'undefined' && window.__SITE_ENV__) ? window.__SITE_ENV__ : null;
+  const siteRoot = (siteEnv && siteEnv.siteBaseUrl) ? siteEnv.siteBaseUrl : new URL('./', window.location.href).toString();
 
   // If palette is hosted on Object Storage, bucket root is /<bucket>/
   let bucketRoot = `${paletteURL.protocol}//${paletteURL.host}/`;
@@ -198,9 +209,15 @@ function buildResolver(paletteUrl, data) {
     if (isAbs(s) || isSpecial(s)) return s;
     if (baseAbs) return new URL(s.replace(/^\/+/, ''), baseAbs).toString();
     if (s.startsWith('./') || s.startsWith('../')) return new URL(s, paletteDir).toString();
-    if (s.startsWith('assets/') || s.startsWith('css/') || s.startsWith('js/')) return new URL(s, siteRoot).toString();
+    if (s.startsWith('assets/') || s.startsWith('css/') || s.startsWith('js/')) {
+      return (siteEnv && typeof siteEnv.resolveSiteUrl === 'function')
+        ? siteEnv.resolveSiteUrl(s)
+        : new URL(s, siteRoot).toString();
+    }
     if (paletteURL.hostname.endsWith('storage.yandexcloud.net')) return new URL(s.replace(/^\/+/, ''), bucketRoot).toString();
-    return new URL(s.replace(/^\/+/, ''), siteRoot).toString();
+    return (siteEnv && typeof siteEnv.resolveSiteUrl === 'function')
+      ? siteEnv.resolveSiteUrl(s)
+      : new URL(s.replace(/^\/+/, ''), siteRoot).toString();
   };
 
   return resolvePath;
@@ -500,11 +517,12 @@ async function validatePalette(paletteUrl, opts) {
   const resolved = items.map((it) => {
     const out = (it && typeof it === 'object') ? cloneValue(it) : it;
     if (!out || typeof out !== 'object') return out;
-    if (out.preview) out.preview = resolvePath(out.preview);
-    if (out.texture) out.texture = resolvePath(out.texture);
+    if (out.preview) out.preview = resolvePath(contentIdentity && typeof contentIdentity.normalizeContentPath === 'function' ? contentIdentity.normalizeContentPath(out.preview) : out.preview);
+    if (out.texture) out.texture = resolvePath(contentIdentity && typeof contentIdentity.normalizeContentPath === 'function' ? contentIdentity.normalizeContentPath(out.texture) : out.texture);
     if (out.maps && typeof out.maps === 'object') {
       Object.keys(out.maps).forEach((k) => {
-        out.maps[k] = resolvePath(out.maps[k]);
+        const raw = out.maps[k];
+        out.maps[k] = resolvePath(contentIdentity && typeof contentIdentity.normalizeContentPath === 'function' ? contentIdentity.normalizeContentPath(raw) : raw);
       });
     }
     return out;
@@ -513,7 +531,7 @@ async function validatePalette(paletteUrl, opts) {
   // Duplicate id check
   const seen = new Map();
   resolved.forEach((it, idx) => {
-    const id = (it && typeof it === 'object') ? String(it.id || '') : '';
+    const id = (it && typeof it === 'object') ? String((contentIdentity && typeof contentIdentity.canonicalEntityId === 'function') ? contentIdentity.canonicalEntityId(it.id || it.textureId || '') : (it.id || it.textureId || '')) : '';
     if (!id) return;
     const prev = seen.get(id);
     if (prev === undefined) seen.set(id, idx);

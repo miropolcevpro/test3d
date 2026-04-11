@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "tiles": [
     {
       "id": 1,
@@ -14,6 +14,11 @@
         "Прямая",
         "Диагональ 45°",
         "Вразбежку"
+      ],
+      "layoutCodes": [
+        "straight",
+        "diagonal",
+        "stagger"
       ]
     },
     {
@@ -29,6 +34,11 @@
         "Прямая",
         "Диагональ 45°",
         "Вразбежку"
+      ],
+      "layoutCodes": [
+        "straight",
+        "diagonal",
+        "stagger"
       ]
     },
     {
@@ -44,6 +54,11 @@
         "Прямая",
         "Диагональ 45°",
         "Вразбежку"
+      ],
+      "layoutCodes": [
+        "straight",
+        "diagonal",
+        "stagger"
       ]
     },
     {
@@ -59,6 +74,11 @@
         "Прямая",
         "Диагональ 45°",
         "Вразбежку"
+      ],
+      "layoutCodes": [
+        "straight",
+        "diagonal",
+        "stagger"
       ]
     },
     {
@@ -74,6 +94,11 @@
         "Прямая",
         "Диагональ 45°",
         "Вразбежку"
+      ],
+      "layoutCodes": [
+        "straight",
+        "diagonal",
+        "stagger"
       ]
     },
     {
@@ -89,6 +114,11 @@
         "Прямая",
         "Диагональ 45°",
         "Вразбежку"
+      ],
+      "layoutCodes": [
+        "straight",
+        "diagonal",
+        "stagger"
       ]
     },
     {
@@ -104,6 +134,11 @@
         "Прямая",
         "Диагональ 45°",
         "Вразбежку"
+      ],
+      "layoutCodes": [
+        "straight",
+        "diagonal",
+        "stagger"
       ]
     },
     {
@@ -119,6 +154,11 @@
         "Прямая",
         "Диагональ 45°",
         "Вразбежку"
+      ],
+      "layoutCodes": [
+        "straight",
+        "diagonal",
+        "stagger"
       ]
     },
     {
@@ -134,6 +174,11 @@
         "Прямая",
         "Диагональ 45°",
         "Вразбежку"
+      ],
+      "layoutCodes": [
+        "straight",
+        "diagonal",
+        "stagger"
       ]
     },
     {
@@ -149,6 +194,11 @@
         "Прямая",
         "Диагональ 45°",
         "Вразбежку"
+      ],
+      "layoutCodes": [
+        "straight",
+        "diagonal",
+        "stagger"
       ]
     },
     {
@@ -164,6 +214,11 @@
         "Прямая",
         "Диагональ 45°",
         "Вразбежку"
+      ],
+      "layoutCodes": [
+        "straight",
+        "diagonal",
+        "stagger"
       ]
     },
     {
@@ -179,6 +234,11 @@
         "Прямая",
         "Диагональ 45°",
         "Вразбежку"
+      ],
+      "layoutCodes": [
+        "straight",
+        "diagonal",
+        "stagger"
       ]
     }
   ]

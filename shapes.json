@@ -5,7 +5,7 @@
       "name": "Антика",
       "icon": "assets/forms/antika_thumb.png",
       "hero": "assets/forms/antika.png",
-      "description": "Форма «Антика». Выберите цвет/поверхность и перейдите в AR-визуализацию.",
+      "description": "Тротуарная плитка «Антика». Выберите цвет и поверхность, затем перейдите в AR-визуализацию покрытия.",
       "tileIds": [
         1,
         2,
@@ -21,6 +21,8 @@
         12
       ],
       "tech": {
+        "Серия": "Антика",
+        "Категория": "Тротуарная плитка",
         "Толщина": "60мм",
         "Размер, мм": "118х98х95х60 / 108х88х95х60 / 97х77х95х60 / 87х67х95х60 / 76х56х95х60",
         "Количество м² на поддоне": "10.2",
@@ -31,14 +33,16 @@
         "assets/gallery/antika/2.webp",
         "assets/gallery/antika/3.webp",
         "assets/gallery/antika/4.webp"
-      ]
+      ],
+      "subtitle": "Тротуарная плитка",
+      "surfacePalette": null
     },
     {
       "id": "bruschatka",
       "name": "Брусчатка",
       "icon": "assets/forms/bruschatka_thumb.png",
       "hero": "assets/forms/bruschatka.png",
-      "description": "Форма «Брусчатка». Выберите цвет/поверхность и перейдите в AR-визуализацию.",
+      "description": "Тротуарная плитка «Брусчатка». Выберите цвет и поверхность, затем перейдите в AR-визуализацию покрытия.",
       "tileIds": [
         1,
         2,
@@ -55,22 +59,23 @@
       ],
       "tech": {
         "Серия": "Брусчатка",
-        "Толщина": "—",
-        "Назначение": "—"
+        "Категория": "Тротуарная плитка"
       },
       "gallery": [
         "assets/gallery/bruschatka/1.webp",
         "assets/gallery/bruschatka/2.webp",
         "assets/gallery/bruschatka/3.webp",
         "assets/gallery/bruschatka/4.webp"
-      ]
+      ],
+      "subtitle": "Тротуарная плитка",
+      "surfacePalette": null
     },
     {
       "id": "klassika",
       "name": "Классика",
       "icon": "assets/forms/klassika_thumb.png",
       "hero": "assets/forms/klassika.png",
-      "description": "Форма «Классика». Выберите цвет/поверхность и перейдите в AR-визуализацию.",
+      "description": "Тротуарная плитка «Классика». Выберите цвет и поверхность, затем перейдите в AR-визуализацию покрытия.",
       "tileIds": [
         1,
         2,
@@ -87,8 +92,7 @@
       ],
       "tech": {
         "Серия": "Классика",
-        "Толщина": "—",
-        "Назначение": "—"
+        "Категория": "Тротуарная плитка"
       },
       "gallery": [
         "assets/gallery/klassika/1.webp",
@@ -96,14 +100,15 @@
         "assets/gallery/klassika/3.webp",
         "assets/gallery/klassika/4.webp"
       ],
-      "surfacePalette": "https://storage.yandexcloud.net/webar3dtexture/palettes/klassika.json"
+      "surfacePalette": "https://storage.yandexcloud.net/webar3dtexture/palettes/klassika.json",
+      "subtitle": "Тротуарная плитка"
     },
     {
       "id": "poligonal",
       "name": "Полигональ",
       "icon": "assets/forms/poligonal_thumb.png",
       "hero": "assets/forms/poligonal.png",
-      "description": "Форма «Полигональ». Выберите цвет/поверхность и перейдите в AR-визуализацию.",
+      "description": "Тротуарная плитка «Полигональ». Выберите цвет и поверхность, затем перейдите в AR-визуализацию покрытия.",
       "tileIds": [
         1,
         2,
@@ -120,22 +125,23 @@
       ],
       "tech": {
         "Серия": "Полигональ",
-        "Толщина": "—",
-        "Назначение": "—"
+        "Категория": "Тротуарная плитка"
       },
       "gallery": [
         "assets/gallery/poligonal/1.webp",
         "assets/gallery/poligonal/2.webp",
         "assets/gallery/poligonal/3.webp",
         "assets/gallery/poligonal/4.webp"
-      ]
+      ],
+      "subtitle": "Тротуарная плитка",
+      "surfacePalette": null
     },
     {
       "id": "promenad2",
       "name": "Променад II",
       "icon": "assets/forms/promenad2_thumb.png",
       "hero": "assets/forms/promenad2.png",
-      "description": "Форма «Променад II». Выберите цвет/поверхность и перейдите в AR-визуализацию.",
+      "description": "Тротуарная плитка «Променад II». Выберите цвет и поверхность, затем перейдите в AR-визуализацию покрытия.",
       "tileIds": [
         1,
         2,
@@ -152,22 +158,23 @@
       ],
       "tech": {
         "Серия": "Променад II",
-        "Толщина": "—",
-        "Назначение": "—"
+        "Категория": "Тротуарная плитка"
       },
       "gallery": [
         "assets/gallery/promenad2/1.webp",
         "assets/gallery/promenad2/2.webp",
         "assets/gallery/promenad2/3.webp",
         "assets/gallery/promenad2/4.webp"
-      ]
+      ],
+      "subtitle": "Тротуарная плитка",
+      "surfacePalette": null
     },
     {
       "id": "new_gorod",
       "name": "Новый город",
       "icon": "assets/forms/new_gorod_thumb.png",
       "hero": "assets/forms/new_gorod.png",
-      "description": "Форма «Новый город». Выберите цвет/поверхность и перейдите в AR-визуализацию.",
+      "description": "Тротуарная плитка «Новый город». Выберите цвет и поверхность, затем перейдите в AR-визуализацию покрытия.",
       "tileIds": [
         1,
         2,
@@ -184,22 +191,23 @@
       ],
       "tech": {
         "Серия": "Новый город",
-        "Толщина": "—",
-        "Назначение": "—"
+        "Категория": "Тротуарная плитка"
       },
       "gallery": [
         "assets/gallery/new_gorod/1.webp",
         "assets/gallery/new_gorod/2.webp",
         "assets/gallery/new_gorod/3.webp",
         "assets/gallery/new_gorod/4.webp"
-      ]
+      ],
+      "subtitle": "Тротуарная плитка",
+      "surfacePalette": null
     },
     {
       "id": "old_gorod",
       "name": "Старый город",
       "icon": "assets/forms/old_gorod_thumb.png",
       "hero": "assets/forms/old_gorod.png",
-      "description": "Форма «Старый город». Выберите цвет/поверхность и перейдите в AR-визуализацию.",
+      "description": "Тротуарная плитка «Старый город». Выберите цвет и поверхность, затем перейдите в AR-визуализацию покрытия.",
       "tileIds": [
         1,
         2,
@@ -216,22 +224,23 @@
       ],
       "tech": {
         "Серия": "Старый город",
-        "Толщина": "—",
-        "Назначение": "—"
+        "Категория": "Тротуарная плитка"
       },
       "gallery": [
         "assets/gallery/old_gorod/1.webp",
         "assets/gallery/old_gorod/2.webp",
         "assets/gallery/old_gorod/3.webp",
         "assets/gallery/old_gorod/4.webp"
-      ]
+      ],
+      "subtitle": "Тротуарная плитка",
+      "surfacePalette": null
     },
     {
       "id": "rigel",
       "name": "Ригель",
       "icon": "assets/forms/rigel_thumb.png",
       "hero": "assets/forms/rigel.png",
-      "description": "Форма «Ригель». Выберите цвет/поверхность и перейдите в AR-визуализацию.",
+      "description": "Тротуарная плитка «Ригель». Выберите цвет и поверхность, затем перейдите в AR-визуализацию покрытия.",
       "tileIds": [
         1,
         2,
@@ -248,22 +257,23 @@
       ],
       "tech": {
         "Серия": "Ригель",
-        "Толщина": "—",
-        "Назначение": "—"
+        "Категория": "Тротуарная плитка"
       },
       "gallery": [
         "assets/gallery/rigel/1.webp",
         "assets/gallery/rigel/2.webp",
         "assets/gallery/rigel/3.webp",
         "assets/gallery/rigel/4.webp"
-      ]
+      ],
+      "subtitle": "Тротуарная плитка",
+      "surfacePalette": null
     },
     {
       "id": "paladio",
       "name": "Паладио",
       "icon": "assets/forms/paladio_thumb.png",
       "hero": "assets/forms/paladio.png",
-      "description": "Форма «Паладио». Выберите цвет/поверхность и перейдите в AR-визуализацию.",
+      "description": "Тротуарная плитка «Паладио». Выберите цвет и поверхность, затем перейдите в AR-визуализацию покрытия.",
       "tileIds": [
         1,
         2,
@@ -280,22 +290,23 @@
       ],
       "tech": {
         "Серия": "Паладио",
-        "Толщина": "—",
-        "Назначение": "—"
+        "Категория": "Тротуарная плитка"
       },
       "gallery": [
         "assets/gallery/paladio/1.webp",
         "assets/gallery/paladio/2.webp",
         "assets/gallery/paladio/3.webp",
         "assets/gallery/paladio/4.webp"
-      ]
+      ],
+      "subtitle": "Тротуарная плитка",
+      "surfacePalette": null
     },
     {
       "id": "gazonnaya_reshetka",
       "name": "Газонная решетка",
       "icon": "assets/forms/gazonnaya_reshetka_thumb.png",
       "hero": "assets/forms/gazonnaya_reshetka.png",
-      "description": "Форма «Газонная решетка». Выберите цвет/поверхность и перейдите в AR-визуализацию.",
+      "description": "Тротуарная плитка «Газонная решетка». Выберите цвет и поверхность, затем перейдите в AR-визуализацию покрытия.",
       "tileIds": [
         1,
         2,
@@ -312,22 +323,23 @@
       ],
       "tech": {
         "Серия": "Газонная решетка",
-        "Толщина": "—",
-        "Назначение": "—"
+        "Категория": "Тротуарная плитка"
       },
       "gallery": [
         "assets/gallery/gazonnaya_reshetka/1.webp",
         "assets/gallery/gazonnaya_reshetka/2.webp",
         "assets/gallery/gazonnaya_reshetka/3.webp",
         "assets/gallery/gazonnaya_reshetka/4.webp"
-      ]
+      ],
+      "subtitle": "Тротуарная плитка",
+      "surfacePalette": null
     },
     {
       "id": "megapolis",
       "name": "Мегаполис",
       "icon": "assets/forms/megapolis_thumb.png",
       "hero": "assets/forms/megapolis.png",
-      "description": "Форма «Мегаполис». Выберите цвет/поверхность и перейдите в AR-визуализацию.",
+      "description": "Тротуарная плитка «Мегаполис». Выберите цвет и поверхность, затем перейдите в AR-визуализацию покрытия.",
       "tileIds": [
         1,
         2,
@@ -344,22 +356,23 @@
       ],
       "tech": {
         "Серия": "Мегаполис",
-        "Толщина": "—",
-        "Назначение": "—"
+        "Категория": "Тротуарная плитка"
       },
       "gallery": [
         "assets/gallery/megapolis/1.webp",
         "assets/gallery/megapolis/2.webp",
         "assets/gallery/megapolis/3.webp",
         "assets/gallery/megapolis/4.webp"
-      ]
+      ],
+      "subtitle": "Тротуарная плитка",
+      "surfacePalette": null
     },
     {
       "id": "promenad1",
       "name": "Променад I",
       "icon": "assets/forms/promenad1_thumb.png",
       "hero": "assets/forms/promenad1.png",
-      "description": "Форма «Променад I». Выберите цвет/поверхность и перейдите в AR-визуализацию.",
+      "description": "Тротуарная плитка «Променад I». Выберите цвет и поверхность, затем перейдите в AR-визуализацию покрытия.",
       "tileIds": [
         1,
         2,
@@ -376,15 +389,17 @@
       ],
       "tech": {
         "Серия": "Променад I",
-        "Толщина": "—",
-        "Назначение": "—"
+        "Категория": "Тротуарная плитка"
       },
       "gallery": [
         "assets/gallery/promenad1/1.webp",
         "assets/gallery/promenad1/2.webp",
         "assets/gallery/promenad1/3.webp",
         "assets/gallery/promenad1/4.webp"
-      ]
+      ],
+      "subtitle": "Тротуарная плитка",
+      "surfacePalette": null
     }
-  ]
+  ],
+  "version": 3
 }
