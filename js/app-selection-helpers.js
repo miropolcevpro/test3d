@@ -151,6 +151,7 @@ export function createSelectionHelpers(ctx) {
 
         for (let i = 0; i < tasks.length; i++) {
           ctx.applyMapToTileMaterial(mat, tasks[i][0], rs[i] || null);
+          try { opts.onMapApplied?.(tasks[i][0], rs[i] || null); } catch (_) {}
         }
         const fillMesh = ctx.getFillMesh();
         if (fillMesh && ctx.state.phase === 'ar_final') {
@@ -254,8 +255,8 @@ export function createSelectionHelpers(ctx) {
     const showTexProgress = ctx.state.phase === 'ar_final';
     const texProgSeq = showTexProgress ? (ctx.arTexProgress.seq + 1) : 0;
     if (showTexProgress) {
-      const total = [albedoUrl, roughUrl, aoUrl].filter(Boolean).length;
-      ctx.arTexProgressShow(texProgSeq, total);
+      const total = [albedoUrl, roughUrl, normalUrl, aoUrl].filter(Boolean).length;
+      ctx.arTexProgressShow(texProgSeq, total, { label: 'Загрузка текстуры…', delayMs: 450 });
     }
 
     const albedoP = ctx.loadTileAlbedoWithFallback(t, preferredQuality, isStale, { priority: 'high', getTileAlbedoCandidates: ctx.getTileAlbedoCandidates });
@@ -265,8 +266,9 @@ export function createSelectionHelpers(ctx) {
 
     if (showTexProgress) {
       albedoP.finally(() => ctx.arTexProgressTick(texProgSeq));
-      roughP.finally(() => ctx.arTexProgressTick(texProgSeq));
-      aoP.finally(() => ctx.arTexProgressTick(texProgSeq));
+      if (roughUrl) roughP.finally(() => ctx.arTexProgressTick(texProgSeq));
+      if (normalUrl) normalP.finally(() => ctx.arTexProgressTick(texProgSeq));
+      if (aoUrl) aoP.finally(() => ctx.arTexProgressTick(texProgSeq));
     }
 
     const albedoResult = await albedoP;
@@ -412,10 +414,31 @@ export function createSelectionHelpers(ctx) {
 
     if (ctx.UI.arProductTitle) ctx.UI.arProductTitle.textContent = t.name || '—';
 
+    const refineJobsPlanned = [];
+    if (preferredQuality === '2k') refineJobsPlanned.push('albedo2k');
+    if (normalUrl) refineJobsPlanned.push('normal');
+    if (roughUrl) refineJobsPlanned.push('roughness');
+    if (ctx.state.phase === 'ar_final') {
+      if (!aoTexCore && aoUrl) refineJobsPlanned.push('ao');
+      if (tuning?.loadHeightInAR && heightUrl) refineJobsPlanned.push('height');
+    } else {
+      if (!aoTexCore && aoUrl) refineJobsPlanned.push('ao');
+      if (tuning?.loadHeightOutsideAR && heightUrl) refineJobsPlanned.push('height');
+    }
+
     const matRef = mat;
     const deferMs = Math.max(40, Number(tuning?.postApplyDelayMs ?? 80) || 80);
     setTimeout(async () => {
       if (isStale()) return;
+
+      let refineProgSeq = 0;
+      if (showTexProgress && refineJobsPlanned.length) {
+        refineProgSeq = texProgSeq + 1;
+        ctx.arTexProgressShowImmediate(refineProgSeq, refineJobsPlanned.length, { label: 'Улучшение качества…' });
+      }
+      const refineTick = () => {
+        if (refineProgSeq) ctx.arTexProgressTick(refineProgSeq);
+      };
 
       if (preferredQuality === '2k') {
         const albedo2k = await ctx.loadTexSmartCached(activeAlbedoUrl, 'albedo', preferredQuality, isStale, { priority: 'normal' });
@@ -429,6 +452,7 @@ export function createSelectionHelpers(ctx) {
           }
           try { ctx.touchMaterialTextures?.(matRef); } catch (_) {}
         }
+        refineTick();
       }
 
       const jobs = [
@@ -460,6 +484,7 @@ export function createSelectionHelpers(ctx) {
           pm.needsUpdate = true;
           try { ctx.touchMaterialTextures?.(pm); } catch (_) {}
         }
+        refineTick();
       }
 
       const fillMesh2 = ctx.getFillMesh();
@@ -479,7 +504,7 @@ export function createSelectionHelpers(ctx) {
       } catch (_) {}
 
       if (ctx.state.phase === 'ar_final') {
-        scheduleDeferredHeavyMaps(matRef, { aoUrl: (aoTexCore ? null : aoUrl), heightUrl: (tuning?.loadHeightInAR ? heightUrl : null) }, '1k', isStale, { delayMs: Number(tuning?.heavyMapsDelayMs ?? 1200) || 1200, debounceMs: Number(tuning?.heavyMapsDebounceMs ?? 350) || 350 });
+        scheduleDeferredHeavyMaps(matRef, { aoUrl: (aoTexCore ? null : aoUrl), heightUrl: (tuning?.loadHeightInAR ? heightUrl : null) }, '1k', isStale, { delayMs: Number(tuning?.heavyMapsDelayMs ?? 1200) || 1200, debounceMs: Number(tuning?.heavyMapsDebounceMs ?? 350) || 350, onMapApplied: refineTick });
       } else {
         const heavyJobs = [
           ['ao', (aoTexCore ? null : aoUrl)],
@@ -501,6 +526,7 @@ export function createSelectionHelpers(ctx) {
               pm.needsUpdate = true;
               try { ctx.touchMaterialTextures?.(pm); } catch (_) {}
             }
+            refineTick();
           }
         }
       }

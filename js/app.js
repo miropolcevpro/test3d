@@ -163,6 +163,7 @@ const UI = {
   finalColors: document.getElementById('finalColors'),
 
   // AR texture load progress
+  texLoadStatus: document.getElementById('texLoadStatus'),
   texLoadBarWrap: document.getElementById('texLoadBarWrap'),
   texLoadBar: document.getElementById('texLoadBar'),
 
@@ -176,9 +177,17 @@ const UI = {
 // ------------------------
 // AR: texture load progress indicator (thin bar under pattern buttons)
 // ------------------------
-const _arTexProgress = { seq: 0, total: 0, done: 0, hideTimer: 0, showTimer: 0, shown: false, shownAt: 0 };
+const _arTexProgress = { seq: 0, total: 0, done: 0, hideTimer: 0, showTimer: 0, shown: false, shownAt: 0, label: 'Загрузка текстуры…' };
 
-function _arTexProgressShow(seq, total) {
+function _arTexProgressSetLabel(seq, label) {
+  try {
+    if (seq !== _arTexProgress.seq) return;
+    _arTexProgress.label = String(label || 'Загрузка текстуры…');
+    if (UI.texLoadStatus) UI.texLoadStatus.textContent = _arTexProgress.label;
+  } catch (_) {}
+}
+
+function _arTexProgressShow(seq, total, opts = {}) {
   try {
     if (!UI.texLoadBarWrap || !UI.texLoadBar) return;
 
@@ -187,6 +196,7 @@ function _arTexProgressShow(seq, total) {
     _arTexProgress.done = 0;
     _arTexProgress.shown = false;
     _arTexProgress.shownAt = 0;
+    _arTexProgress.label = String(opts.label || 'Загрузка текстуры…');
 
     if (_arTexProgress.hideTimer) {
       clearTimeout(_arTexProgress.hideTimer);
@@ -197,8 +207,9 @@ function _arTexProgressShow(seq, total) {
       _arTexProgress.showTimer = 0;
     }
 
-    // Delay UI to avoid flicker on fast texture switches.
-    // If loading still in progress after 2s, show progress bar with current progress.
+    // Delay UI to avoid flicker on fast texture switches, but still
+    // show progress early enough on slow networks / partial map loading.
+    const showDelayMs = Math.max(0, Number(opts.delayMs ?? 450) || 450);
     _arTexProgress.showTimer = setTimeout(() => {
       try {
         if (seq !== _arTexProgress.seq) return;
@@ -207,6 +218,7 @@ function _arTexProgressShow(seq, total) {
 
         // Show now
         UI.texLoadBar.style.width = '0%';
+        if (UI.texLoadStatus) { UI.texLoadStatus.textContent = _arTexProgress.label; show(UI.texLoadStatus, true); }
         UI.texLoadBarWrap.classList.add('is-visible');
         show(UI.texLoadBarWrap, true);
         _arTexProgress.shown = true;
@@ -217,14 +229,14 @@ function _arTexProgressShow(seq, total) {
 
         updateArBottomStripVar(UI);
       } catch (_) {}
-    }, 2000);
+    }, showDelayMs);
   } catch (_) {}
 }
 
 
-function _arTexProgressShowImmediate(seq, total) {
+function _arTexProgressShowImmediate(seq, total, opts = {}) {
   try {
-    _arTexProgressShow(seq, total);
+    _arTexProgressShow(seq, total, { ...opts, delayMs: 0 });
     if (!UI.texLoadBarWrap || !UI.texLoadBar) return;
     // Cancel delayed show and show immediately.
     if (_arTexProgress.showTimer) {
@@ -232,6 +244,7 @@ function _arTexProgressShowImmediate(seq, total) {
       _arTexProgress.showTimer = 0;
     }
     UI.texLoadBar.style.width = '0%';
+    if (UI.texLoadStatus) { UI.texLoadStatus.textContent = _arTexProgress.label; show(UI.texLoadStatus, true); }
     UI.texLoadBarWrap.classList.add('is-visible');
     show(UI.texLoadBarWrap, true);
     _arTexProgress.shown = true;
@@ -289,6 +302,7 @@ function _arTexProgressHide(seq) {
         setTimeout(() => {
           try {
             if (seq !== _arTexProgress.seq) return;
+            if (UI.texLoadStatus) show(UI.texLoadStatus, false);
             show(UI.texLoadBarWrap, false);
             updateArBottomStripVar(UI);
           } catch (_) {}
@@ -537,6 +551,8 @@ const selectionHelpers = createSelectionHelpers({
   makeTileMaterial,
   arTexProgress: _arTexProgress,
   arTexProgressShow: _arTexProgressShow,
+  arTexProgressShowImmediate: _arTexProgressShowImmediate,
+  arTexProgressSetLabel: _arTexProgressSetLabel,
   arTexProgressTick: _arTexProgressTick,
   getTileMaterial: () => tileMaterial,
   setTileMaterial: (mat) => { tileMaterial = mat; },
