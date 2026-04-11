@@ -177,79 +177,136 @@ const UI = {
 // ------------------------
 // AR: texture load progress indicator (thin bar under pattern buttons)
 // ------------------------
-const _arTexProgress = { seq: 0, total: 0, done: 0, hideTimer: 0, showTimer: 0, shown: false, shownAt: 0, label: 'Загрузка текстуры…' };
+const _arTexProgress = { seq: 0, total: 0, done: 0, hideTimer: 0, showTimer: 0, shown: false, shownAt: 0, label: 'Загрузка текстуры…', maps: [] };
+
+function _arTexProgressMapLabel(key, fallback = '') {
+  const k = String(key || '').toLowerCase();
+  if (k === 'albedo' || k === 'albedo2k') return 'Цвет';
+  if (k === 'roughness') return 'Шерох.';
+  if (k === 'normal') return 'Рельеф';
+  if (k === 'ao') return 'AO';
+  if (k === 'height') return 'Height';
+  return fallback || key || 'Карта';
+}
+
+function _arTexProgressStatusIcon(status) {
+  const s = String(status || 'loading');
+  if (s === 'loaded' || s === 'ready') return '✓';
+  if (s === 'failed') return '✕';
+  if (s === 'skipped') return '–';
+  return '…';
+}
+
+function _arTexProgressIsTerminal(status) {
+  const s = String(status || 'loading');
+  return s === 'loaded' || s === 'ready' || s === 'failed' || s === 'skipped';
+}
+
+function _arTexProgressRecompute(seq) {
+  try {
+    if (seq !== _arTexProgress.seq) return;
+    const maps = Array.isArray(_arTexProgress.maps) ? _arTexProgress.maps : [];
+    _arTexProgress.total = Math.max(1, maps.length || Number(_arTexProgress.total) || 1);
+    _arTexProgress.done = maps.filter(m => _arTexProgressIsTerminal(m?.status)).length;
+    const suffix = maps.length
+      ? maps.map(m => `${m.label || _arTexProgressMapLabel(m.key)} ${_arTexProgressStatusIcon(m.status)}`).join(' · ')
+      : '';
+    const text = suffix ? `${_arTexProgress.label} ${suffix}` : _arTexProgress.label;
+    if (UI.texLoadStatus) UI.texLoadStatus.textContent = text;
+    if (_arTexProgress.shown && UI.texLoadBar) {
+      const pct = Math.max(0, Math.min(100, (_arTexProgress.done / _arTexProgress.total) * 100));
+      UI.texLoadBar.style.width = `${pct.toFixed(0)}%`;
+    }
+    if (_arTexProgress.done >= _arTexProgress.total) _arTexProgressHide(seq);
+  } catch (_) {}
+}
 
 function _arTexProgressSetLabel(seq, label) {
   try {
     if (seq !== _arTexProgress.seq) return;
     _arTexProgress.label = String(label || 'Загрузка текстуры…');
-    if (UI.texLoadStatus) UI.texLoadStatus.textContent = _arTexProgress.label;
+    _arTexProgressRecompute(seq);
   } catch (_) {}
 }
 
-function _arTexProgressShow(seq, total, opts = {}) {
+function _arTexProgressStart(seq, mapsOrTotal, opts = {}) {
   try {
-    if (!UI.texLoadBarWrap || !UI.texLoadBar) return;
+    const maps = Array.isArray(mapsOrTotal)
+      ? mapsOrTotal.filter(Boolean).map((m, idx) => ({
+          key: String(m.key || m.id || `map_${idx}`),
+          label: String(m.label || _arTexProgressMapLabel(m.key || m.id || `map_${idx}`)),
+          status: String(m.status || 'loading'),
+        }))
+      : Array.from({ length: Math.max(1, Number(mapsOrTotal) || 1) }, (_, idx) => ({
+          key: `step_${idx + 1}`,
+          label: `Шаг ${idx + 1}`,
+          status: 'loading',
+        }));
 
     _arTexProgress.seq = seq;
-    _arTexProgress.total = Math.max(1, Number(total) || 1);
-    _arTexProgress.done = 0;
+    _arTexProgress.maps = maps;
+    _arTexProgress.total = Math.max(1, maps.length || 1);
+    _arTexProgress.done = maps.filter(m => _arTexProgressIsTerminal(m.status)).length;
     _arTexProgress.shown = false;
     _arTexProgress.shownAt = 0;
     _arTexProgress.label = String(opts.label || 'Загрузка текстуры…');
 
-    if (_arTexProgress.hideTimer) {
-      clearTimeout(_arTexProgress.hideTimer);
-      _arTexProgress.hideTimer = 0;
-    }
-    if (_arTexProgress.showTimer) {
-      clearTimeout(_arTexProgress.showTimer);
-      _arTexProgress.showTimer = 0;
-    }
+    if (_arTexProgress.hideTimer) { clearTimeout(_arTexProgress.hideTimer); _arTexProgress.hideTimer = 0; }
+    if (_arTexProgress.showTimer) { clearTimeout(_arTexProgress.showTimer); _arTexProgress.showTimer = 0; }
 
-    // Delay UI to avoid flicker on fast texture switches, but still
-    // show progress early enough on slow networks / partial map loading.
     const showDelayMs = Math.max(0, Number(opts.delayMs ?? 450) || 450);
     _arTexProgress.showTimer = setTimeout(() => {
       try {
         if (seq !== _arTexProgress.seq) return;
         if (_arTexProgress.done >= _arTexProgress.total) return;
         _arTexProgress.showTimer = 0;
-
-        // Show now
         UI.texLoadBar.style.width = '0%';
-        if (UI.texLoadStatus) { UI.texLoadStatus.textContent = _arTexProgress.label; show(UI.texLoadStatus, true); }
-        UI.texLoadBarWrap.classList.add('is-visible');
         show(UI.texLoadBarWrap, true);
+        UI.texLoadBarWrap.classList.add('is-visible');
+        if (UI.texLoadStatus) show(UI.texLoadStatus, true);
         _arTexProgress.shown = true;
         _arTexProgress.shownAt = Date.now();
-
-        const pct = Math.max(0, Math.min(100, (_arTexProgress.done / _arTexProgress.total) * 100));
-        UI.texLoadBar.style.width = `${pct.toFixed(0)}%`;
-
+        _arTexProgressRecompute(seq);
         updateArBottomStripVar(UI);
       } catch (_) {}
     }, showDelayMs);
   } catch (_) {}
 }
 
+function _arTexProgressShow(seq, totalOrMaps, opts = {}) {
+  _arTexProgressStart(seq, totalOrMaps, opts);
+}
 
-function _arTexProgressShowImmediate(seq, total, opts = {}) {
+function _arTexProgressShowImmediate(seq, totalOrMaps, opts = {}) {
   try {
-    _arTexProgressShow(seq, total, { ...opts, delayMs: 0 });
+    _arTexProgressStart(seq, totalOrMaps, { ...opts, delayMs: 0 });
     if (!UI.texLoadBarWrap || !UI.texLoadBar) return;
-    // Cancel delayed show and show immediately.
-    if (_arTexProgress.showTimer) {
-      clearTimeout(_arTexProgress.showTimer);
-      _arTexProgress.showTimer = 0;
-    }
+    if (_arTexProgress.showTimer) { clearTimeout(_arTexProgress.showTimer); _arTexProgress.showTimer = 0; }
     UI.texLoadBar.style.width = '0%';
-    if (UI.texLoadStatus) { UI.texLoadStatus.textContent = _arTexProgress.label; show(UI.texLoadStatus, true); }
-    UI.texLoadBarWrap.classList.add('is-visible');
     show(UI.texLoadBarWrap, true);
+    UI.texLoadBarWrap.classList.add('is-visible');
+    if (UI.texLoadStatus) show(UI.texLoadStatus, true);
     _arTexProgress.shown = true;
     _arTexProgress.shownAt = Date.now();
+    _arTexProgressRecompute(seq);
     updateArBottomStripVar(UI);
+  } catch (_) {}
+}
+
+function _arTexProgressMapUpdate(seq, key, status, opts = {}) {
+  try {
+    if (seq !== _arTexProgress.seq) return;
+    const maps = Array.isArray(_arTexProgress.maps) ? _arTexProgress.maps : [];
+    const mapKey = String(key || '');
+    let entry = maps.find(m => String(m.key) === mapKey);
+    if (!entry) {
+      entry = { key: mapKey || `map_${maps.length + 1}`, label: String(opts.label || _arTexProgressMapLabel(mapKey)), status: 'loading' };
+      maps.push(entry);
+      _arTexProgress.maps = maps;
+    }
+    if (opts.label) entry.label = String(opts.label);
+    entry.status = String(status || 'loading');
+    _arTexProgressRecompute(seq);
   } catch (_) {}
 }
 
@@ -257,12 +314,10 @@ function _arTexProgressTick(seq) {
   try {
     if (seq !== _arTexProgress.seq) return;
     _arTexProgress.done++;
-
     if (_arTexProgress.shown && UI.texLoadBar) {
       const pct = Math.max(0, Math.min(100, (_arTexProgress.done / _arTexProgress.total) * 100));
       UI.texLoadBar.style.width = `${pct.toFixed(0)}%`;
     }
-
     if (_arTexProgress.done >= _arTexProgress.total) _arTexProgressHide(seq);
   } catch (_) {}
 }
@@ -270,35 +325,18 @@ function _arTexProgressTick(seq) {
 function _arTexProgressHide(seq) {
   try {
     if (seq !== _arTexProgress.seq) return;
-
-    // If bar hasn't been shown yet (fast load), just cancel the delayed show.
-    if (_arTexProgress.showTimer) {
-      clearTimeout(_arTexProgress.showTimer);
-      _arTexProgress.showTimer = 0;
-    }
+    if (_arTexProgress.showTimer) { clearTimeout(_arTexProgress.showTimer); _arTexProgress.showTimer = 0; }
     if (!_arTexProgress.shown) return;
-
     if (!UI.texLoadBarWrap) return;
-
-    // Prevent flicker: once shown, keep it visible for a minimal time.
     const MIN_VISIBLE_MS = 450;
     const visibleFor = Date.now() - (_arTexProgress.shownAt || Date.now());
     const wait = Math.max(0, MIN_VISIBLE_MS - visibleFor);
-
-    if (_arTexProgress.hideTimer) {
-      clearTimeout(_arTexProgress.hideTimer);
-      _arTexProgress.hideTimer = 0;
-    }
-
+    if (_arTexProgress.hideTimer) { clearTimeout(_arTexProgress.hideTimer); _arTexProgress.hideTimer = 0; }
     _arTexProgress.hideTimer = setTimeout(() => {
       try {
         if (seq !== _arTexProgress.seq) return;
-
-        // Finish smoothly then fade out.
         if (UI.texLoadBar) UI.texLoadBar.style.width = '100%';
         UI.texLoadBarWrap.classList.remove('is-visible');
-
-        // allow CSS transition to complete
         setTimeout(() => {
           try {
             if (seq !== _arTexProgress.seq) return;
@@ -553,6 +591,7 @@ const selectionHelpers = createSelectionHelpers({
   arTexProgressShow: _arTexProgressShow,
   arTexProgressShowImmediate: _arTexProgressShowImmediate,
   arTexProgressSetLabel: _arTexProgressSetLabel,
+  arTexProgressMapUpdate: _arTexProgressMapUpdate,
   arTexProgressTick: _arTexProgressTick,
   getTileMaterial: () => tileMaterial,
   setTileMaterial: (mat) => { tileMaterial = mat; },

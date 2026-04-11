@@ -145,14 +145,19 @@ export function createSelectionHelpers(ctx) {
         if (!slowNet && heightUrl) tasks.push(['height', heightUrl]);
         if (!tasks.length) return;
 
-        const ps = tasks.map(([kind, u]) => ctx.loadTexSmartCached(u, kind, preferredQuality, isStaleFn, { priority: 'normal' }));
-        const rs = await Promise.all(ps);
+        const rs = await Promise.all(tasks.map(async ([kind, u]) => {
+          try {
+            const tex = await ctx.loadTexSmartCached(u, kind, preferredQuality, isStaleFn, { priority: 'normal' });
+            if (isStaleFn && isStaleFn()) return null;
+            ctx.applyMapToTileMaterial(mat, kind, tex || null);
+            try { opts.onMapApplied?.(kind, tex || null); } catch (_) {}
+            return tex || null;
+          } catch (_) {
+            try { opts.onMapApplied?.(kind, null); } catch (_) {}
+            return null;
+          }
+        }));
         if (isStaleFn && isStaleFn()) return;
-
-        for (let i = 0; i < tasks.length; i++) {
-          ctx.applyMapToTileMaterial(mat, tasks[i][0], rs[i] || null);
-          try { opts.onMapApplied?.(tasks[i][0], rs[i] || null); } catch (_) {}
-        }
         const fillMesh = ctx.getFillMesh();
         if (fillMesh && ctx.state.phase === 'ar_final') {
           fillMesh.material = mat;
@@ -254,21 +259,38 @@ export function createSelectionHelpers(ctx) {
 
     const showTexProgress = ctx.state.phase === 'ar_final';
     const texProgSeq = showTexProgress ? (ctx.arTexProgress.seq + 1) : 0;
-    if (showTexProgress) {
-      const total = [albedoUrl, roughUrl, normalUrl, aoUrl].filter(Boolean).length;
-      ctx.arTexProgressShow(texProgSeq, total, { label: 'Загрузка текстуры…', delayMs: 450 });
+    const coreProgressMaps = [
+      albedoUrl ? { key: 'albedo', label: 'Цвет' } : null,
+      roughUrl ? { key: 'roughness', label: 'Шерох.' } : null,
+      normalUrl ? { key: 'normal', label: 'Рельеф' } : null,
+      aoUrl ? { key: 'ao', label: 'AO' } : null,
+    ].filter(Boolean);
+    if (showTexProgress && coreProgressMaps.length) {
+      ctx.arTexProgressShow(texProgSeq, coreProgressMaps, { label: 'Загрузка текстуры…', delayMs: 450 });
     }
 
-    const albedoP = ctx.loadTileAlbedoWithFallback(t, preferredQuality, isStale, { priority: 'high', getTileAlbedoCandidates: ctx.getTileAlbedoCandidates });
-    const roughP = ctx.loadTexSmartCached(roughUrl, 'roughness', preferredQuality, isStale, { priority: 'high' });
-    const aoP = aoUrl ? ctx.loadTexSmartCached(aoUrl, 'ao', preferredQuality, isStale, { priority: 'high' }) : Promise.resolve(null);
-    const normalP = ctx.loadTexSmartCached(normalUrl, 'normal', preferredQuality, isStale, { priority: 'normal' });
+    const markCoreMap = (key, promise) => {
+      if (!showTexProgress || !promise) return promise;
+      return Promise.resolve(promise).then((v) => {
+        const ok = (key === 'albedo') ? !!(v && v.tex) : !!v;
+        ctx.arTexProgressMapUpdate?.(texProgSeq, key, ok ? 'loaded' : 'failed');
+        return v;
+      }).catch((err) => {
+        ctx.arTexProgressMapUpdate?.(texProgSeq, key, 'failed');
+        throw err;
+      });
+    };
+
+    const albedoP = markCoreMap('albedo', ctx.loadTileAlbedoWithFallback(t, preferredQuality, isStale, { priority: 'high', getTileAlbedoCandidates: ctx.getTileAlbedoCandidates }));
+    const roughP = roughUrl ? markCoreMap('roughness', ctx.loadTexSmartCached(roughUrl, 'roughness', preferredQuality, isStale, { priority: 'high' })) : Promise.resolve(null);
+    const aoP = aoUrl ? markCoreMap('ao', ctx.loadTexSmartCached(aoUrl, 'ao', preferredQuality, isStale, { priority: 'high' })) : Promise.resolve(null);
+    const normalP = normalUrl ? markCoreMap('normal', ctx.loadTexSmartCached(normalUrl, 'normal', preferredQuality, isStale, { priority: 'normal' })) : Promise.resolve(null);
 
     if (showTexProgress) {
-      albedoP.finally(() => ctx.arTexProgressTick(texProgSeq));
-      if (roughUrl) roughP.finally(() => ctx.arTexProgressTick(texProgSeq));
-      if (normalUrl) normalP.finally(() => ctx.arTexProgressTick(texProgSeq));
-      if (aoUrl) aoP.finally(() => ctx.arTexProgressTick(texProgSeq));
+      if (!albedoUrl) ctx.arTexProgressMapUpdate?.(texProgSeq, 'albedo', 'skipped', { label: 'Цвет' });
+      if (!roughUrl) ctx.arTexProgressMapUpdate?.(texProgSeq, 'roughness', 'skipped', { label: 'Шерох.' });
+      if (!normalUrl) ctx.arTexProgressMapUpdate?.(texProgSeq, 'normal', 'skipped', { label: 'Рельеф' });
+      if (!aoUrl) ctx.arTexProgressMapUpdate?.(texProgSeq, 'ao', 'skipped', { label: 'AO' });
     }
 
     const albedoResult = await albedoP;
@@ -434,10 +456,11 @@ export function createSelectionHelpers(ctx) {
       let refineProgSeq = 0;
       if (showTexProgress && refineJobsPlanned.length) {
         refineProgSeq = texProgSeq + 1;
-        ctx.arTexProgressShowImmediate(refineProgSeq, refineJobsPlanned.length, { label: 'Улучшение качества…' });
+        const refineProgressMaps = refineJobsPlanned.map((kind) => ({ key: kind, label: kind === 'albedo2k' ? 'Цвет 2k' : (kind === 'roughness' ? 'Шерох.' : (kind === 'normal' ? 'Рельеф' : (kind === 'height' ? 'Height' : 'AO'))) }));
+        ctx.arTexProgressShowImmediate(refineProgSeq, refineProgressMaps, { label: 'Улучшение качества…' });
       }
-      const refineTick = () => {
-        if (refineProgSeq) ctx.arTexProgressTick(refineProgSeq);
+      const refineMapDone = (key, status = 'loaded') => {
+        if (refineProgSeq) ctx.arTexProgressMapUpdate?.(refineProgSeq, key, status);
       };
 
       if (preferredQuality === '2k') {
@@ -452,7 +475,7 @@ export function createSelectionHelpers(ctx) {
           }
           try { ctx.touchMaterialTextures?.(matRef); } catch (_) {}
         }
-        refineTick();
+        refineMapDone('albedo2k');
       }
 
       const jobs = [
@@ -463,29 +486,32 @@ export function createSelectionHelpers(ctx) {
         return kind === 'roughness' || warmKinds.includes('normal') || ctx.state.phase !== 'ar_final';
       });
 
-      const promises = jobs.map(([kind, u]) => ctx.loadTexSmartCached(u, kind, preferredQuality, isStale, { priority: 'normal' }));
-      const results = await Promise.all(promises);
-      if (isStale()) return;
+      await Promise.all(jobs.map(async ([kind, u]) => {
+        try {
+          const tex = await ctx.loadTexSmartCached(u, kind, preferredQuality, isStale, { priority: 'normal' });
+          if (isStale()) return null;
+          ctx.applyMapToTileMaterial(matRef, kind, tex || null);
 
-      for (let i = 0; i < jobs.length; i++) {
-        const kind = jobs[i][0];
-        const tex = results[i] || null;
-        ctx.applyMapToTileMaterial(matRef, kind, tex);
-
-        const previewPlane3 = ctx.getPreviewPlane();
-        if (previewPlane3 && previewPlane3.material && previewPlane3.material.isMeshStandardMaterial) {
-          const pm = previewPlane3.material;
-          if (kind === 'normal') {
-            pm.normalMap = tex;
-            pm.normalScale?.set?.(ns || 0.0, ns || 0.0);
-          } else if (kind === 'roughness') {
-            pm.roughnessMap = tex;
+          const previewPlane3 = ctx.getPreviewPlane();
+          if (previewPlane3 && previewPlane3.material && previewPlane3.material.isMeshStandardMaterial) {
+            const pm = previewPlane3.material;
+            if (kind === 'normal') {
+              pm.normalMap = tex || null;
+              pm.normalScale?.set?.(ns || 0.0, ns || 0.0);
+            } else if (kind === 'roughness') {
+              pm.roughnessMap = tex || null;
+            }
+            pm.needsUpdate = true;
+            try { ctx.touchMaterialTextures?.(pm); } catch (_) {}
           }
-          pm.needsUpdate = true;
-          try { ctx.touchMaterialTextures?.(pm); } catch (_) {}
+          refineMapDone(kind, tex ? 'loaded' : 'failed');
+          return tex || null;
+        } catch (_) {
+          refineMapDone(kind, 'failed');
+          return null;
         }
-        refineTick();
-      }
+      }));
+      if (isStale()) return;
 
       const fillMesh2 = ctx.getFillMesh();
       if (fillMesh2 && ctx.state.phase === 'ar_final') {
@@ -504,30 +530,34 @@ export function createSelectionHelpers(ctx) {
       } catch (_) {}
 
       if (ctx.state.phase === 'ar_final') {
-        scheduleDeferredHeavyMaps(matRef, { aoUrl: (aoTexCore ? null : aoUrl), heightUrl: (tuning?.loadHeightInAR ? heightUrl : null) }, '1k', isStale, { delayMs: Number(tuning?.heavyMapsDelayMs ?? 1200) || 1200, debounceMs: Number(tuning?.heavyMapsDebounceMs ?? 350) || 350, onMapApplied: refineTick });
+        scheduleDeferredHeavyMaps(matRef, { aoUrl: (aoTexCore ? null : aoUrl), heightUrl: (tuning?.loadHeightInAR ? heightUrl : null) }, '1k', isStale, { delayMs: Number(tuning?.heavyMapsDelayMs ?? 1200) || 1200, debounceMs: Number(tuning?.heavyMapsDebounceMs ?? 350) || 350, onMapApplied: (kind) => refineMapDone(kind || 'heavy') });
       } else {
         const heavyJobs = [
           ['ao', (aoTexCore ? null : aoUrl)],
           ['height', (tuning?.loadHeightOutsideAR ? heightUrl : null)],
         ].filter(([_, u]) => !!u);
         if (heavyJobs.length) {
-          const heavyPs = heavyJobs.map(([kind, u]) => ctx.loadTexSmartCached(u, kind, preferredQuality, isStale, { priority: 'normal' }));
-          const heavyRs = await Promise.all(heavyPs);
-          if (isStale()) return;
-          for (let i = 0; i < heavyJobs.length; i++) {
-            const kind = heavyJobs[i][0];
-            const tex = heavyRs[i] || null;
-            ctx.applyMapToTileMaterial(matRef, kind, tex);
-            const previewPlane4 = ctx.getPreviewPlane();
-            if (previewPlane4 && previewPlane4.material && previewPlane4.material.isMeshStandardMaterial) {
-              const pm = previewPlane4.material;
-              if (kind === 'ao') pm.aoMap = tex;
-              else if (kind === 'height') { pm.bumpMap = tex; pm.bumpScale = bs || 0.0; }
-              pm.needsUpdate = true;
-              try { ctx.touchMaterialTextures?.(pm); } catch (_) {}
+          await Promise.all(heavyJobs.map(async ([kind, u]) => {
+            try {
+              const tex = await ctx.loadTexSmartCached(u, kind, preferredQuality, isStale, { priority: 'normal' });
+              if (isStale()) return null;
+              ctx.applyMapToTileMaterial(matRef, kind, tex || null);
+              const previewPlane4 = ctx.getPreviewPlane();
+              if (previewPlane4 && previewPlane4.material && previewPlane4.material.isMeshStandardMaterial) {
+                const pm = previewPlane4.material;
+                if (kind === 'ao') pm.aoMap = tex || null;
+                else if (kind === 'height') { pm.bumpMap = tex || null; pm.bumpScale = bs || 0.0; }
+                pm.needsUpdate = true;
+                try { ctx.touchMaterialTextures?.(pm); } catch (_) {}
+              }
+              refineMapDone(kind, tex ? 'loaded' : 'failed');
+              return tex || null;
+            } catch (_) {
+              refineMapDone(kind, 'failed');
+              return null;
             }
-            refineTick();
-          }
+          }));
+          if (isStale()) return;
         }
       }
       try {
