@@ -30,3 +30,5 @@ This project now keeps `js/app.js` as the orchestration layer and pushes reusabl
 ## Rule for future work
 - Keep `updateXR()` and core AR runtime orchestration in `app.js` until a dedicated AR runtime split is planned and validated separately.
 - New reusable logic should go into focused helper modules first, then be wired into `app.js` as orchestration.
+
+- `app-quick-launch-helpers.js` — сборка и рендер quick AR launch rail на каталоге; сортировка presets и карточки быстрого старта в AR.

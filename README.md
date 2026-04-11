@@ -71,6 +71,10 @@ The runtime is now split into focused helper modules under `js/`, while `js/app.
 - Deferred heavy-map work is cancelled on AR cleanup/restart so stale loads do not keep accumulating after session changes.
 - Warmup GPU helper resources are explicitly disposed during AR cleanup.
 
+## Быстрый запуск в AR
+
+На экране каталога есть горизонтальный блок **«Быстрый запуск в AR»**. Он автоматически собирается из доступных форм и текстур, сортируется по алфавиту и позволяет запустить AR сразу с выбранной формой и текстурой без перехода на detail-screen. Для запуска используется тот же стабильный pipeline: подготовка формы и текстуры через `openDetail(...)`, затем `startAR()`.
+
 ## Release check and packaging
 
 Current release token is recorded in `RELEASE_STAMP.txt`, and HTML asset URLs must match it exactly.

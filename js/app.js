@@ -5,6 +5,7 @@ import { show, setActiveScreen, fmtMeters, fmtArea, updateArBottomStripVar, upda
 import { getDirectPaletteUrlForShape, getPaletteCandidateUrlsForShape, paletteItemsToTiles, getTilePreviewUrl, getTileMapUrls, getTileAlbedoCandidates, prefetchImageUrls, renderColorRow } from './app-palette-helpers.js';
 import { loadSurfacePalette, loadPaletteDefaultsForShape, filterPaletteItemsBySurfaces } from './app-palette-data-helpers.js';
 import { renderCatalog, renderDetailHero, renderDetailTech, setShapePickerOpen, buildShapePickerList, buildFallbackShapesFromTiles } from './app-catalog-detail-helpers.js';
+import { sortQuickLaunchItems, renderQuickLaunchRail } from './app-quick-launch-helpers.js';
 import { getConnInfo, updateTexLoadMaxParallel, loadTexSmartCached, applyMapToTileMaterial, warmupTextureOnGPU, crossfadeAlbedoOnMaterial, prepMapTex, getFallbackWhiteTex, computeAutoExposureMultFromTexture, withTimeout, loadTileAlbedoWithFallback, getPreferredSurfaceQuality, getSurfaceRuntimeTuning, make2kCandidateUrl, make1kCandidateUrl, makeAltExtCandidates, touchMaterialTextures, trimTextureCaches, disposeWarmupResources } from './app-texture-material-helpers.js';
 import { makeTileMaterial } from './app-shader-material-helpers.js';
 import { distXZ, computeAreaM2FromContours, rebuildMarkersAndLine, rebuildFillMesh, clearMeasureLabels as clearMeasureLabelsHelper, updateMeasureLabels as updateMeasureLabelsHelper, updateAreaUI as updateAreaUIHelper } from './app-geometry-helpers.js';
@@ -120,6 +121,8 @@ const UI = {
   // Catalog
   catalogSearch: document.getElementById('catalogSearch'),
   catalogCards: document.getElementById('catalogCards'),
+  quickArRail: document.getElementById('quickArRail'),
+  quickArStatus: document.getElementById('quickArStatus'),
 
   // Detail
   btnDetailBack: document.getElementById('btnDetailBack'),
@@ -704,6 +707,7 @@ async function openDetail(shapeId, opts = {}) {
 
   const preserveScreen = !!opts.preserveScreen;
   const keepCurrentTile = !!opts.keepCurrentTile;
+  const preferredTileId = opts.preferredTileId ? String(opts.preferredTileId) : '';
 
   const { allowed, paletteActive } = await resolveAllowedTilesForShape(s);
   state.currentAllowedTiles = allowed;
@@ -733,7 +737,10 @@ async function openDetail(shapeId, opts = {}) {
   const retainedTile = keepCurrentTile && state.selectedTile
     ? allowed.find((tile) => tile && state.selectedTile && tile.id === state.selectedTile.id)
     : null;
-  const defaultTile = retainedTile || allowed[0] || state.tiles[0] || null;
+  const preferredTile = preferredTileId
+    ? allowed.find((tile) => tile && String(tile.id) === preferredTileId)
+    : null;
+  const defaultTile = retainedTile || preferredTile || allowed[0] || state.tiles[0] || null;
   if (defaultTile) await selectTile(defaultTile);
 
   if (!preserveScreen) updateArEntryUI(UI);
@@ -748,6 +755,77 @@ async function openDetail(shapeId, opts = {}) {
 // ------------------------
 // XR setup
 // ------------------------
+
+function setQuickArStatus(message) {
+  if (!UI.quickArStatus) return;
+  UI.quickArStatus.textContent = String(message || '').trim();
+}
+
+async function buildQuickLaunchItems() {
+  const seq = (state._quickLaunchSeq = (state._quickLaunchSeq || 0) + 1);
+  setQuickArStatus('Подбираем готовые варианты…');
+  const shapes = Array.isArray(state.shapes) ? state.shapes.slice() : [];
+  const results = [];
+  const seen = new Set();
+  let index = 0;
+  const workers = Array.from({ length: Math.max(1, Math.min(3, shapes.length || 1)) }, async () => {
+    while (index < shapes.length) {
+      const shape = shapes[index++];
+      if (!shape || !shape.id) continue;
+      try {
+        const { allowed } = await resolveAllowedTilesForShape(shape);
+        for (const tile of Array.isArray(allowed) ? allowed : []) {
+          if (!tile || !tile.id) continue;
+          const key = `${shape.id}::${tile.id}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          results.push({
+            shapeId: shape.id,
+            shapeName: shape.name || shape.id,
+            tileId: tile.id,
+            tileName: tile.name || tile.id,
+            previewUrl: getTilePreviewUrl(tile) || shape.icon || shape.hero || '',
+          });
+        }
+      } catch (_) {}
+    }
+  });
+  await Promise.all(workers);
+  if (state._quickLaunchSeq !== seq) return;
+  state.quickLaunchItems = sortQuickLaunchItems(results);
+  renderQuickLaunchRail(UI.quickArRail, state.quickLaunchItems, { onLaunch: launchQuickArPreset });
+  setQuickArStatus(state.quickLaunchItems.length
+    ? `Готово: ${state.quickLaunchItems.length} вариантов для быстрого запуска.`
+    : 'Быстрые AR-варианты пока недоступны.');
+}
+
+async function launchQuickArPreset(item) {
+  if (!item || !item.shapeId || !item.tileId) return;
+  if (state._launchingQuickAr) return;
+  state._launchingQuickAr = true;
+  const restoreStatus = UI.quickArStatus ? UI.quickArStatus.textContent : '';
+  try {
+    setQuickArStatus(`Подготавливаем AR: ${item.shapeName} — ${item.tileName}`);
+    await openDetail(item.shapeId, {
+      preserveScreen: true,
+      keepCurrentTile: false,
+      preferredTileId: item.tileId,
+    });
+    await startAR();
+    setQuickArStatus(`AR готов: ${item.shapeName} — ${item.tileName}`);
+  } catch (e) {
+    console.error('quick AR launch failed', e);
+    setQuickArStatus('Не удалось запустить AR. Попробуйте ещё раз.');
+  } finally {
+    state._launchingQuickAr = false;
+    setTimeout(() => {
+      if (!state._launchingQuickAr && UI.quickArStatus && /^(AR готов|Не удалось)/.test(UI.quickArStatus.textContent || '')) {
+        UI.quickArStatus.textContent = restoreStatus || UI.quickArStatus.textContent;
+      }
+    }, 2200);
+  }
+}
+
 async function startAR() {
   if (state._startingAR) return;
   state._startingAR = true;
@@ -2244,6 +2322,7 @@ async function init() {
 
   // initial
   renderCatalog(state.shapes, { UI, onShapeSelect: (shapeId) => openDetail(shapeId) });
+  renderQuickLaunchRail(UI.quickArRail, []);
   setActiveScreen('catalog', UI);
   state.phase = 'catalog';
 
@@ -2259,6 +2338,11 @@ async function init() {
 
   // Apply AR entry gating UI (safe on all devices)
   updateArEntryUI(UI);
+
+  buildQuickLaunchItems().catch((e) => {
+    console.warn('quick AR rail build failed', e);
+    setQuickArStatus('Быстрый запуск временно недоступен.');
+  });
 }
 
 renderer.setAnimationLoop((t, frame) => {
