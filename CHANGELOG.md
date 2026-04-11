@@ -4,13 +4,17 @@ All notable project stabilization work is recorded here.
 
 ## Unreleased
 
-Release token: `20260411-f22c`
+Release token: `20260411-f22d`
+
+- **F22d**: stabilized AR map loading with a strict 1k-ready-first path, optional 2k refinement, per-map timeouts, and faster downgrade when 2k assets are slow or missing.
 
 - **F22b**: made AR texture readiness feedback honest on slow networks by tracking normal maps in the core loading phase, adding a visible loading status label, and showing a follow-up quality refinement phase while delayed maps continue to load.
 
 - **F20a**: fixed real service worker metadata chain by importing `js/runtime-config.js` before `js/sw-meta.js` in `sw.js`, made `runtime-config.js` worker-safe, and strengthened release-check to validate the SW import chain and current runtime/SW token.
 
-- Release token: `20260411-f22c`
+- Release token: `20260411-f22d`
+
+- **F22d**: stabilized AR map loading with a strict 1k-ready-first path, optional 2k refinement, per-map timeouts, and faster downgrade when 2k assets are slow or missing.
 
 - F18c: added real forceReload support to admin ensurePaletteLoaded() for clean palette refresh flow.
 

@@ -194,6 +194,7 @@ async function loadTexSmartCached(url, label, preferredQuality, isStaleFn, opts 
   if (!url) return null;
   const priority = (opts && opts.priority) ? String(opts.priority) : 'normal';
   const kind = label ? String(label) : 'any';
+  const fast2kFallbackMs = Math.max(0, Number(opts && opts.fast2kFallbackMs) || 0);
   let desiredQuality = (preferredQuality === '2k') ? '2k' : '1k';
   const canon = canonTexKey(url);
   const qKey = `${kind}|${canon}`;
@@ -216,7 +217,20 @@ async function loadTexSmartCached(url, label, preferredQuality, isStaleFn, opts 
   else { pushWithAlts(u1k); if (u2k && u2k !== u1k) pushWithAlts(u2k); }
   for (const u of candidates) {
     if (isStaleFn && isStaleFn()) return null;
-    const tex = await loadTextureCached(u, { priority, silent: true, kind });
+    const is2kAttempt = String(u).includes('/2k/');
+    let tex = null;
+    if (desiredQuality === '2k' && is2kAttempt && fast2kFallbackMs > 0) {
+      const timed = await Promise.race([
+        loadTextureCached(u, { priority, silent: true, kind }).then((v) => ({ ok: true, tex: v || null })).catch(() => ({ ok: false, tex: null })),
+        new Promise((resolve) => setTimeout(() => resolve({ ok: false, tex: null, timeout: true }), fast2kFallbackMs)),
+      ]);
+      tex = timed && timed.ok ? timed.tex : null;
+      if (!tex && timed && timed.timeout) {
+        try { texBestQualityCache.set(qKey, '1k'); } catch (_) {}
+      }
+    } else {
+      tex = await loadTextureCached(u, { priority, silent: true, kind });
+    }
     if (isStaleFn && isStaleFn()) return null;
     if (tex) {
       texResolvedUrlCache.set(baseKey, u);
