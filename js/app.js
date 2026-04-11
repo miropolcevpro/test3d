@@ -803,7 +803,7 @@ async function buildQuickLaunchItems() {
   if (!state.quickLaunchItems.length) state.quickLaunchExpanded = false;
   renderQuickLaunchSection();
   setQuickArStatus(state.quickLaunchItems.length
-    ? `Готово: ${state.quickLaunchItems.length} опубликованных вариантов для быстрого запуска.`
+    ? 'Выбирайте варианты для быстрого запуска'
     : 'Быстрые AR-варианты появятся после публикации реальных текстур в палитрах.');
 }
 
@@ -2101,6 +2101,10 @@ UI.overlay?.addEventListener('pointerdown', (e) => {
 }, true);
 
 ensureArFinalControlsBound();
+
+UI.btnQuickArToggle?.addEventListener('click', () => {
+  toggleQuickLaunchExpanded();
+});
 
 UI.catalogSearch?.addEventListener('input', () => {
   const q = UI.catalogSearch.value.trim().toLowerCase();

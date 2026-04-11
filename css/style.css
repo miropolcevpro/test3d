@@ -103,9 +103,13 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   overflow-x:auto;
   -webkit-overflow-scrolling:touch;
   scroll-snap-type:x proximity;
-  padding:2px 2px 4px;
+  padding:2px 2px 10px;
 }
 .quickArRail:empty{display:none;}
+.quickArRail::-webkit-scrollbar{height:8px;}
+.quickArRail::-webkit-scrollbar-track{background:transparent;}
+.quickArRail::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.18);border-radius:999px;}
+.quickArRail{scrollbar-color:rgba(255,255,255,0.18) transparent;scrollbar-width:thin;}
 .quickArCard{
   min-width:146px;
   max-width:146px;
