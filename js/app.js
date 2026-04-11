@@ -5,7 +5,7 @@ import { show, setActiveScreen, fmtMeters, fmtArea, updateArBottomStripVar, upda
 import { getDirectPaletteUrlForShape, getPaletteCandidateUrlsForShape, paletteItemsToTiles, getTilePreviewUrl, getTileMapUrls, getTileAlbedoCandidates, prefetchImageUrls, renderColorRow } from './app-palette-helpers.js';
 import { loadSurfacePalette, loadPaletteDefaultsForShape, filterPaletteItemsBySurfaces } from './app-palette-data-helpers.js';
 import { renderCatalog, renderDetailHero, renderDetailTech, setShapePickerOpen, buildShapePickerList, buildFallbackShapesFromTiles } from './app-catalog-detail-helpers.js';
-import { sortQuickLaunchItems, renderQuickLaunchRail } from './app-quick-launch-helpers.js';
+import { buildPublishedQuickLaunchItems, renderQuickLaunchRail } from './app-quick-launch-helpers.js';
 import { getConnInfo, updateTexLoadMaxParallel, loadTexSmartCached, applyMapToTileMaterial, warmupTextureOnGPU, crossfadeAlbedoOnMaterial, prepMapTex, getFallbackWhiteTex, computeAutoExposureMultFromTexture, withTimeout, loadTileAlbedoWithFallback, getPreferredSurfaceQuality, getSurfaceRuntimeTuning, make2kCandidateUrl, make1kCandidateUrl, makeAltExtCandidates, touchMaterialTextures, trimTextureCaches, disposeWarmupResources } from './app-texture-material-helpers.js';
 import { makeTileMaterial } from './app-shader-material-helpers.js';
 import { distXZ, computeAreaM2FromContours, rebuildMarkersAndLine, rebuildFillMesh, clearMeasureLabels as clearMeasureLabelsHelper, updateMeasureLabels as updateMeasureLabelsHelper, updateAreaUI as updateAreaUIHelper } from './app-geometry-helpers.js';
@@ -122,7 +122,9 @@ const UI = {
   catalogSearch: document.getElementById('catalogSearch'),
   catalogCards: document.getElementById('catalogCards'),
   quickArRail: document.getElementById('quickArRail'),
+  quickArExpanded: document.getElementById('quickArExpanded'),
   quickArStatus: document.getElementById('quickArStatus'),
+  btnQuickArToggle: document.getElementById('btnQuickArToggle'),
 
   // Detail
   btnDetailBack: document.getElementById('btnDetailBack'),
@@ -371,6 +373,7 @@ const state = {
   _restartingAR: false,
   _startingAR: false,
   _switchingShapeInAr: false,
+  quickLaunchExpanded: false,
 
   // WebXR
   xrSession: null,
@@ -761,42 +764,47 @@ function setQuickArStatus(message) {
   UI.quickArStatus.textContent = String(message || '').trim();
 }
 
+function renderQuickLaunchSection() {
+  renderQuickLaunchRail(UI.quickArRail, state.quickLaunchItems, {
+    onLaunch: launchQuickArPreset,
+    expandedEl: UI.quickArExpanded,
+    toggleEl: UI.btnQuickArToggle,
+    expanded: !!state.quickLaunchExpanded,
+  });
+}
+
+function toggleQuickLaunchExpanded() {
+  state.quickLaunchExpanded = !state.quickLaunchExpanded;
+  renderQuickLaunchSection();
+}
+
 async function buildQuickLaunchItems() {
   const seq = (state._quickLaunchSeq = (state._quickLaunchSeq || 0) + 1);
-  setQuickArStatus('Подбираем готовые варианты…');
+  setQuickArStatus('Подбираем опубликованные варианты…');
   const shapes = Array.isArray(state.shapes) ? state.shapes.slice() : [];
-  const results = [];
-  const seen = new Set();
-  let index = 0;
-  const workers = Array.from({ length: Math.max(1, Math.min(3, shapes.length || 1)) }, async () => {
-    while (index < shapes.length) {
-      const shape = shapes[index++];
-      if (!shape || !shape.id) continue;
-      try {
-        const { allowed } = await resolveAllowedTilesForShape(shape);
-        for (const tile of Array.isArray(allowed) ? allowed : []) {
-          if (!tile || !tile.id) continue;
-          const key = `${shape.id}::${tile.id}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          results.push({
-            shapeId: shape.id,
-            shapeName: shape.name || shape.id,
-            tileId: tile.id,
-            tileName: tile.name || tile.id,
-            previewUrl: getTilePreviewUrl(tile) || shape.icon || shape.hero || '',
-          });
-        }
-      } catch (_) {}
-    }
+  const results = await buildPublishedQuickLaunchItems(shapes, {
+    getPaletteCandidateUrlsForShape,
+    loadPaletteDefaultsForShape,
+    loadSurfacePalette,
+    filterPaletteItemsBySurfaces,
+    paletteItemsToTiles,
+    getTilePreviewUrl,
+    apiBaseUrl: API_BASE_URL,
+    surfacePaletteBaseUrl: SURFACE_PALETTE_BASE_URL,
+    paletteSettingsBaseUrl: PALETTE_SETTINGS_BASE_URL,
+    enablePaletteSettings: ENABLE_PALETTE_SETTINGS,
+    paletteCache: state._paletteCache,
+    paletteDefaultsCache: state._paletteDefaultsCache,
+    warnOnce: warnNetworkFallbackOnce,
+    concurrency: 3,
   });
-  await Promise.all(workers);
   if (state._quickLaunchSeq !== seq) return;
-  state.quickLaunchItems = sortQuickLaunchItems(results);
-  renderQuickLaunchRail(UI.quickArRail, state.quickLaunchItems, { onLaunch: launchQuickArPreset });
+  state.quickLaunchItems = results;
+  if (!state.quickLaunchItems.length) state.quickLaunchExpanded = false;
+  renderQuickLaunchSection();
   setQuickArStatus(state.quickLaunchItems.length
-    ? `Готово: ${state.quickLaunchItems.length} вариантов для быстрого запуска.`
-    : 'Быстрые AR-варианты пока недоступны.');
+    ? `Готово: ${state.quickLaunchItems.length} опубликованных вариантов для быстрого запуска.`
+    : 'Быстрые AR-варианты появятся после публикации реальных текстур в палитрах.');
 }
 
 async function launchQuickArPreset(item) {
@@ -2322,7 +2330,7 @@ async function init() {
 
   // initial
   renderCatalog(state.shapes, { UI, onShapeSelect: (shapeId) => openDetail(shapeId) });
-  renderQuickLaunchRail(UI.quickArRail, []);
+  renderQuickLaunchSection();
   setActiveScreen('catalog', UI);
   state.phase = 'catalog';
 

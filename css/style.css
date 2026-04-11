@@ -126,6 +126,35 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
 .quickArCardShape{font-size:11px;font-weight:800;letter-spacing:.3px;text-transform:uppercase;color:rgba(255,255,255,0.66);line-height:1.25;}
 .quickArCardTile{margin-top:4px;font-size:14px;font-weight:800;line-height:1.2;color:#fff;min-height:34px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
 .quickArCard:active{transform:translateY(1px);}
+.quickArToggle{
+  flex:0 0 auto;
+  align-self:center;
+  min-height:36px;
+  padding:0 14px;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,0.14);
+  background:rgba(255,255,255,0.06);
+  color:#fff;
+  font-weight:800;
+  font-size:13px;
+}
+.quickArToggle[hidden]{display:none !important;}
+.quickArExpanded{
+  display:grid;
+  grid-template-columns:repeat(2, minmax(0,1fr));
+  gap:12px;
+  margin-top:12px;
+}
+.quickArExpanded[hidden]{display:none !important;}
+.quickArExpanded .quickArCard{
+  min-width:0;
+  max-width:none;
+  width:100%;
+}
+@media (min-width: 900px){
+  .quickArExpanded{grid-template-columns:repeat(4, minmax(0,1fr));}
+}
+
 .catalogCards{
   display:grid;
   grid-template-columns:repeat(3, minmax(0, 1fr));
