@@ -1,9 +1,9 @@
-## 2026-04-17 — f24p
+## 2026-04-17 — f24q
 
-- Refined the form detail CTA sizing so the full label «Связь с менеджером» fits cleanly inside the primary button without clipping.
-- Re-centered the decorative cart icon inside the `Сайт` button so its visual middle aligns with the text baseline area.
-- Slightly tightened the CTA spacing and cart icon bounds for narrow screens while keeping the existing stable layout logic intact.
-- Release token: `20260417-f24p`
+- AR unified texture rail now shows only forms with real published textures; fallback placeholder tiles are skipped.
+- Forms without real textures are omitted from the AR texture chooser instead of showing generic placeholders.
+- Negative cache for no-texture shapes is avoided in the AR rail path so newly published textures can appear automatically on the next rebuild/open.
+- Release token: `20260417-f24q`
 
 ## 2026-04-17 — f24o
 

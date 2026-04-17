@@ -368,6 +368,8 @@ const state = {
   selectedTile: null,
   shapes: [],
   selectedShape: null,
+  currentAllowedTiles: [],
+  currentAllowedTilesPaletteActive: false,
   layout: 'straight', // compatibility mode: layout switching is disabled in favor of texture rotation
   textureRotationDeg: 0,
   rotationPanelOpen: false,
@@ -681,9 +683,11 @@ function attachShapeMetaToTiles(shape, tiles = []) {
 }
 
 async function resolveAllowedTilesForShape(shape, opts = {}) {
-  if (!shape) return { allowed: state.tiles.slice(0, 8), paletteActive: false };
+  const allowFallback = opts.allowFallback !== false;
+  if (!shape) return { allowed: allowFallback ? state.tiles.slice(0, 8) : [], paletteActive: false };
 
-  const cacheKey = shape && shape.id ? String(shape.id) : '';
+  const cacheShapeId = shape && shape.id ? String(shape.id) : '';
+  const cacheKey = cacheShapeId ? `${cacheShapeId}|fallback:${allowFallback ? '1' : '0'}` : '';
   const force = !!opts.force;
   if (!force && cacheKey && state._allowedTilesByShape.has(cacheKey)) {
     return state._allowedTilesByShape.get(cacheKey);
@@ -721,14 +725,16 @@ async function resolveAllowedTilesForShape(shape, opts = {}) {
     }
   }
 
-  if (!Array.isArray(allowed) || !allowed.length) {
+  if ((!Array.isArray(allowed) || !allowed.length) && allowFallback) {
     allowed = (Array.isArray(shape.tileIds) && shape.tileIds.length
       ? shape.tileIds.map(id => state.tiles.find(t => t.id === id)).filter(Boolean)
       : state.tiles.slice(0, 8));
   }
 
-  const result = { allowed: attachShapeMetaToTiles(shape, allowed), paletteActive };
-  if (cacheKey) state._allowedTilesByShape.set(cacheKey, result);
+  const result = { allowed: attachShapeMetaToTiles(shape, Array.isArray(allowed) ? allowed : []), paletteActive };
+  if (cacheKey && (allowFallback || result.paletteActive || result.allowed.length)) {
+    state._allowedTilesByShape.set(cacheKey, result);
+  }
   return result;
 }
 
@@ -743,9 +749,10 @@ function getOrderedShapesForArRail() {
 }
 
 function getFallbackArTextureGroups() {
-  const tiles = Array.isArray(state.currentAllowedTiles) && state.currentAllowedTiles.length
+  const hasRealCurrentShapeTextures = !!state.currentAllowedTilesPaletteActive;
+  const tiles = hasRealCurrentShapeTextures && Array.isArray(state.currentAllowedTiles) && state.currentAllowedTiles.length
     ? state.currentAllowedTiles
-    : (state.selectedTile ? [state.selectedTile] : []);
+    : [];
   if (!tiles.length) return [];
   return [{
     shapeId: state.selectedShape && state.selectedShape.id ? String(state.selectedShape.id) : 'current-shape',
@@ -806,9 +813,9 @@ async function ensureArTextureGroupsBuilt(opts = {}) {
     for (const shape of orderedShapes) {
       if (!shape || !shape.id) continue;
       try {
-        const resolved = await resolveAllowedTilesForShape(shape);
+        const resolved = await resolveAllowedTilesForShape(shape, { allowFallback: false, force: !!opts.force });
         const tiles = Array.isArray(resolved && resolved.allowed) ? resolved.allowed : [];
-        if (!tiles.length) continue;
+        if (!resolved || !resolved.paletteActive || !tiles.length) continue;
         groups.push({
           shapeId: String(shape.id),
           shapeName: shape.name ? String(shape.name) : String(shape.id),
@@ -844,6 +851,7 @@ async function openDetail(shapeId, opts = {}) {
 
   const { allowed, paletteActive } = await resolveAllowedTilesForShape(s);
   state.currentAllowedTiles = allowed;
+  state.currentAllowedTilesPaletteActive = !!paletteActive;
 
   renderColorRow(UI.colorRow, allowed, {
     onTileClick: async (tile) => {

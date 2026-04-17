@@ -129,7 +129,7 @@
   if (!siteBasePath.endsWith('/')) siteBasePath += '/';
 
   var config = Object.freeze({
-    version: '20260417-f24p',
+    version: '20260417-f24q',
     site: Object.freeze({
       siteBaseUrl: siteBaseUrl,
       siteBasePath: siteBasePath,
@@ -138,7 +138,7 @@
       isSpecialUrl: isSpecialUrl
     }),
     sw: Object.freeze({
-      version: '20260417-f24p',
+      version: '20260417-f24q',
       scriptFilename: 'sw.js',
       messages: SW_MESSAGES
     }),
