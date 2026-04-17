@@ -1,3 +1,10 @@
+## 2026-04-17 — f24p
+
+- Refined the form detail CTA sizing so the full label «Связь с менеджером» fits cleanly inside the primary button without clipping.
+- Re-centered the decorative cart icon inside the `Сайт` button so its visual middle aligns with the text baseline area.
+- Slightly tightened the CTA spacing and cart icon bounds for narrow screens while keeping the existing stable layout logic intact.
+- Release token: `20260417-f24p`
+
 ## 2026-04-17 — f24o
 
 - Increased AR texture preview cards by ~20% (64px → 77px) for better visibility and easier selection while preserving the unified grouped rail logic.
