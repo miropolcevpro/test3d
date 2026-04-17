@@ -1,3 +1,9 @@
+## 2026-04-17 — f24o
+
+- Increased AR texture preview cards by ~20% (64px → 77px) for better visibility and easier selection while preserving the unified grouped rail logic.
+- Increased the trailing AR rail hint size to match the larger preview cards.
+- Release token: `20260417-f24o`
+
 ## 2026-04-17 — f24n
 - Increased the AR bottom texture preview cards by ~15% for easier selection without changing the unified rail logic.
 - Kept the thinner form dividers intact while enlarging the swatch preview size from 56px to 64px.
