@@ -205,28 +205,6 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   line-height:1.45;
 }
 
-.bottomNav{
-  position:fixed;left:0;right:0;bottom:0;
-  padding:10px 10px calc(10px + var(--safe-bottom));
-  display:flex;gap:10px;justify-content:space-around;
-  background:rgba(245,247,250,0.95);
-  color:#0a0c10;
-}
-.navItem{
-  flex:1;
-  border:0;
-  background:transparent;
-  padding:10px 8px;
-  border-radius:16px;
-  display:flex;align-items:center;justify-content:center;gap:10px;
-  font-size:15px;
-  color:#0a0c10;
-  text-decoration:none;
-}
-.navItem--active{background:#e6f2ff;}
-.navIcon{font-size:18px;}
-.navLabel{font-weight:600;}
-
 /* Detail */
 .detailTop{
   padding:calc(10px + var(--safe-top)) 14px 10px;

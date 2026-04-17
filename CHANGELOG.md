@@ -61,3 +61,7 @@ Release token: `20260411-f24g`
 - F01: fixed the palette surface filter helper call mismatch.
 
 - F19b: structured ZIP upload now enforces the same bucket-based policy as manual upload: 2k is allowed only after an already existing complete 1k set for the same textureId.
+
+## 2026-04-17 — remove bottom navigation from home screen
+- Removed the fixed bottom navigation block on the main catalog screen (`Формы`, `3D`, `Админка`).
+- Cleaned related CSS tails for the removed home-screen bottom navigation.
