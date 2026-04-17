@@ -1,9 +1,14 @@
+## 2026-04-17 — f24m
+- AR unified texture rail: made shape separators much lighter and thinner.
+- Reworked section labels from a tall top stripe into a compact inline divider with a subtle hairline + small form name.
+- Kept the unified cross-form texture scroll logic intact while reducing the visual height/weight of the AR bottom rail.
+
 ## 2026-04-17 — Patch: unified AR texture rail across all forms with labeled sections
 - Replaced the AR bottom swatch strip with one continuous horizontally scrollable rail that aggregates textures from all forms.
 - Added per-form section labels inside the AR rail so the next form begins with a clear named divider instead of requiring manual form switching.
 - Kept the current shape first in the AR rail for each session and switched shapes safely in-place when the user taps a texture from another form.
 - The rail is data-driven from live per-form palettes, so newly added textures stay inside their own form section and appear automatically without manual UI curation.
-- Release token: `20260417-f24l`
+- Release token: `20260417-f24m`
 
 ## 2026-04-17 — Patch: raise `Сайт` label above decorative cart icon on form pages
 - Fixed the detail-page `Сайт` CTA layering so the text label always stays above the decorative cart icon.
