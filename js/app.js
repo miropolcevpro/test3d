@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { loadTiles, loadShapes, clamp, sanitizePalettePayload, reportValidationWarnings, fetchJsonResource, formatResourceError, isMissingResourceError, isRetryableResourceError } from './utils.js';
 import { show, setActiveScreen, fmtMeters, fmtArea, updateArBottomStripVar, updateArTopStripVar } from './app-ui-helpers.js';
-import { getDirectPaletteUrlForShape, getPaletteCandidateUrlsForShape, paletteItemsToTiles, getTilePreviewUrl, getTileMapUrls, getTileAlbedoCandidates, prefetchImageUrls, renderColorRow } from './app-palette-helpers.js';
+import { getDirectPaletteUrlForShape, getPaletteCandidateUrlsForShape, paletteItemsToTiles, getTilePreviewUrl, getTileMapUrls, getTileAlbedoCandidates, prefetchImageUrls, renderColorRow, renderGroupedColorRow } from './app-palette-helpers.js';
 import { loadSurfacePalette, loadPaletteDefaultsForShape, filterPaletteItemsBySurfaces } from './app-palette-data-helpers.js';
 import { renderCatalog, renderDetailHero, renderDetailTech, setShapePickerOpen, buildShapePickerList, buildFallbackShapesFromTiles } from './app-catalog-detail-helpers.js';
 import { buildPublishedQuickLaunchItems, renderQuickLaunchRail } from './app-quick-launch-helpers.js';
@@ -373,6 +373,11 @@ const state = {
   rotationPanelOpen: false,
   _paletteCache: new Map(),
   _paletteDefaultsCache: new Map(),
+  _allowedTilesByShape: new Map(),
+  arTextureRailStartShapeId: '',
+  arTextureGroups: [],
+  _arTextureGroupsPromise: null,
+  _arTextureGroupsSeq: 0,
 
   // internal guards
   _restartingAR: false,
@@ -665,8 +670,24 @@ function fillShapeDetailUI(shape) {
   setLayout(state.layout);
 }
 
-async function resolveAllowedTilesForShape(shape) {
+function attachShapeMetaToTiles(shape, tiles = []) {
+  const shapeId = shape && shape.id ? String(shape.id) : '';
+  const shapeName = shape && shape.name ? String(shape.name) : shapeId;
+  return (tiles || []).map((tile) => ({
+    ...tile,
+    shapeId: tile && tile.shapeId ? String(tile.shapeId) : shapeId,
+    shapeName: tile && tile.shapeName ? String(tile.shapeName) : shapeName,
+  }));
+}
+
+async function resolveAllowedTilesForShape(shape, opts = {}) {
   if (!shape) return { allowed: state.tiles.slice(0, 8), paletteActive: false };
+
+  const cacheKey = shape && shape.id ? String(shape.id) : '';
+  const force = !!opts.force;
+  if (!force && cacheKey && state._allowedTilesByShape.has(cacheKey)) {
+    return state._allowedTilesByShape.get(cacheKey);
+  }
 
   let allowed = null;
   let paletteActive = false;
@@ -706,7 +727,109 @@ async function resolveAllowedTilesForShape(shape) {
       : state.tiles.slice(0, 8));
   }
 
-  return { allowed, paletteActive };
+  const result = { allowed: attachShapeMetaToTiles(shape, allowed), paletteActive };
+  if (cacheKey) state._allowedTilesByShape.set(cacheKey, result);
+  return result;
+}
+
+function getOrderedShapesForArRail() {
+  const shapes = Array.isArray(state.shapes) ? state.shapes.slice() : [];
+  if (!shapes.length) return [];
+  const startShapeId = state.arTextureRailStartShapeId || (state.selectedShape && state.selectedShape.id ? String(state.selectedShape.id) : '');
+  if (!startShapeId) return shapes;
+  const startIndex = shapes.findIndex((shape) => shape && String(shape.id) === startShapeId);
+  if (startIndex <= 0) return shapes;
+  return shapes.slice(startIndex).concat(shapes.slice(0, startIndex));
+}
+
+function getFallbackArTextureGroups() {
+  const tiles = Array.isArray(state.currentAllowedTiles) && state.currentAllowedTiles.length
+    ? state.currentAllowedTiles
+    : (state.selectedTile ? [state.selectedTile] : []);
+  if (!tiles.length) return [];
+  return [{
+    shapeId: state.selectedShape && state.selectedShape.id ? String(state.selectedShape.id) : 'current-shape',
+    shapeName: state.selectedShape && state.selectedShape.name ? String(state.selectedShape.name) : 'Текущая форма',
+    tiles,
+  }];
+}
+
+async function handleArTextureRailTileClick(tile) {
+  if (!tile) return;
+  const tileShapeId = tile && tile.shapeId ? String(tile.shapeId) : '';
+  const selectedShapeId = state.selectedShape && state.selectedShape.id ? String(state.selectedShape.id) : '';
+
+  if (tileShapeId && selectedShapeId && tileShapeId !== selectedShapeId) {
+    if (state._switchingShapeInAr) return;
+    state._switchingShapeInAr = true;
+    try {
+      await openDetail(tileShapeId, { preserveScreen: true, preferredTileId: tile.id });
+      renderArTextureRail();
+    } catch (e) {
+      console.error('in-rail shape switch failed', e);
+    } finally {
+      state._switchingShapeInAr = false;
+    }
+    return;
+  }
+
+  await selectTile(tile);
+}
+
+function renderArTextureRail() {
+  if (!UI.finalColors) return;
+  const groups = (Array.isArray(state.arTextureGroups) && state.arTextureGroups.length)
+    ? state.arTextureGroups
+    : getFallbackArTextureGroups();
+  const trailingHint = state._arTextureGroupsPromise
+    ? (state.arTextureGroups.length ? 'Подгружаем остальные формы…' : 'Загружаем все формы и текстуры…')
+    : '';
+
+  renderGroupedColorRow(UI.finalColors, groups, {
+    selectedTileId: state.selectedTile ? state.selectedTile.id : '',
+    selectedShapeId: state.selectedShape && state.selectedShape.id ? state.selectedShape.id : '',
+    onTileClick: handleArTextureRailTileClick,
+    trailingHint,
+  });
+  updateArBottomStripVar(UI);
+}
+
+async function ensureArTextureGroupsBuilt(opts = {}) {
+  const force = !!opts.force;
+  if (!force && Array.isArray(state.arTextureGroups) && state.arTextureGroups.length) return state.arTextureGroups;
+  if (!force && state._arTextureGroupsPromise) return state._arTextureGroupsPromise;
+
+  const seq = ++state._arTextureGroupsSeq;
+  const promise = (async () => {
+    const groups = [];
+    const orderedShapes = getOrderedShapesForArRail();
+    for (const shape of orderedShapes) {
+      if (!shape || !shape.id) continue;
+      try {
+        const resolved = await resolveAllowedTilesForShape(shape);
+        const tiles = Array.isArray(resolved && resolved.allowed) ? resolved.allowed : [];
+        if (!tiles.length) continue;
+        groups.push({
+          shapeId: String(shape.id),
+          shapeName: shape.name ? String(shape.name) : String(shape.id),
+          tiles,
+        });
+      } catch (err) {
+        console.warn('AR texture rail group skipped:', shape && shape.id ? shape.id : 'unknown-shape', err);
+      }
+    }
+    if (seq !== state._arTextureGroupsSeq) return state.arTextureGroups;
+    state.arTextureGroups = groups;
+    if (state.phase === 'ar_final') renderArTextureRail();
+    return groups;
+  })();
+
+  state._arTextureGroupsPromise = promise;
+  try {
+    return await promise;
+  } finally {
+    if (state._arTextureGroupsPromise === promise) state._arTextureGroupsPromise = null;
+  }
 }
 
 async function openDetail(shapeId, opts = {}) {
@@ -2298,19 +2421,16 @@ function ensureArFinalControlsBound() {
     UI.btnShapePicker.addEventListener('click', () => {
       if (!UI.shapePickerPanel || !UI.shapePickerList) return;
       setRotationPanelOpen(false);
-      if (!UI.shapePickerPanel.hasAttribute('data-built')) {
-        try {
-          buildShapePickerList({
-            UI,
-            state,
-            setShapePickerOpen: (open) => setShapePickerOpen(open, { UI, updateArTopStripVar, updateArBottomStripVar }),
-            onShapeSelect: handleShapePickerSelection,
-          });
-        } catch (e) {
-          console.warn('shape picker build failed', e);
-          return;
-        }
-        UI.shapePickerPanel.setAttribute('data-built', '1');
+      try {
+        buildShapePickerList({
+          UI,
+          state,
+          setShapePickerOpen: (open) => setShapePickerOpen(open, { UI, updateArTopStripVar, updateArBottomStripVar }),
+          onShapeSelect: handleShapePickerSelection,
+        });
+      } catch (e) {
+        console.warn('shape picker build failed', e);
+        return;
       }
       const isOpen = !UI.shapePickerPanel.hidden && UI.shapePickerPanel.classList.contains('open');
       setShapePickerOpen(!isOpen, { UI, updateArTopStripVar, updateArBottomStripVar });
@@ -2352,10 +2472,13 @@ UI.btnDone?.addEventListener('click', async () => {
   setLayout(state.layout);
   applyTextureRotationDeg(state.textureRotationDeg, { preserveFullCircle: state.textureRotationDeg === 360 });
 
-  renderColorRow(UI.finalColors, (Array.isArray(state.currentAllowedTiles) && state.currentAllowedTiles.length ? state.currentAllowedTiles : state.tiles.slice(0, 8)), {
-    onTileClick: async (tile) => {
-      await selectTile(tile);
-    }
+  if (!state.arTextureRailStartShapeId) {
+    state.arTextureRailStartShapeId = state.selectedShape && state.selectedShape.id ? String(state.selectedShape.id) : '';
+  }
+  renderArTextureRail();
+  ensureArTextureGroupsBuilt().catch((e) => {
+    console.warn('AR texture rail build failed', e);
+    renderArTextureRail();
   });
 
   // hide hint
@@ -2462,12 +2585,11 @@ async function handleShapePickerSelection(shapeId) {
       if (state.phase === 'ar_final') {
         show(UI.finalBar, true);
         show(UI.finalColors, true);
-        renderColorRow(UI.finalColors, (Array.isArray(state.currentAllowedTiles) && state.currentAllowedTiles.length ? state.currentAllowedTiles : state.tiles.slice(0, 8)), {
-          onTileClick: async (tile) => {
-            await selectTile(tile);
-          }
+        renderArTextureRail();
+        ensureArTextureGroupsBuilt().catch((e) => {
+          console.warn('AR texture rail refresh failed', e);
+          renderArTextureRail();
         });
-        updateArBottomStripVar(UI);
       }
       if (result && result.defaultTile && prevTileId && result.defaultTile.id !== prevTileId) {
         // openDetail already applied the fallback/default tile; this branch only documents intent.

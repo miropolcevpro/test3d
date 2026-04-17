@@ -158,6 +158,7 @@ export function renderColorRow(container, tiles, opts = {}) {
     sw.type = 'button';
     sw.className = 'swatch';
     sw.dataset.tileId = String(tile.id);
+    if (tile && tile.shapeId) sw.dataset.shapeId = String(tile.shapeId);
     const bgUrl = getTilePreviewUrl(tile);
     sw.dataset.bg = bgUrl;
     if (idx < eagerCount && bgUrl) {
@@ -170,6 +171,78 @@ export function renderColorRow(container, tiles, opts = {}) {
     });
     container.appendChild(sw);
   });
+
+  setupLazySwatches(container);
+}
+
+export function renderGroupedColorRow(container, groups, opts = {}) {
+  if (!container) return;
+  container.innerHTML = '';
+  container.classList.add('finalColors--grouped');
+
+  const eagerCount = (typeof opts.eagerCount === 'number') ? opts.eagerCount : 12;
+  const onTileClick = (typeof opts.onTileClick === 'function') ? opts.onTileClick : null;
+  const selectedTileId = opts.selectedTileId != null ? String(opts.selectedTileId) : '';
+  const selectedShapeId = opts.selectedShapeId != null ? String(opts.selectedShapeId) : '';
+  let eagerIndex = 0;
+
+  const isTileActive = (tile) => {
+    if (!tile || selectedTileId !== String(tile.id)) return false;
+    const tileShapeId = tile.shapeId != null ? String(tile.shapeId) : '';
+    if (!selectedShapeId || !tileShapeId) return true;
+    return selectedShapeId === tileShapeId;
+  };
+
+  (groups || []).forEach((group) => {
+    const tiles = Array.isArray(group && group.tiles) ? group.tiles : [];
+    if (!tiles.length) return;
+
+    const section = document.createElement('section');
+    section.className = 'finalColorSection';
+    if (group && group.shapeId) section.dataset.shapeId = String(group.shapeId);
+
+    const label = document.createElement('div');
+    label.className = 'finalColorSectionLabel';
+    label.textContent = (group && (group.shapeName || group.name || group.shapeId)) ? String(group.shapeName || group.name || group.shapeId) : 'Форма';
+    section.appendChild(label);
+
+    const row = document.createElement('div');
+    row.className = 'finalColorSectionRow';
+
+    tiles.forEach((tile) => {
+      const sw = document.createElement('button');
+      sw.type = 'button';
+      sw.className = 'swatch';
+      sw.dataset.tileId = String(tile.id);
+      if (tile && tile.shapeId) sw.dataset.shapeId = String(tile.shapeId);
+      const bgUrl = getTilePreviewUrl(tile);
+      sw.dataset.bg = bgUrl;
+      if (eagerIndex < eagerCount && bgUrl) {
+        sw.style.backgroundImage = `url(${bgUrl})`;
+        sw.dataset.bgLoaded = '1';
+      }
+      eagerIndex += 1;
+      if (isTileActive(tile)) sw.classList.add('swatch--active');
+      const shapeLabel = (group && (group.shapeName || group.name || group.shapeId)) ? String(group.shapeName || group.name || group.shapeId) : '';
+      sw.title = shapeLabel ? `${tile.name || 'Текстура'} · ${shapeLabel}` : (tile.name || 'Текстура');
+      sw.setAttribute('aria-label', sw.title);
+      sw.addEventListener('click', async () => {
+        if (onTileClick) await onTileClick(tile, group);
+      });
+      row.appendChild(sw);
+    });
+
+    section.appendChild(row);
+    container.appendChild(section);
+  });
+
+  const trailingHint = String(opts.trailingHint || '').trim();
+  if (trailingHint) {
+    const hint = document.createElement('div');
+    hint.className = 'finalColorRailHint';
+    hint.textContent = trailingHint;
+    container.appendChild(hint);
+  }
 
   setupLazySwatches(container);
 }

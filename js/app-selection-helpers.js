@@ -468,9 +468,13 @@ export function createSelectionHelpers(ctx) {
     }
 
     const tileKey = String(t.id);
+    const tileShapeKey = (t && t.shapeId) ? String(t.shapeId) : (ctx.state.selectedShape && ctx.state.selectedShape.id ? String(ctx.state.selectedShape.id) : '');
     const updateSwatches = (wrap) => {
       wrap?.querySelectorAll('[data-tile-id]').forEach(el => {
-        el.classList.toggle('swatch--active', tileKey === el.dataset.tileId);
+        const elShapeKey = el.dataset && el.dataset.shapeId ? String(el.dataset.shapeId) : '';
+        const sameTile = tileKey === el.dataset.tileId;
+        const sameShape = !tileShapeKey || !elShapeKey || tileShapeKey === elShapeKey;
+        el.classList.toggle('swatch--active', sameTile && sameShape);
       });
     };
     updateSwatches(ctx.UI.colorRow);

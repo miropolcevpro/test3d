@@ -1,3 +1,22 @@
+## 2026-04-17 — Patch: unified AR texture rail across all forms with labeled sections
+- Replaced the AR bottom swatch strip with one continuous horizontally scrollable rail that aggregates textures from all forms.
+- Added per-form section labels inside the AR rail so the next form begins with a clear named divider instead of requiring manual form switching.
+- Kept the current shape first in the AR rail for each session and switched shapes safely in-place when the user taps a texture from another form.
+- The rail is data-driven from live per-form palettes, so newly added textures stay inside their own form section and appear automatically without manual UI curation.
+- Release token: `20260417-f24l`
+
+## 2026-04-17 — Patch: raise `Сайт` label above decorative cart icon on form pages
+- Fixed the detail-page `Сайт` CTA layering so the text label always stays above the decorative cart icon.
+- Reworked the site CTA styling to make the cart icon a right-side decorative layer instead of a competing inline element.
+- Fixed the broken `convIconCart` CSS tail that could cause unstable icon sizing/overlap.
+- Release token: `20260417-f24k`
+
+## 2026-04-17 — Patch: producer site CTA on catalog and unified form-site links
+- Added a bottom CTA button on the main catalog screen: «Перейти на сайт АКТИВ ГРУПП» → `https://ag-ru.com/`.
+- Updated the shared `Сайт` button on form detail pages to open `https://ag-ru.com/`.
+- Reduced the catalog bottom tail so the new footer CTA sits cleanly at the end of the page.
+- Release token: `20260417-f24j`
+
 ## 2026-04-16 — Patch: safe AR texture rotation replaces layout switch
 - В AR нижняя кнопка «Смена укладки» заменена на «Вращение».
 - Добавлена компактная панель управления углом: −15°, +15°, ползунок 0–360° и сброс в 0°.

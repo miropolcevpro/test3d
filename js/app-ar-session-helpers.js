@@ -56,6 +56,10 @@ export function createArSessionHelpers(ctx = {}) {
     state.floorYEstimate = null;
     state.textureRotationDeg = 0;
     state.rotationPanelOpen = false;
+    state.arTextureRailStartShapeId = '';
+    state.arTextureGroups = [];
+    state._arTextureGroupsSeq = (state._arTextureGroupsSeq || 0) + 1;
+    state._arTextureGroupsPromise = null;
 
     try {
       const btnTextureRotate = document.getElementById('btnTextureRotate');
