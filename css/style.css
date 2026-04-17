@@ -982,8 +982,8 @@ to   { transform: scale(1.12); }
   background:rgba(0,0,0,0.46);
 }
 #detailTechCard .convBtn.convPrimary{
-  /* Give primary CTA a bit more width so the full label fits */
-  flex:1.65 1 0;
+  /* Give primary CTA a bit more width so the full label fits reliably */
+  flex:1.9 1 0;
   background:rgba(90, 170, 255, 0.65);
 }
 #detailTechCard .convBtn.convPrimary:active,
@@ -998,15 +998,18 @@ to   { transform: scale(1.12); }
   flex:0 0 20px;
 }
 #detailTechCard .convBtnSite{
-  padding-right:38px;
+  padding-right:34px;
 }
 #detailTechCard .convBtnSite .convIconCart{
   position:absolute;
-  right:10px;
-  bottom:4px;
+  right:8px;
+  top:50%;
+  transform:translateY(-50%);
   z-index:1;
-  width:24px;
+  width:21px;
   height:24px;
+  object-fit:cover;
+  object-position:center;
   opacity:0.92;
   pointer-events:none;
 }
@@ -1016,7 +1019,7 @@ to   { transform: scale(1.12); }
   z-index:3;
   font-weight:700;
   /* Responsive sizing: keep on one line without truncation */
-  font-size:clamp(12px, 3.4vw, 14px);
+  font-size:clamp(11px, 3.15vw, 13px);
   line-height:1.05;
   white-space:nowrap;
   overflow:hidden;
@@ -1026,6 +1029,7 @@ to   { transform: scale(1.12); }
   #detailTechCard .convBody{gap:8px;}
   #detailTechCard .convBtn{padding:11px 8px;}
   #detailTechCard .convIcon{width:18px;height:18px;flex:0 0 18px;}
-  #detailTechCard .convBtnSite{padding-right:34px;}
-  #detailTechCard .convBtnSite .convIconCart{right:8px;bottom:4px;width:22px;height:22px;}
+  #detailTechCard .convBtnSite{padding-right:31px;}
+  #detailTechCard .convBtnSite .convIconCart{right:7px;top:50%;width:19px;height:21px;}
+  #detailTechCard .convText{font-size:clamp(10px, 3.05vw, 12px);}
 }

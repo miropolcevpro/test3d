@@ -1,9 +1,23 @@
+## Fix24s — detail CTA text fit + site icon center
+- Increased the primary detail CTA share so `Связь с менеджером` fits fully inside the button.
+- Reduced CTA label size slightly for safer fit on narrow screens.
+- Recentered the decorative cart icon on the `Сайт` button and trimmed its visual footprint.
+- Release token: `20260418-f24s`
+
+## 2026-04-18 — f24r
+
+- Form detail hero galleries no longer depend on the hardcoded 4-entry `gallery` arrays in `shapes.json`.
+- Detail pages now auto-discover sequential hero frames from `assets/gallery/<shapeId>/1.webp`, `2.webp`, `3.webp` and so on, stopping safely at the first missing file.
+- Forms with only `1.webp` now show just that frame, while newly added numbered frames appear automatically without code edits.
+- Missing legacy gallery entries no longer produce broken-image artifacts in the form-page hero.
+- Release token: `20260418-f24r`
+
 ## 2026-04-17 — f24q
 
 - AR unified texture rail now shows only forms with real published textures; fallback placeholder tiles are skipped.
 - Forms without real textures are omitted from the AR texture chooser instead of showing generic placeholders.
 - Negative cache for no-texture shapes is avoided in the AR rail path so newly published textures can appear automatically on the next rebuild/open.
-- Release token: `20260417-f24q`
+- Release token: `20260418-f24r`
 
 ## 2026-04-17 — f24o
 

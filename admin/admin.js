@@ -1,5 +1,5 @@
 // BUILD: v28 2026-01-16f (runtime-config)
-const __BUILD_ID__ = "20260417-f24q";
+const __BUILD_ID__ = "20260418-f24s";
 console.log("[Admin] build", __BUILD_ID__);
 /* Admin (Step 3 start) — shapes list + shape details (read-only palette), router scaffold */
 (async () => {

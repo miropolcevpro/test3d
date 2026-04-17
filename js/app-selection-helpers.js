@@ -461,7 +461,8 @@ export function createSelectionHelpers(ctx) {
     } catch (_) {}
 
     if (ctx.UI.detailHero) {
-      if (!(ctx.state.selectedShape && Array.isArray(ctx.state.selectedShape.gallery) && ctx.state.selectedShape.gallery.length)) {
+      const hasResolvedGallery = ctx.UI.detailHero.dataset && ctx.UI.detailHero.dataset.heroHasResolvedGallery === '1';
+      if (!hasResolvedGallery) {
         const hero = t.preview || (t.maps && t.maps.albedo) || t.texture || '';
         ctx.UI.detailHero.style.backgroundImage = hero ? `url(${hero})` : 'none';
       }

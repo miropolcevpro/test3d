@@ -1,3 +1,5 @@
+const detailHeroGalleryCache = new Map();
+
 function readCssPxVar(name, fallback = 0) {
   try {
     const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -6,6 +8,132 @@ function readCssPxVar(name, fallback = 0) {
   } catch (_) {
     return fallback;
   }
+}
+
+function getRuntimeAssetVersion() {
+  try {
+    const value = globalThis && globalThis.__RUNTIME_CONFIG__ && globalThis.__RUNTIME_CONFIG__.version
+      ? String(globalThis.__RUNTIME_CONFIG__.version).trim()
+      : '';
+    return value;
+  } catch (_) {
+    return '';
+  }
+}
+
+function withRuntimeAssetVersion(url) {
+  const src = typeof url === 'string' ? url.trim() : '';
+  if (!src) return '';
+  if (/^(data:|blob:)/i.test(src)) return src;
+  const token = getRuntimeAssetVersion();
+  if (!token) return src;
+  return src + (src.includes('?') ? '&' : '?') + 'v=' + encodeURIComponent(token);
+}
+
+function renderDetailHeroFallback(detailHeroEl, shape) {
+  if (!detailHeroEl) return;
+  detailHeroEl.dataset.heroHasResolvedGallery = '0';
+  detailHeroEl.innerHTML = '';
+  const fallback = withRuntimeAssetVersion(shape?.hero || shape?.icon || '');
+  detailHeroEl.style.backgroundImage = fallback ? `url(${fallback})` : 'none';
+}
+
+function renderDetailHeroCarousel(detailHeroEl, gallery = []) {
+  if (!detailHeroEl) return;
+  const items = Array.isArray(gallery) ? gallery.filter(Boolean) : [];
+  if (!items.length) {
+    detailHeroEl.dataset.heroHasResolvedGallery = '0';
+    detailHeroEl.innerHTML = '';
+    detailHeroEl.style.backgroundImage = 'none';
+    return;
+  }
+
+  detailHeroEl.dataset.heroHasResolvedGallery = '1';
+  detailHeroEl.style.backgroundImage = 'none';
+  detailHeroEl.innerHTML = `
+    <div class="heroCarousel">
+      <div class="heroTrack" id="heroTrack">
+        ${items.map((src, idx) => `
+          <div class="heroSlide" data-idx="${idx}">
+            <img src="${src}" alt="">
+          </div>`).join('')}
+      </div>
+      <div class="heroDots" id="heroDots">
+        ${items.map((_, idx) => `<div class="heroDot ${idx===0?'active':''}" data-idx="${idx}"></div>`).join('')}
+      </div>
+    </div>
+  `;
+  const track = detailHeroEl.querySelector('#heroTrack');
+  const dots = [...detailHeroEl.querySelectorAll('.heroDot')];
+  const activateDot = (i) => dots.forEach((d, di) => d.classList.toggle('active', di === i));
+  track.addEventListener('scroll', () => {
+    const w = track.clientWidth || 1;
+    const idx = Math.round(track.scrollLeft / w);
+    activateDot(Math.max(0, Math.min(dots.length - 1, idx)));
+  }, { passive: true });
+}
+
+async function probeAssetExists(url) {
+  const src = withRuntimeAssetVersion(url);
+  if (!src) return false;
+
+  try {
+    const headResp = await fetch(src, { method: 'HEAD', cache: 'no-store' });
+    if (headResp && headResp.ok) return true;
+    if (headResp && headResp.status && headResp.status !== 405) return false;
+  } catch (_) {}
+
+  try {
+    return await new Promise((resolve) => {
+      const img = new Image();
+      let done = false;
+      const finish = (ok) => {
+        if (done) return;
+        done = true;
+        img.onload = null;
+        img.onerror = null;
+        resolve(ok);
+      };
+      img.onload = () => finish(true);
+      img.onerror = () => finish(false);
+      img.src = src;
+    });
+  } catch (_) {
+    return false;
+  }
+}
+
+async function resolveSequentialDetailGallery(shape) {
+  const shapeId = shape && shape.id ? String(shape.id).trim() : '';
+  const cacheKey = shapeId ? `seq:${shapeId}` : `raw:${Array.isArray(shape?.gallery) ? shape.gallery.join('|') : ''}`;
+  if (detailHeroGalleryCache.has(cacheKey)) {
+    return detailHeroGalleryCache.get(cacheKey);
+  }
+
+  const probePromise = (async () => {
+    const sequential = [];
+    if (shapeId) {
+      for (let idx = 1; idx <= 64; idx += 1) {
+        const candidate = `assets/gallery/${shapeId}/${idx}.webp`;
+        const exists = await probeAssetExists(candidate);
+        if (!exists) break;
+        sequential.push(withRuntimeAssetVersion(candidate));
+      }
+    }
+    if (sequential.length) return sequential;
+
+    const explicit = Array.isArray(shape?.gallery) ? shape.gallery.filter(Boolean) : [];
+    if (!explicit.length) return [];
+
+    const filtered = [];
+    for (const src of explicit) {
+      if (await probeAssetExists(src)) filtered.push(withRuntimeAssetVersion(src));
+    }
+    return filtered;
+  })().catch(() => []);
+
+  detailHeroGalleryCache.set(cacheKey, probePromise);
+  return probePromise;
 }
 
 function clampShapePickerPanelBounds(UI) {
@@ -86,35 +214,22 @@ export function renderCatalog(list, ctx = {}) {
 
 export function renderDetailHero(detailHeroEl, shape) {
   if (!detailHeroEl) return;
-  const gallery = Array.isArray(shape?.gallery) ? shape.gallery.filter(Boolean) : [];
-  if (gallery.length > 0) {
-    detailHeroEl.style.backgroundImage = 'none';
-    detailHeroEl.innerHTML = `
-      <div class="heroCarousel">
-        <div class="heroTrack" id="heroTrack">
-          ${gallery.map((src, idx) => `
-            <div class="heroSlide" data-idx="${idx}">
-              <img src="${src}" alt="">
-            </div>`).join('')}
-        </div>
-        <div class="heroDots" id="heroDots">
-          ${gallery.map((_, idx) => `<div class="heroDot ${idx===0?'active':''}" data-idx="${idx}"></div>`).join('')}
-        </div>
-      </div>
-    `;
-    const track = detailHeroEl.querySelector('#heroTrack');
-    const dots = [...detailHeroEl.querySelectorAll('.heroDot')];
-    const activateDot = (i) => dots.forEach((d, di) => d.classList.toggle('active', di === i));
-    track.addEventListener('scroll', () => {
-      const w = track.clientWidth || 1;
-      const idx = Math.round(track.scrollLeft / w);
-      activateDot(Math.max(0, Math.min(dots.length - 1, idx)));
-    }, { passive: true });
-    return;
-  }
 
-  detailHeroEl.innerHTML = '';
-  detailHeroEl.style.backgroundImage = `url(${shape?.hero || shape?.icon || ''})`;
+  const requestId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  detailHeroEl.dataset.heroRequestId = requestId;
+  renderDetailHeroFallback(detailHeroEl, shape);
+
+  resolveSequentialDetailGallery(shape).then((gallery) => {
+    if (!detailHeroEl || detailHeroEl.dataset.heroRequestId !== requestId) return;
+    if (Array.isArray(gallery) && gallery.length) {
+      renderDetailHeroCarousel(detailHeroEl, gallery);
+      return;
+    }
+    renderDetailHeroFallback(detailHeroEl, shape);
+  }).catch(() => {
+    if (!detailHeroEl || detailHeroEl.dataset.heroRequestId !== requestId) return;
+    renderDetailHeroFallback(detailHeroEl, shape);
+  });
 }
 
 export function renderDetailTech(detailTechEl, techBodyEl, btnTechToggleEl, shape) {
