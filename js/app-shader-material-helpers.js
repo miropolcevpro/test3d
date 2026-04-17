@@ -10,6 +10,7 @@ const TILE_VERTEX_SHADER = `
   uniform vec2 uTileSize;
   uniform vec2 uUvScale;
   uniform int uLayoutMode;
+  uniform float uUvRotation;
 
   mat2 rot(float a){
     float c = cos(a), s = sin(a);
@@ -32,6 +33,8 @@ const TILE_VERTEX_SHADER = `
       float row = floor(uv.y);
       uv.x += 0.5 * mod(row, 2.0);
     }
+
+    uv = rot(uUvRotation) * uv;
 
     vUv = uv;
     gl_Position = vClipPos;
@@ -225,6 +228,7 @@ export function makeTileMaterial(arg = {}) {
       uTileSize: { value: new THREE.Vector2(0.2, 0.2) },
       uUvScale: { value: new THREE.Vector2(1, 1) },
       uLayoutMode: { value: 0 },
+      uUvRotation: { value: 0.0 },
       uLightDir: { value: new THREE.Vector3(1, 2, 1).normalize() },
       uFillLightDir: { value: new THREE.Vector3(-1, 1.2, 0.6).normalize() },
       uFillStrength: { value: 0.26 },

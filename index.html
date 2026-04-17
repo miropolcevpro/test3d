@@ -59,6 +59,20 @@
         <div id="catalogCards" class="catalogCards"></div>
       </div>
 
+      <nav class="bottomNav" aria-label="Навигация">
+        <button class="navItem navItem--active" type="button">
+          <span class="navIcon">▦</span>
+          <span class="navLabel">Формы</span>
+        </button>
+        <button class="navItem" type="button" id="btnNav3D">
+          <span class="navIcon">⬚</span>
+          <span class="navLabel">3D</span>
+        </button>
+        <a class="navItem" href="admin/" rel="noopener">
+          <span class="navIcon">⚙</span>
+          <span class="navLabel">Админка</span>
+        </a>
+      </nav>
     </section>
 
     <!-- Экран 2: Детали позиции -->
@@ -248,8 +262,21 @@
       <!-- Нижняя панель после визуализации -->
       <div id="finalBar" class="finalBar" hidden>
         <div class="finalPatterns" id="finalPatterns">
-          <button id="btnLayoutCycle" class="patternTab" type="button">Смена укладки</button>
+          <button id="btnTextureRotate" class="patternTab" type="button" aria-expanded="false" aria-controls="rotationPanel">Вращение 0°</button>
           <button id="btnShapePicker" class="patternTab" type="button">Выбрать форму</button>
+        </div>
+        <div id="rotationPanel" class="rotationPanel" hidden>
+          <div class="rotationPanelHeader">
+            <div class="rotationPanelTitle">Вращение текстуры</div>
+            <button id="btnRotationReset" class="rotationResetBtn" type="button">Сброс 0°</button>
+          </div>
+          <div id="rotationHint" class="rotationHint">Подсказка: используйте −15° / +15° для быстрого шага или ползунок для точного поворота рисунка плитки.</div>
+          <div class="rotationStepRow">
+            <button id="btnRotateMinus" class="rotationStepBtn" type="button" aria-label="Повернуть текстуру на 15 градусов назад">−15°</button>
+            <div id="rotationValue" class="rotationValue" aria-live="polite">0°</div>
+            <button id="btnRotatePlus" class="rotationStepBtn" type="button" aria-label="Повернуть текстуру на 15 градусов вперёд">+15°</button>
+          </div>
+          <input id="rotationSlider" class="rotationSlider" type="range" min="0" max="360" step="1" value="0" aria-label="Угол вращения текстуры" />
         </div>
         <div id="texLoadStatus" class="texLoadStatus" hidden aria-live="polite">Загрузка текстуры…</div>
         <div id="texLoadBarWrap" class="texLoadBarWrap" hidden aria-hidden="true">

@@ -7,21 +7,54 @@ export function createSelectionHelpers(ctx) {
   let heavyMapsTimer = null;
   let heavyMapsSeq = 0;
 
-  function setLayout(layout) {
-    if (layout !== 'straight' && layout !== 'diagonal') layout = 'straight';
+  function normalizeRotationDeg(value, preserveFullCircle = false) {
+    let deg = Number(value);
+    if (!Number.isFinite(deg)) deg = 0;
+    if (preserveFullCircle && Math.abs(deg - 360) < 0.0001) return 360;
+    deg = deg % 360;
+    if (deg < 0) deg += 360;
+    if (Math.abs(deg) < 0.0001) deg = 0;
+    return deg;
+  }
 
-    ctx.state.layout = layout;
-    if (ctx.UI.layoutSelect) ctx.UI.layoutSelect.value = layout;
+  function formatRotationDegLabel(value) {
+    const deg = normalizeRotationDeg(value, true);
+    return `${Math.round(deg)}°`;
+  }
+
+  function syncRotationUi(deg) {
+    if (ctx.UI.btnTextureRotate) ctx.UI.btnTextureRotate.textContent = `Вращение ${formatRotationDegLabel(deg)}`;
+    if (ctx.UI.rotationValue) ctx.UI.rotationValue.textContent = formatRotationDegLabel(deg);
+    if (ctx.UI.rotationSlider) ctx.UI.rotationSlider.value = String(Math.round(normalizeRotationDeg(deg, true)));
+  }
+
+  function setTextureRotationDeg(deg, opts = {}) {
+    const nextDeg = normalizeRotationDeg(deg, !!opts.preserveFullCircle);
+    ctx.state.textureRotationDeg = nextDeg;
     const tileMaterial = ctx.getTileMaterial();
-    if (tileMaterial) {
-      tileMaterial.uniforms.uLayoutMode.value = layout === 'diagonal' ? 1 : 0;
+    if (tileMaterial && tileMaterial.uniforms && tileMaterial.uniforms.uUvRotation) {
+      tileMaterial.uniforms.uUvRotation.value = nextDeg * Math.PI / 180;
     }
-    ctx.UI.finalPatterns?.querySelectorAll('.patternTab').forEach(btn => {
-      btn.classList.toggle('patternTab--active', btn.dataset.layout === layout);
+    syncRotationUi(nextDeg);
+    return nextDeg;
+  }
+
+  function setLayout(layout) {
+    const safeLayout = 'straight';
+
+    ctx.state.layout = safeLayout;
+    if (ctx.UI.layoutSelect) ctx.UI.layoutSelect.value = safeLayout;
+    const tileMaterial = ctx.getTileMaterial();
+    if (tileMaterial && tileMaterial.uniforms && tileMaterial.uniforms.uLayoutMode) {
+      tileMaterial.uniforms.uLayoutMode.value = 0;
+    }
+    ctx.UI.finalPatterns?.querySelectorAll('.patternTab[data-layout]').forEach(btn => {
+      btn.classList.toggle('patternTab--active', btn.dataset.layout === safeLayout);
     });
     ctx.UI.layoutRow?.querySelectorAll('.layoutCard').forEach(btn => {
-      btn.classList.toggle('layoutCard--active', btn.dataset.layout === layout);
+      btn.classList.toggle('layoutCard--active', btn.dataset.layout === safeLayout);
     });
+    return safeLayout;
   }
 
   function crossfadeFillMeshToMaterial(newMat, durationMs = 140) {
@@ -403,6 +436,7 @@ export function createSelectionHelpers(ctx) {
     ctx.applyMapToTileMaterial(mat, 'height', null);
 
     setLayout(ctx.state.layout);
+    setTextureRotationDeg(ctx.state.textureRotationDeg, { preserveFullCircle: true });
 
     if (ctx.state.phase === 'ar_final') {
       ctx.crossfadeAlbedoOnMaterial(mat, albedoTex, 140);
@@ -597,8 +631,11 @@ export function createSelectionHelpers(ctx) {
     selectTileSeq += 1;
   }
 
+  syncRotationUi(ctx.state.textureRotationDeg || 0);
+
   return {
     setLayout,
+    setTextureRotationDeg,
     selectTile,
     schedulePrefetchAdjacentTiles,
     crossfadeFillMeshToMaterial,

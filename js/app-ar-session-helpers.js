@@ -54,6 +54,23 @@ export function createArSessionHelpers(ctx = {}) {
     state.floorY = 0;
     state.floorSamples = [];
     state.floorYEstimate = null;
+    state.textureRotationDeg = 0;
+    state.rotationPanelOpen = false;
+
+    try {
+      const btnTextureRotate = document.getElementById('btnTextureRotate');
+      if (btnTextureRotate) {
+        btnTextureRotate.textContent = 'Вращение 0°';
+        btnTextureRotate.classList.remove('active');
+        btnTextureRotate.setAttribute('aria-expanded', 'false');
+      }
+      const rotationPanel = document.getElementById('rotationPanel');
+      if (rotationPanel) rotationPanel.hidden = true;
+      const rotationValue = document.getElementById('rotationValue');
+      if (rotationValue) rotationValue.textContent = '0°';
+      const rotationSlider = document.getElementById('rotationSlider');
+      if (rotationSlider) rotationSlider.value = '0';
+    } catch (_) {}
 
     if (ctx.reticle) ctx.reticle.visible = false;
     if (ctx.scanGrid) ctx.scanGrid.visible = false;

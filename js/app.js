@@ -160,7 +160,14 @@ const UI = {
   btnDone: document.getElementById('btnDone'),
   finalBar: document.getElementById('finalBar'),
   finalPatterns: document.getElementById('finalPatterns'),
-  btnLayoutCycle: document.getElementById('btnLayoutCycle'),
+  btnTextureRotate: document.getElementById('btnTextureRotate'),
+  rotationPanel: document.getElementById('rotationPanel'),
+  rotationHint: document.getElementById('rotationHint'),
+  btnRotationReset: document.getElementById('btnRotationReset'),
+  btnRotateMinus: document.getElementById('btnRotateMinus'),
+  btnRotatePlus: document.getElementById('btnRotatePlus'),
+  rotationValue: document.getElementById('rotationValue'),
+  rotationSlider: document.getElementById('rotationSlider'),
   btnShapePicker: document.getElementById('btnShapePicker'),
   shapePickerBackdrop: document.getElementById('shapePickerBackdrop'),
   shapePickerPanel: document.getElementById('shapePickerPanel'),
@@ -361,13 +368,11 @@ const state = {
   selectedTile: null,
   shapes: [],
   selectedShape: null,
-  layout: 'straight', // straight | diagonal
+  layout: 'straight', // compatibility mode: layout switching is disabled in favor of texture rotation
+  textureRotationDeg: 0,
+  rotationPanelOpen: false,
   _paletteCache: new Map(),
   _paletteDefaultsCache: new Map(),
-
-  // AR UI: layout cycle button ("Смена укладки")
-  layoutCycleInitial: 'straight',
-  layoutCycleStep: 0, // 0 -> next straight, 1 -> next diagonal, 2 -> back to initial
 
   // internal guards
   _restartingAR: false,
@@ -607,7 +612,7 @@ const selectionHelpers = createSelectionHelpers({
   touchMaterialTextures,
   trimTextureCaches,
 });
-const { setLayout, selectTile, disposeSelectionRuntime } = selectionHelpers;
+const { setLayout, setTextureRotationDeg, selectTile, disposeSelectionRuntime } = selectionHelpers;
 
 const arSessionHelpers = createArSessionHelpers({
   state,
@@ -1437,6 +1442,7 @@ function resetAll(keepFloor = false) {
     // Hide the main bottom menu while scanning / placing points so it doesn't overlap the "+" button.
     // Show it again after the contour is closed and the fill is visible.
     const hideMainMenu = (state.phase === 'ar_scan') || (state.phase === 'ar_draw') || (state.phase === 'ar_cut');
+    if (hideMainMenu) setRotationPanelOpen(false);
     show(UI.finalBar, !hideMainMenu);
     show(UI.finalColors, false);
   } else {
@@ -2159,11 +2165,42 @@ UI.btnArOk?.addEventListener('click', () => {
   else closeContour();
 });
 
+function normalizeTextureRotationDeg(value, preserveFullCircle = false) {
+  let deg = Number(value);
+  if (!Number.isFinite(deg)) deg = 0;
+  if (preserveFullCircle && Math.abs(deg - 360) < 0.0001) return 360;
+  deg = deg % 360;
+  if (deg < 0) deg += 360;
+  if (Math.abs(deg) < 0.0001) deg = 0;
+  return deg;
+}
+
+function setRotationPanelOpen(open) {
+  const next = !!open && state.phase === 'ar_final';
+  state.rotationPanelOpen = next;
+  if (UI.rotationPanel) show(UI.rotationPanel, next);
+  if (UI.btnTextureRotate) {
+    UI.btnTextureRotate.classList.toggle('active', next);
+    UI.btnTextureRotate.setAttribute('aria-expanded', next ? 'true' : 'false');
+  }
+  updateArBottomStripVar(UI);
+}
+
+function applyTextureRotationDeg(value, opts = {}) {
+  return setTextureRotationDeg(normalizeTextureRotationDeg(value, !!opts.preserveFullCircle), { preserveFullCircle: !!opts.preserveFullCircle });
+}
+
+function stepTextureRotation(deltaDeg) {
+  const base = normalizeTextureRotationDeg(state.textureRotationDeg);
+  return applyTextureRotationDeg(base + deltaDeg);
+}
+
 UI.btnEditShape?.addEventListener('click', () => {
   // return to drawing mode, keep points
   show(UI.finalColors, false);
   // Do not re-show the initial contour hint: the user is already in the flow.
   show(UI.contourHint, false);
+  setRotationPanelOpen(false);
   // While placing points, hide the main bottom menu so it doesn't overlap the "+" button.
   show(UI.finalBar, false);
   if (typeof updateArBottomStripVar === 'function') updateArBottomStripVar(UI);
@@ -2194,6 +2231,7 @@ UI.btnCutout?.addEventListener('click', () => {
   // cutout mode
   show(UI.finalColors, false);
   show(UI.contourHint, false);
+  setRotationPanelOpen(false);
   // While placing points, hide the main bottom menu so it doesn't overlap the "+" button.
   show(UI.finalBar, false);
   if (typeof updateArBottomStripVar === 'function') updateArBottomStripVar(UI);
@@ -2219,17 +2257,47 @@ UI.btnCutout?.addEventListener('click', () => {
 });
 
 function ensureArFinalControlsBound() {
-  if (UI.btnLayoutCycle && !UI.btnLayoutCycle.__arBound) {
-    UI.btnLayoutCycle.addEventListener('click', () => {
-      const nextLayout = state.layout === 'diagonal' ? 'straight' : 'diagonal';
-      setLayout(nextLayout);
+  if (UI.btnTextureRotate && !UI.btnTextureRotate.__arBound) {
+    UI.btnTextureRotate.addEventListener('click', () => {
+      const shouldOpen = UI.rotationPanel ? UI.rotationPanel.hidden : !state.rotationPanelOpen;
+      setRotationPanelOpen(shouldOpen);
     });
-    UI.btnLayoutCycle.__arBound = true;
+    UI.btnTextureRotate.__arBound = true;
+  }
+
+  if (UI.btnRotateMinus && !UI.btnRotateMinus.__arBound) {
+    UI.btnRotateMinus.addEventListener('click', () => {
+      stepTextureRotation(-15);
+    });
+    UI.btnRotateMinus.__arBound = true;
+  }
+
+  if (UI.btnRotatePlus && !UI.btnRotatePlus.__arBound) {
+    UI.btnRotatePlus.addEventListener('click', () => {
+      stepTextureRotation(15);
+    });
+    UI.btnRotatePlus.__arBound = true;
+  }
+
+  if (UI.btnRotationReset && !UI.btnRotationReset.__arBound) {
+    UI.btnRotationReset.addEventListener('click', () => {
+      applyTextureRotationDeg(0);
+    });
+    UI.btnRotationReset.__arBound = true;
+  }
+
+  if (UI.rotationSlider && !UI.rotationSlider.__arBound) {
+    UI.rotationSlider.addEventListener('input', (ev) => {
+      const rawValue = ev && ev.target ? ev.target.value : UI.rotationSlider.value;
+      applyTextureRotationDeg(rawValue, { preserveFullCircle: Number(rawValue) === 360 });
+    });
+    UI.rotationSlider.__arBound = true;
   }
 
   if (UI.btnShapePicker && !UI.btnShapePicker.__arBound) {
     UI.btnShapePicker.addEventListener('click', () => {
       if (!UI.shapePickerPanel || !UI.shapePickerList) return;
+      setRotationPanelOpen(false);
       if (!UI.shapePickerPanel.hasAttribute('data-built')) {
         try {
           buildShapePickerList({
@@ -2258,6 +2326,7 @@ function ensureArFinalControlsBound() {
 
 UI.btnDone?.addEventListener('click', async () => {
   state.phase = 'ar_final';
+  setRotationPanelOpen(false);
   show(UI.contourHint, false);
   show(UI.postCloseBar, false);
   show(UI.arBottomCenter, false);
@@ -2281,6 +2350,7 @@ UI.btnDone?.addEventListener('click', async () => {
 
   ensureArFinalControlsBound();
   setLayout(state.layout);
+  applyTextureRotationDeg(state.textureRotationDeg, { preserveFullCircle: state.textureRotationDeg === 360 });
 
   renderColorRow(UI.finalColors, (Array.isArray(state.currentAllowedTiles) && state.currentAllowedTiles.length ? state.currentAllowedTiles : state.tiles.slice(0, 8)), {
     onTileClick: async (tile) => {
@@ -2347,8 +2417,9 @@ async function init() {
   // AR title
   if (UI.arProductTitle && state.selectedTile) UI.arProductTitle.textContent = state.selectedTile.name;
 
-  // set initial layout
+  // set initial layout and neutral texture rotation
   setLayout('straight');
+  applyTextureRotationDeg(0);
 
   // Apply AR entry gating UI (safe on all devices)
   updateArEntryUI(UI);

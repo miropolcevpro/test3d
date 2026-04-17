@@ -163,7 +163,7 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   display:grid;
   grid-template-columns:repeat(3, minmax(0, 1fr));
   gap:12px;
-  padding-bottom:24px;
+  padding-bottom:96px;
 }
 .catalogCard{
   position:relative;
@@ -204,6 +204,28 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   text-align:center;
   line-height:1.45;
 }
+
+.bottomNav{
+  position:fixed;left:0;right:0;bottom:0;
+  padding:10px 10px calc(10px + var(--safe-bottom));
+  display:flex;gap:10px;justify-content:space-around;
+  background:rgba(245,247,250,0.95);
+  color:#0a0c10;
+}
+.navItem{
+  flex:1;
+  border:0;
+  background:transparent;
+  padding:10px 8px;
+  border-radius:16px;
+  display:flex;align-items:center;justify-content:center;gap:10px;
+  font-size:15px;
+  color:#0a0c10;
+  text-decoration:none;
+}
+.navItem--active{background:#e6f2ff;}
+.navIcon{font-size:18px;}
+.navLabel{font-weight:600;}
 
 /* Detail */
 .detailTop{
@@ -492,6 +514,66 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   font-weight:900;
 }
 .patternTab.active{background:rgba(90,167,255,0.92);}
+.rotationPanel{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  width:100%;
+  padding:12px;
+  border-radius:18px;
+  background:rgba(255,255,255,0.10);
+  border:1px solid rgba(255,255,255,0.14);
+  box-shadow:0 10px 28px rgba(0,0,0,0.18);
+}
+.rotationPanelHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+}
+.rotationPanelTitle{
+  color:#fff;
+  font-weight:900;
+  letter-spacing:0.2px;
+}
+.rotationResetBtn,
+.rotationStepBtn{
+  border:0;
+  border-radius:12px;
+  background:rgba(255,255,255,0.14);
+  color:#fff;
+  font-weight:900;
+}
+.rotationResetBtn{
+  padding:8px 10px;
+  white-space:nowrap;
+}
+.rotationHint{
+  color:rgba(255,255,255,0.78);
+  font-size:12px;
+  line-height:1.35;
+}
+.rotationStepRow{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);
+  gap:10px;
+  align-items:center;
+}
+.rotationStepBtn{
+  min-height:42px;
+  padding:10px 12px;
+}
+.rotationValue{
+  min-width:64px;
+  text-align:center;
+  color:#fff;
+  font-weight:1000;
+  font-size:18px;
+}
+.rotationSlider{
+  width:100%;
+  margin:2px 0 0;
+}
 .finalColors{display:flex;gap:10px;overflow:auto;padding-bottom:2px;}
 .finalColors .swatch{flex:0 0 56px;width:56px;height:56px;border-radius:14px;border-color:rgba(255,255,255,0.20);}
 
@@ -509,7 +591,7 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
 }
 
 @media (min-width: 820px){
-  .catalogCards{max-width:780px;margin:0 auto;padding-bottom:24px;}
+  .catalogCards{max-width:780px;margin:0 auto;padding-bottom:120px;}
   .detailBody{max-width:520px;margin:0 auto;}
 }
 
