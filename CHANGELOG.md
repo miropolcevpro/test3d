@@ -1,3 +1,9 @@
+## 2026-04-17 — f24n
+- Increased the AR bottom texture preview cards by ~15% for easier selection without changing the unified rail logic.
+- Kept the thinner form dividers intact while enlarging the swatch preview size from 56px to 64px.
+- Matched the trailing rail hint height to the new card size so the AR bottom rail stays visually aligned.
+- Release token: `20260417-f24n`
+
 ## 2026-04-17 — f24m
 - AR unified texture rail: made shape separators much lighter and thinner.
 - Reworked section labels from a tall top stripe into a compact inline divider with a subtle hairline + small form name.
