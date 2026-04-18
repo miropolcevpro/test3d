@@ -1,5 +1,5 @@
 // BUILD: v28 2026-01-16f (runtime-config)
-const __BUILD_ID__ = "20260418-f24av";
+const __BUILD_ID__ = "20260418-f24aw";
 console.log("[Admin] build", __BUILD_ID__);
 /* Admin (Step 3 start) — shapes list + shape details (read-only palette), router scaffold */
 (async () => {
@@ -294,6 +294,7 @@ function pickMediaUrl(candidates, opts) {
   const elTelemetryErrorReportCard = $('telemetryErrorReportCard');
   const elTelemetryErrorReportStatus = $('telemetryErrorReportStatus');
   const elTelemetryErrorReportRefreshBtn = $('telemetryErrorReportRefreshBtn');
+  const elTelemetryErrorReportClearBtn = $('telemetryErrorReportClearBtn');
   const elTelemetryErrorReportCsvBtn = $('telemetryErrorReportCsvBtn');
   const elTelemetryErrorReportJsonBtn = $('telemetryErrorReportJsonBtn');
   const elTelemetryErrorSeveritySelect = $('telemetryErrorSeveritySelect');
@@ -1300,6 +1301,7 @@ function setTelemetryStatus(message, kind) {
     const source = inferTelemetryErrorSource(item);
     return {
       raw: item,
+      id: String(item && item.id || ''),
       technicalKey: name || 'error',
       title: telemetryEventLabel(name || 'error'),
       severity,
@@ -1345,6 +1347,24 @@ function setTelemetryStatus(message, kind) {
     if (!elTelemetryErrorReportStatus) return;
     elTelemetryErrorReportStatus.textContent = String(message || '').trim();
     elTelemetryErrorReportStatus.className = 'status' + (kind ? (' ' + kind) : '');
+  }
+
+
+  function updateTelemetryErrorReportActionState(state) {
+    if (!elTelemetryErrorReportClearBtn) return;
+    const reportState = state || telemetryErrorReportState || null;
+    const visibleItems = reportState && Array.isArray(reportState.visibleItems) ? reportState.visibleItems : [];
+    const hasItems = visibleItems.some((item) => item && item.id);
+    const isRemoteFailed = reportState && reportState.sourceMode === 'remote_failed';
+    const canClearLocal = !!(telemetry && telemetry.clearItemsByIds);
+    const canClearRemote = !!(telemetry && telemetry.clearRemoteErrorsDetailed);
+    const canClear = !isRemoteFailed && hasItems && ((reportState && reportState.sourceMode === 'remote' && canClearRemote) || (reportState && reportState.sourceMode === 'local' && canClearLocal));
+    elTelemetryErrorReportClearBtn.disabled = !canClear;
+    if (isRemoteFailed) elTelemetryErrorReportClearBtn.title = 'Очистка недоступна, пока детальный серверный отчёт не загружен.';
+    else if (!hasItems) elTelemetryErrorReportClearBtn.title = 'В текущем отчёте нет ошибок для очистки.';
+    else if (reportState && reportState.sourceMode === 'remote') elTelemetryErrorReportClearBtn.title = 'Очистить текущие ошибки из серверного отчёта.';
+    else if (reportState && reportState.sourceMode === 'local') elTelemetryErrorReportClearBtn.title = 'Очистить текущие ошибки этого браузера.';
+    else elTelemetryErrorReportClearBtn.title = 'Очистка недоступна.';
   }
 
   function normalizeTelemetryErrorCountMap(list, allowedKeys) {
@@ -1473,6 +1493,7 @@ function setTelemetryStatus(message, kind) {
     if (elTelemetryErrorReportSummary) {
       elTelemetryErrorReportSummary.innerHTML = buildTelemetryErrorSummaryCards(state);
     }
+    updateTelemetryErrorReportActionState(state);
     if (elTelemetryErrorReportList) {
       const header = [];
       if (state.truncated) header.push('<div class="hint mtSm">Показана ограниченная выборка последних ошибок. Для стабильности интерфейс показывает последние записи, а итоговые счётчики строятся по полному серверному скану выбранного периода.</div>');
@@ -1657,6 +1678,74 @@ function setTelemetryStatus(message, kind) {
         props: item.details
       }))
     });
+  }
+
+  async function clearTelemetryErrorReportCurrent() {
+    const state = telemetryErrorReportState;
+    if (!state) {
+      setTelemetryErrorReportStatus('Сначала загрузите отчёт по ошибкам.', 'warn');
+      return;
+    }
+    if (state.sourceMode === 'remote_failed') {
+      setTelemetryErrorReportStatus('Очистка остановлена: детальный серверный отчёт сейчас недоступен.', 'err');
+      return;
+    }
+    const visibleItems = (Array.isArray(state.visibleItems) ? state.visibleItems : []).filter((item) => item && item.id);
+    if (!visibleItems.length) {
+      setTelemetryErrorReportStatus('В текущем отчёте нет ошибок для очистки.', 'warn');
+      return;
+    }
+    const scopeLabel = state.sourceMode === 'remote' ? 'серверного отчёта' : 'журнала этого браузера';
+    const confirmed = window.confirm(`Очистить текущие ошибки из ${scopeLabel}? Будет скрыто ${visibleItems.length} записей по текущим фильтрам.`);
+    if (!confirmed) return;
+
+    telemetryTrack('admin_error_report_clear_click', Object.assign({}, getTelemetryFilters(), getTelemetryErrorReportFilters(), {
+      sourceMode: state.sourceMode,
+      visibleCount: visibleItems.length
+    }));
+
+    setTelemetryErrorReportStatus('Очищаем текущие ошибки…', '');
+
+    if (state.sourceMode === 'remote') {
+      const payload = {
+        scope: {
+          sourceLabel: state.sourceLabel,
+          baseFilters: state.baseFilters,
+          reportFilters: state.uiFilters
+        },
+        items: visibleItems.map((item) => ({
+          id: item.id,
+          ts: item.ts,
+          name: item.technicalKey || ''
+        }))
+      };
+      const result = telemetry && telemetry.clearRemoteErrorsDetailed ? await telemetry.clearRemoteErrorsDetailed(payload) : { ok: false, message: 'Telemetry clear endpoint is not configured' };
+      if (!result || !result.ok) {
+        setTelemetryErrorReportStatus(`Не удалось очистить текущие ошибки: ${result && result.message ? result.message : 'неизвестная ошибка'}.`, 'err');
+        return;
+      }
+      await renderTelemetryPanel();
+      await loadTelemetryErrorReportData();
+      const cleared = Number(result.data && result.data.cleared || 0) || visibleItems.length;
+      setTelemetryErrorReportStatus(`Очищено ${cleared} ошибок из текущего серверного отчёта.`, 'ok');
+      setTelemetryStatus('Серверный журнал ошибок обновлён: текущая выборка очищена.', 'ok');
+      return;
+    }
+
+    if (state.sourceMode === 'local') {
+      const result = telemetry && telemetry.clearItemsByIds ? telemetry.clearItemsByIds(visibleItems.map((item) => item.id)) : null;
+      if (!result || !result.ok) {
+        setTelemetryErrorReportStatus('Не удалось очистить текущие ошибки этого браузера.', 'err');
+        return;
+      }
+      await renderTelemetryPanel();
+      await loadTelemetryErrorReportData();
+      setTelemetryErrorReportStatus(`Очищено ${Number(result.cleared || 0)} ошибок этого браузера.`, 'ok');
+      setTelemetryStatus('Журнал ошибок этого браузера очищен по текущей выборке.', 'ok');
+      return;
+    }
+
+    setTelemetryErrorReportStatus('Очистка для текущего источника данных не поддерживается.', 'warn');
   }
 
   function syncTelemetryModalBodyState() {
@@ -3970,6 +4059,10 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
       const payload = telemetry && telemetry.exportJson ? telemetry.exportJson() : {};
       downloadJson('webar_telemetry_export.json', payload);
       renderTelemetryPanel();
+    });
+
+    elTelemetryErrorReportClearBtn && elTelemetryErrorReportClearBtn.addEventListener('click', async () => {
+      await clearTelemetryErrorReportCurrent();
     });
 
     elTelemetryErrorReportCsvBtn && elTelemetryErrorReportCsvBtn.addEventListener('click', async () => {

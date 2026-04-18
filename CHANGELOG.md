@@ -1,7 +1,8 @@
-## 20260418-f24av — admin error report getprop hotfix
-- Release token: `20260418-f24av`
-- Fixed admin-side `ReferenceError: getProp is not defined` in the error report classifier, which prevented the detailed error report modal from rendering.
-- Added the missing `getProp()` helper to `admin/admin.js` without changing telemetry ingestion, backend report flow, or AR logic.
+## 20260418-f24aw — admin error report clear current errors
+- Release token: `20260418-f24aw`
+- Added a dedicated `Очистить ошибки` action next to export in the admin error report modal.
+- Implemented soft server-side clearing for the current visible error selection: cleared error IDs are hidden from summary and detailed error reports without rewriting raw telemetry batches.
+- Added safe local-browser clearing fallback for local-only error reports and kept the rest of analytics, AR logic and telemetry ingestion unchanged.
 
 ## 20260418-f24as — admin error report modal with classification and export
 - Release token: `20260418-f24as`

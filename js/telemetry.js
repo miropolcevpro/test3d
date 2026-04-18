@@ -853,6 +853,51 @@
     });
   }
 
+  function postRemoteResult(url, payload) {
+    if (!url) {
+      return Promise.resolve({ ok: false, status: 0, data: null, url: '', message: 'Telemetry endpoint is not configured', code: 'no_endpoint' });
+    }
+    return fetch(url, {
+      method: 'POST',
+      cache: 'no-store',
+      credentials: 'omit',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload || {})
+    }).then(function (res) {
+      if (!res) return { ok: false, status: 0, data: null, url: url, message: 'Empty response from telemetry endpoint', code: 'empty_response' };
+      return res.text().then(function (bodyText) {
+        var data = null;
+        if (bodyText) {
+          try {
+            data = JSON.parse(bodyText);
+          } catch (_) {
+            data = null;
+          }
+        }
+        if (res.ok) {
+          return { ok: true, status: res.status, data: data, url: url, message: '', code: '' };
+        }
+        var message = data && (data.message || data.error) ? String(data.message || data.error) : ('HTTP ' + String(res.status || 0));
+        var code = data && (data.code || data.errorCode) ? String(data.code || data.errorCode) : 'http_error';
+        return { ok: false, status: res.status, data: data, url: url, message: message, code: code };
+      }).catch(function () {
+        return { ok: false, status: res.status || 0, data: null, url: url, message: 'Failed to read telemetry response body', code: 'read_failed' };
+      });
+    }).catch(function (err) {
+      return {
+        ok: false,
+        status: 0,
+        data: null,
+        url: url,
+        message: err && err.message ? String(err.message) : 'Network request failed',
+        code: err && (err.name || err.code) ? String(err.name || err.code) : 'network_error'
+      };
+    });
+  }
+
   function getRemoteSummary(params) {
     return fetchRemoteJson(buildRemoteUrl('summary', params || {}));
   }
@@ -873,6 +918,10 @@
     return fetchRemoteJson(buildRemoteUrl('health', {}));
   }
 
+  function clearRemoteErrorsDetailed(payload) {
+    return postRemoteResult(buildRemoteUrl('', {}), Object.assign({ action: 'clear_errors' }, payload || {}));
+  }
+
   function getSyncStatus() {
     var history = readStorage(STORAGE_HISTORY_KEY, []);
     var pending = readStorage(STORAGE_PENDING_KEY, []);
@@ -891,6 +940,31 @@
       lastFlushResult: lastFlushResult || '',
       endpointDisabledForSession: !!endpointDisabledForSession
     };
+  }
+
+  function clearItemsByIds(ids) {
+    var list = Array.isArray(ids) ? ids : [];
+    var idSet = Object.create(null);
+    list.forEach(function (id) {
+      var key = safeString(id);
+      if (!key) return;
+      idSet[key] = true;
+    });
+    var idCount = Object.keys(idSet).length;
+    if (!idCount) return { ok: false, cleared: 0, historyCleared: 0, pendingCleared: 0 };
+    var history = readStorage(STORAGE_HISTORY_KEY, []);
+    var pending = readStorage(STORAGE_PENDING_KEY, []);
+    var nextHistory = (Array.isArray(history) ? history : []).filter(function (item) {
+      return !idSet[safeString(item && item.id)];
+    });
+    var nextPending = (Array.isArray(pending) ? pending : []).filter(function (item) {
+      return !idSet[safeString(item && item.id)];
+    });
+    var historyCleared = Math.max(0, history.length - nextHistory.length);
+    var pendingCleared = Math.max(0, pending.length - nextPending.length);
+    writeStorage(STORAGE_HISTORY_KEY, nextHistory);
+    writeStorage(STORAGE_PENDING_KEY, nextPending);
+    return { ok: true, cleared: historyCleared + pendingCleared, historyCleared: historyCleared, pendingCleared: pendingCleared };
   }
 
   function clearAll() {
@@ -951,7 +1025,9 @@
     getRemoteErrors: getRemoteErrors,
     getRemoteErrorsDetailed: getRemoteErrorsDetailed,
     getRemoteHealth: getRemoteHealth,
+    clearRemoteErrorsDetailed: clearRemoteErrorsDetailed,
     getSyncStatus: getSyncStatus,
+    clearItemsByIds: clearItemsByIds,
     clearAll: clearAll,
     exportJson: exportJson,
     getSessionId: getSessionId,
