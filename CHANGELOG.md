@@ -1,3 +1,10 @@
+## 20260418-f24aj — admin dashboard visual refresh
+- Release token: `20260418-f24aj`
+- полностью переработан визуальный стиль блока «Аналитика и ошибки» в админке
+- повышен контраст текста, метрик и панелей для читаемости на десктопе и мобильных экранах
+- улучшен autolayout dashboard: фильтры, KPI, аудитория, воронка, устройства и список событий адаптируются под планшеты и телефоны
+- обновлены кнопки действий, карточки метрик, списки событий и code/JSON-блоки в более чистом современном light-стиле
+
 ## 2026-04-18 — Patch f24ai: admin login + telemetry hotfix
 - Release token: `20260418-f24ai`
 - Restored missing admin helper functions `getToken`, `setToken`, and `apiFetch` in `admin/admin.js`, fixing broken admin initialization and login after telemetry rollout.
