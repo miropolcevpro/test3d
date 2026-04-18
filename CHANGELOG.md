@@ -1,3 +1,9 @@
+## Fix24t — AR shape picker auto-scrolls unified texture rail
+- When a user selects a shape through `Выбрать форму` in AR, the bottom unified texture rail now auto-scrolls to that shape's texture section.
+- Added a safe pending-scroll retry so the rail lands on the chosen form even if grouped textures finish rebuilding a moment later.
+- Preserved the existing unified rail logic, AR pipeline, and current texture/form switching behavior.
+- Release token: `20260418-f24t`
+
 ## Fix24s — detail CTA text fit + site icon center
 - Increased the primary detail CTA share so `Связь с менеджером` fits fully inside the button.
 - Reduced CTA label size slightly for safer fit on narrow screens.

@@ -783,6 +783,48 @@ async function handleArTextureRailTileClick(tile) {
   await selectTile(tile);
 }
 
+function scrollArTextureRailToShape(shapeId, opts = {}) {
+  if (!UI.finalColors || !shapeId) return false;
+  const shapeIdStr = String(shapeId);
+  const sections = Array.from(UI.finalColors.querySelectorAll('.finalColorSection[data-shape-id]'));
+  const target = sections.find((section) => section && section.dataset && String(section.dataset.shapeId) === shapeIdStr);
+  if (!target) return false;
+
+  const railRect = UI.finalColors.getBoundingClientRect();
+  const targetRect = target.getBoundingClientRect();
+  const offset = targetRect.left - railRect.left;
+  const padding = (typeof opts.padding === 'number') ? opts.padding : 8;
+  const nextLeft = Math.max(0, UI.finalColors.scrollLeft + offset - padding);
+  const behavior = opts.behavior || 'smooth';
+
+  try {
+    UI.finalColors.scrollTo({ left: nextLeft, behavior });
+  } catch (_) {
+    UI.finalColors.scrollLeft = nextLeft;
+  }
+  return true;
+}
+
+function requestArTextureRailScroll(shapeId, opts = {}) {
+  const shapeIdStr = shapeId ? String(shapeId) : '';
+  state.pendingArTextureRailScrollShapeId = shapeIdStr;
+  if (!shapeIdStr) return;
+  const behavior = opts.behavior || 'smooth';
+  const padding = (typeof opts.padding === 'number') ? opts.padding : 8;
+
+  const attempt = () => {
+    if (state.pendingArTextureRailScrollShapeId !== shapeIdStr) return;
+    const ok = scrollArTextureRailToShape(shapeIdStr, { behavior, padding });
+    if (ok) state.pendingArTextureRailScrollShapeId = '';
+  };
+
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(() => requestAnimationFrame(attempt));
+  } else {
+    setTimeout(attempt, 0);
+  }
+}
+
 function renderArTextureRail() {
   if (!UI.finalColors) return;
   const groups = (Array.isArray(state.arTextureGroups) && state.arTextureGroups.length)
@@ -799,6 +841,10 @@ function renderArTextureRail() {
     trailingHint,
   });
   updateArBottomStripVar(UI);
+
+  if (state.pendingArTextureRailScrollShapeId) {
+    requestArTextureRailScroll(state.pendingArTextureRailScrollShapeId, { behavior: 'smooth' });
+  }
 }
 
 async function ensureArTextureGroupsBuilt(opts = {}) {
@@ -2582,19 +2628,31 @@ init().catch(err => {
 async function handleShapePickerSelection(shapeId) {
   setShapePickerOpen(false, { UI, updateArTopStripVar, updateArBottomStripVar });
 
-  if (state.selectedShape && state.selectedShape.id === shapeId) return;
+  const targetShapeId = shapeId != null ? String(shapeId) : '';
+  if (!targetShapeId) return;
+
+  if (state.xrSession && state.phase === 'ar_final') {
+    requestArTextureRailScroll(targetShapeId, { behavior: 'smooth' });
+  }
+
+  if (state.selectedShape && String(state.selectedShape.id) === targetShapeId) {
+    if (state.phase === 'ar_final') renderArTextureRail();
+    return;
+  }
 
   if (state.xrSession) {
     if (state._switchingShapeInAr) return;
     state._switchingShapeInAr = true;
     const prevTileId = state.selectedTile ? state.selectedTile.id : null;
     try {
-      const result = await openDetail(shapeId, { preserveScreen: true, keepCurrentTile: true });
+      const result = await openDetail(targetShapeId, { preserveScreen: true, keepCurrentTile: true });
       if (state.phase === 'ar_final') {
         show(UI.finalBar, true);
         show(UI.finalColors, true);
         renderArTextureRail();
-        ensureArTextureGroupsBuilt().catch((e) => {
+        ensureArTextureGroupsBuilt().then(() => {
+          requestArTextureRailScroll(targetShapeId, { behavior: 'smooth' });
+        }).catch((e) => {
           console.warn('AR texture rail refresh failed', e);
           renderArTextureRail();
         });
