@@ -1,3 +1,8 @@
+## 20260418-f24at — admin telemetry summary hotfix
+- Release token: `20260418-f24at`
+- Fixed missing telemetry collector dashboard helper functions (`extractVisitorId`, `extractDeviceType`, `pushSeriesBucket`, `formatPercentText`) that caused server `mode=summary` requests to fail with HTTP 500.
+- Preserved the new admin error report modal and export flow from `f24as` without changing telemetry ingestion or AR logic.
+
 ## 20260418-f24as — admin error report modal with classification and export
 - Release token: `20260418-f24as`
 - Карточка «Ошибок» в аналитике стала точкой входа в отдельный отчёт по ошибкам.
