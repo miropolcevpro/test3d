@@ -190,6 +190,21 @@ const UI = {
 
 // ------------------------
 
+function updateArTopInsetVar() {
+  try {
+    const root = document.documentElement;
+    if (!root) return;
+    const vv = window.visualViewport || null;
+    const ua = String((navigator && navigator.userAgent) || '');
+    const isAndroid = /Android/i.test(ua);
+    const isTablet = Math.max(window.innerWidth || 0, window.innerHeight || 0) >= 900;
+    const visualOffset = vv ? Math.max(0, Math.round(vv.offsetTop || 0)) : 0;
+    let fallback = isAndroid ? 34 : 16;
+    if (isTablet) fallback += 4;
+    root.style.setProperty('--ar-ui-top-extra', `${Math.max(visualOffset, fallback)}px`);
+  } catch (_) {}
+}
+
 // ------------------------
 // AR: texture load progress indicator (thin bar under pattern buttons)
 // ------------------------
@@ -2832,6 +2847,7 @@ UI.btnDone?.addEventListener('click', async () => {
 });
 
 window.addEventListener('resize', () => {
+  updateArTopInsetVar();
   if (state.xrSession) {
     updateArTopStripVar(UI);
     updateArBottomStripVar(UI);
@@ -2842,10 +2858,22 @@ window.addEventListener('resize', () => {
   camera.updateProjectionMatrix();
 });
 
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', () => {
+    updateArTopInsetVar();
+    if (state.xrSession) updateArTopStripVar(UI);
+  });
+  window.visualViewport.addEventListener('scroll', () => {
+    updateArTopInsetVar();
+    if (state.xrSession) updateArTopStripVar(UI);
+  });
+}
+
 // ------------------------
 // Main
 // ------------------------
 async function init() {
+  updateArTopInsetVar();
   let data = null;
   try {
     data = await loadTiles();

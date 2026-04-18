@@ -1,3 +1,9 @@
+## Fix24w — AR top title safe offset hotfix
+- Added a dynamic top safe offset for the AR title bar so the form/color label stays visible below Android browser chrome, status bars, notches, and tablet overlays.
+- Lowered the AR header and made the title/subtitle sizing calmer on narrow screens without changing the AR pipeline.
+- Anchored scan hint positioning to the actual AR header height to avoid overlaps after the safer top offset.
+- Release token: `20260418-f24w`
+
 ## Fix24v — AR snapshot UI safe-top + smaller logo
 - Moved the AR top title block lower and made it adaptive, so the form/color label no longer gets visually clipped on narrow Android screens and tablets during snapshot flow.
 - Replaced the single-line hard clamp with a responsive two-line title and safer subtitle sizing.

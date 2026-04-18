@@ -13,6 +13,7 @@
   --ar-bottom-strip: 84px;
   /* Reserved height for AR top strip (title + reset) */
   --ar-top-strip: 64px;
+  --ar-ui-top-extra: 0px;
 }
 *{box-sizing:border-box;}
 html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif;height:100%;}
@@ -367,35 +368,38 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
 /* AR */
 .arTop{
   position:absolute;left:0;right:0;top:0;
-  padding:calc(16px + var(--safe-top)) 12px 12px;
+  padding:calc(14px + var(--safe-top) + var(--ar-ui-top-extra)) 12px 12px;
   display:flex;align-items:flex-start;gap:10px;
-  min-height:calc(72px + var(--safe-top));
-  background:linear-gradient(to bottom, rgba(0,0,0,0.55), rgba(0,0,0,0));
+  min-height:calc(76px + var(--safe-top) + var(--ar-ui-top-extra));
+  background:linear-gradient(to bottom, rgba(0,0,0,0.58), rgba(0,0,0,0));
 }
-.arTopText{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:3px;padding-top:2px;}
+.arTopText{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:4px;padding-top:1px;}
 .arTitle{
   font-weight:900;
-  font-size:clamp(15px,4.2vw,18px);
-  line-height:1.12;
+  font-size:clamp(13px,3.6vw,17px);
+  line-height:1.18;
   white-space:normal;
-  overflow:hidden;
+  overflow:visible;
   display:-webkit-box;
   -webkit-box-orient:vertical;
   -webkit-line-clamp:2;
   word-break:break-word;
+  text-wrap:balance;
+  max-width:100%;
 }
 .arArea{
   font-weight:800;
-  font-size:clamp(11px,3.4vw,14px);
-  line-height:1.2;
-  color:rgba(255,255,255,0.80);
+  font-size:clamp(10px,3.1vw,13px);
+  line-height:1.24;
+  color:rgba(255,255,255,0.82);
   white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
+  max-width:100%;
 }
 
 .scanHint{
-  position:absolute;left:12px;right:12px;top:90px;
+  position:absolute;left:12px;right:12px;top:calc(var(--ar-top-strip) + 10px);
   padding:16px 16px;
   border-radius:22px;
   background:rgba(0,0,0,0.45);
@@ -1094,4 +1098,15 @@ to   { transform: scale(1.12); }
   #detailTechCard .convBtnSite{padding-right:31px;}
   #detailTechCard .convBtnSite .convIconCart{right:7px;top:50%;width:19px;height:21px;}
   #detailTechCard .convText{font-size:clamp(10px, 3.05vw, 12px);}
+}
+
+
+@media (max-width: 420px){
+  .arTop{
+    padding-left:10px;
+    padding-right:10px;
+    gap:8px;
+  }
+  .arTitle{font-size:13px;line-height:1.16;}
+  .arArea{font-size:10px;}
 }
