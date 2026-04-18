@@ -5,14 +5,15 @@
     bucketBaseUrl: 'https://storage.yandexcloud.net/webar3dtexture/',
     surfacePaletteBaseUrl: 'https://storage.yandexcloud.net/webar3dtexture/palettes/',
     paletteSettingsBaseUrl: 'https://storage.yandexcloud.net/webar3dtexture/palette_settings/',
-    adminApiBaseUrl: 'https://d5d1712p9mu7k3aurh9s.laqt4bj7.apigw.yandexcloud.net'
+    adminApiBaseUrl: 'https://d5d1712p9mu7k3aurh9s.laqt4bj7.apigw.yandexcloud.net',
+    telemetryEndpoint: ''
   });
 
   var SW_MESSAGES = Object.freeze({
     skipWaiting: 'SKIP_WAITING',
     getVersion: 'GET_VERSION',
     activated: 'SW_ACTIVATED',
-    version: '20260418-f24aa'
+    version: '20260418-f24ah'
   });
 
   function safeString(value) {
@@ -129,7 +130,7 @@
   if (!siteBasePath.endsWith('/')) siteBasePath += '/';
 
   var config = Object.freeze({
-    version: '20260418-f24aa',
+    version: '20260418-f24ah',
     site: Object.freeze({
       siteBaseUrl: siteBaseUrl,
       siteBasePath: siteBasePath,
@@ -138,7 +139,7 @@
       isSpecialUrl: isSpecialUrl
     }),
     sw: Object.freeze({
-      version: '20260418-f24aa',
+      version: '20260418-f24ah',
       scriptFilename: 'sw.js',
       messages: SW_MESSAGES
     }),
@@ -151,6 +152,12 @@
     },
     resolvePublicApiBaseUrl: function() {
       return trimTrailingSlashes(global.__API_BASE_URL__ || '') ? trimTrailingSlashes(global.__API_BASE_URL__) + '/' : '';
+    },
+    resolveTelemetryEndpoint: function() {
+      var direct = safeString(global.__TELEMETRY_ENDPOINT__ || DEFAULTS.telemetryEndpoint).trim();
+      if (direct) return direct;
+      var base = trimTrailingSlashes(resolveAdminApiBaseUrl());
+      return base ? (base + '/api/telemetry') : '';
     },
     resolveAdminApiBaseUrl: resolveAdminApiBaseUrl
   });

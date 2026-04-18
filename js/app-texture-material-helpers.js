@@ -73,6 +73,22 @@ const texLastUsedAt = new Map();
 const texUrlByUuid = new Map();
 
 
+function getTelemetryApi() {
+  try {
+    return (typeof globalThis !== 'undefined' && globalThis.__APP_TELEMETRY__) ? globalThis.__APP_TELEMETRY__ : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function telemetryTrackError(name, err, props = {}) {
+  try {
+    const api = getTelemetryApi();
+    if (api && typeof api.trackError === 'function') api.trackError(name, err, props);
+  } catch (_) {}
+}
+
+
 function canonTexKey(url) {
   try {
     if (!url) return '';
@@ -144,6 +160,8 @@ function loadTextureCached(url, opts = {}) {
   const priority = (opts && opts.priority) ? String(opts.priority) : 'normal';
   const silent = Boolean(opts && opts.silent);
   const kind = (opts && opts.kind) ? String(opts.kind) : '';
+  const suppressTelemetry = Boolean(opts && opts.suppressTelemetry);
+  const telemetryProps = (opts && opts.telemetryProps && typeof opts.telemetryProps === 'object') ? opts.telemetryProps : {};
   const p = runWithTexLoadLimit(async () => {
     const t0 = performance.now();
     const tex = await globalTexLoader.loadAsync(key);
@@ -241,6 +259,16 @@ async function loadTexSmartCached(url, label, preferredQuality, isStaleFn, opts 
     }
   }
   if ((preferredQuality === '2k') && !cacheGet(texBestQualityCache, qKey)) texBestQualityCache.set(qKey, '1k');
+  if (!suppressTelemetry) {
+    telemetryTrackError('texture_map_load_failed', new Error(`texture map load failed: ${kind || 'map'}`), {
+      kind: kind || 'map',
+      requestedUrl: String(url || ''),
+      preferredQuality: desiredQuality,
+      candidatesTried: candidates.length,
+      telemetrySource: 'loadTexSmartCached',
+      ...telemetryProps,
+    });
+  }
   return null;
 }
 
@@ -381,12 +409,23 @@ function withTimeout(promise, ms) {
 async function loadTileAlbedoWithFallback(tile, preferredQuality, isStaleFn, opts = {}) {
   const getTileAlbedoCandidates = (opts && typeof opts.getTileAlbedoCandidates === 'function') ? opts.getTileAlbedoCandidates : null;
   const candidates = getTileAlbedoCandidates ? getTileAlbedoCandidates(tile) : [];
+  const telemetryProps = (opts && opts.telemetryProps && typeof opts.telemetryProps === 'object') ? opts.telemetryProps : {};
   for (let i = 0; i < candidates.length; i += 1) {
     const candidateUrl = candidates[i];
-    const tex = await loadTexSmartCached(candidateUrl, 'albedo', preferredQuality, isStaleFn, opts);
+    const tex = await loadTexSmartCached(candidateUrl, 'albedo', preferredQuality, isStaleFn, { ...opts, suppressTelemetry: true });
     if (isStaleFn && isStaleFn()) return { tex: null, sourceUrl: '', usedFallback: false };
     if (tex) return { tex, sourceUrl: candidateUrl, usedFallback: i > 0 };
   }
+  telemetryTrackError('texture_map_load_failed', new Error('albedo candidates exhausted'), {
+    kind: 'albedo',
+    requestedUrl: String(candidates[0] || ''),
+    preferredQuality: String(preferredQuality || ''),
+    candidatesTried: candidates.length,
+    tileId: tile && tile.id ? String(tile.id) : '',
+    shapeId: tile && tile.shapeId ? String(tile.shapeId) : '',
+    telemetrySource: 'loadTileAlbedoWithFallback',
+    ...telemetryProps,
+  });
   return { tex: null, sourceUrl: '', usedFallback: false };
 }
 

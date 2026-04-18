@@ -7,6 +7,22 @@ function defaultWarnOnce(key, ...args) {
   console.warn(...args);
 }
 
+
+function getTelemetryApi() {
+  try {
+    return (typeof globalThis !== 'undefined' && globalThis.__APP_TELEMETRY__) ? globalThis.__APP_TELEMETRY__ : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function telemetryTrackError(name, err, props = {}) {
+  try {
+    const api = getTelemetryApi();
+    if (api && typeof api.trackError === 'function') api.trackError(name, err, props);
+  } catch (_) {}
+}
+
 function getSiteEnv() {
   return (typeof window !== 'undefined' && window.__SITE_ENV__) ? window.__SITE_ENV__ : null;
 }
@@ -105,6 +121,12 @@ export async function loadSurfacePalette(url, opts = {}) {
       : 'Используем встроенные плитки формы.';
     warnOnce(`palette:${url}:${err?.resourceKind || 'unknown'}:${err?.status || 0}`,
       '[surfaces] ' + formatResourceError(err, suffix));
+    telemetryTrackError(err && err.resourceKind === 'json' ? 'palette_parse_failed' : 'palette_load_failed', err, {
+      resource: String(url || ''),
+      scope: 'surface_palette',
+      status: Number(err && err.status || 0) || 0,
+      resourceKind: err && err.resourceKind ? String(err.resourceKind) : 'unknown',
+    });
     if (cache && isMissingResourceError(err)) {
       cache.set(cacheKey, null);
     }
@@ -144,6 +166,13 @@ export async function loadPaletteDefaultsForShape(shapeId, opts = {}) {
       warnOnce(`palette-defaults:${shapeId}:${err?.resourceKind || 'unknown'}:${err?.status || 0}`,
         '[surfaces] ' + formatResourceError(err, suffix));
     }
+    telemetryTrackError(err && err.resourceKind === 'json' ? 'palette_parse_failed' : 'palette_load_failed', err, {
+      resource: String(url || ''),
+      scope: 'palette_defaults',
+      shapeId: String(shapeId || ''),
+      status: Number(err && err.status || 0) || 0,
+      resourceKind: err && err.resourceKind ? String(err.resourceKind) : 'unknown',
+    });
     if (cache && isMissingResourceError(err)) {
       cache.set(cacheKey, null);
     }

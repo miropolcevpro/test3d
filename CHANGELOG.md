@@ -1,16 +1,66 @@
-## 2026-04-18 — Patch f24aa: AR admin calibration full visual params + wider scale range
-- Expanded AR calibration `uvScale` range to a much wider admin-safe amplitude and synchronized the per-texture admin modal range with the new values.
-- Added full admin AR calibration controls for per-texture `exposureMult`, `contrast`, `saturation`, `roughnessMult`, `specStrength`, `normalScale`, and `bumpScale`, all with live apply and autosave back to the palette.
-- Fixed calibration autosave robustness by snapshotting the current shape/texture and values at schedule time, so quick switching between textures cannot save to the wrong palette item.
-- Added shader-side support for live contrast and saturation so AR calibration now visually reflects the same palette parameters that are available in the admin texture settings.
-- Release token: `20260418-f24aa`
+## 2026-04-18 — Patch f24ah: audience metrics, repeat visits, quarter/year analytics
+- Release token: `20260418-f24ah`
+- Analytics dashboard now shows unique visitors, sessions, repeat visits from the same device/browser, returning devices and average sessions per device.
+- Added period presets for quarter and year, plus dynamic time-series widgets aggregated by days, months, quarters and years.
+- Telemetry records now include a persistent visitor/device identifier so repeat visits are visible across sessions.
+- Telemetry collector default retention window for summaries increased to 365 days.
 
-## 2026-04-18 — Patch f24z: admin mobile modal footer autolayout
-- Fixed mobile admin modal actions so texture-edit buttons, including `AR-калибровка`, no longer get clipped by the modal container on narrow screens.
-- Added responsive modal footer autolayout: 2-column action grid on tablets/smaller widths and a 1-column stacked layout on phones.
-- Reduced modal viewport margins on mobile and switched the modal body/footer sizing to `dvh`-based limits for safer behavior with mobile browser chrome.
-- Allowed long button labels to wrap cleanly instead of overflowing outside the modal card.
-- Release token: `20260418-f24z`
+## 2026-04-18 — Patch f24ag: KPI standards + filterable product analytics
+- Release token: `20260418-f24ah`
+- Added explicit analytics filters in admin telemetry: period (`1 / 7 / 30 days`) and device segment (`all / mobile / tablet / desktop / unknown`).
+- KPI cards now use product standards with visible status badges: `Норма`, `Внимание`, `Риск`, `Нет базы`.
+- Local telemetry summaries now respect selected period and device filters.
+- Remote telemetry summary accepts the same filters through the backend collector and reflects them in dashboard widgets.
+
+## 2026-04-18 — Patch f24af: analytics semantics polish + AR funnel + device segmentation
+- Release token: `20260418-f24af`
+- Product analytics semantics clarified: KPI formulas refined for AR launch/start/completion, texture interaction, CTA and error rates.
+- Dashboard in admin fully Russified for metric labels, event names and telemetry summaries.
+- Added AR funnel widgets (launch → start → first point → contour closed → visualization ready).
+- Added device segmentation widgets (phones / tablets / desktop / unknown) with sessions, AR completion and error rate per session.
+
+## 2026-04-18 — Patch f24ae: product telemetry dashboard + KPI cards
+- Release token: `20260418-f24af`
+- Sprint 1 / Patch 2: added product dashboard in admin telemetry panel with KPI cards, AR funnel aggregates, top shapes, and top textures.
+- Telemetry backend summary now returns dashboard aggregates and KPI-ready remote metrics.
+- Hotfix: restored normalized `form_change` tracking helper and added AR calibration scale slider telemetry event.
+
+## 2026-04-18 — Patch f24ad: telemetry event coverage completion (Patch 1)
+- Release token: `20260418-f24ad`
+- Added normalized `form_change` telemetry when switching forms from the catalog detail flow, AR shape picker, and unified AR texture rail.
+- Added explicit `admin_ar_calibration_scale_slider_change` telemetry for slider-based UV scale changes in AR calibration.
+- Added `admin_visual_param_change` telemetry for texture parameter changes inside the admin texture modal and palette defaults editor.
+- Added `texture_map_load_failed` telemetry for failed texture map loading, including albedo candidate exhaustion and direct map failures.
+- Added `palette_load_failed` / `palette_parse_failed` telemetry for surface palette and palette-defaults loading failures.
+- Added `gallery_asset_missing` telemetry for missing explicit gallery assets and missing fallback hero/icon assets, while keeping sequential autodiscovery stable.
+
+## 2026-04-18 — Patch f24ac: telemetry backend collector + remote admin summary
+- Release token: `20260418-f24ac`
+- Added backend telemetry collector source under `backend_yc_functions/telemetry_collector/` and a ready upload archive under `backend_yc_function_upload/telemetry_collector.zip`.
+- Collector stores each telemetry POST batch as an immutable object in Object Storage to avoid race conditions on concurrent writes.
+- Added `GET /api/telemetry?mode=summary` and `GET /api/telemetry?mode=health` contract for centralized aggregates.
+- Extended `js/telemetry.js` with remote summary/health helpers.
+- Upgraded the admin telemetry panel to show remote aggregate counts when the backend collector is deployed, while keeping local fallback intact.
+- Added deployment notes in `docs/TELEMETRY_BACKEND.md`.
+
+## 2026-04-18 — Sprint 1 foundation: analytics + errors (Patch f24ab)
+
+- Added frontend telemetry core `js/telemetry.js` with:
+  - local history ring buffer
+  - pending queue for optional batch upload
+  - global `window.error` / `unhandledrejection` capture
+  - export/clear helpers for admin diagnostics
+- Wired runtime config for optional telemetry endpoint resolution through the same runtime config layer.
+- Instrumented key product events on the public site:
+  - detail page opens
+  - manager/site CTA clicks
+  - AR launch requests / blocked states / successful starts / session end
+  - first point, contour close, cutout close, final visualization
+  - texture selection, shape picker selection, quick AR launches
+  - rotation panel usage, snapshot usage and fallback, admin AR calibration saves/errors
+- Added admin monitoring panel with summary, recent events/errors, export JSON, clear local history and manual flush of the pending queue.
+- Kept telemetry safe by design: if `/api/telemetry` is absent, events remain local and do not break product flows.
+
 
 ## 2026-04-18 — Patch f24y: AR admin calibration save fix
 - Release token: `20260418-f24y`

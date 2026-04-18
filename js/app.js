@@ -14,6 +14,33 @@ import { createArSessionHelpers } from './app-ar-session-helpers.js';
 import { createSelectionHelpers } from './app-selection-helpers.js';
 
 const runtimeConfig = (typeof window !== 'undefined' && window.__RUNTIME_CONFIG__) ? window.__RUNTIME_CONFIG__ : null;
+const telemetry = (typeof window !== 'undefined' && window.__APP_TELEMETRY__) ? window.__APP_TELEMETRY__ : null;
+function telemetryTrack(name, props = {}) {
+  try { if (telemetry && typeof telemetry.track === 'function') telemetry.track(name, props); } catch (_) {}
+}
+function telemetryPage(name, props = {}) {
+  try { if (telemetry && typeof telemetry.trackPageView === 'function') telemetry.trackPageView(name, props); } catch (_) {}
+}
+function telemetryError(name, err, props = {}) {
+  try { if (telemetry && typeof telemetry.trackError === 'function') telemetry.trackError(name, err, props); } catch (_) {}
+}
+function telemetryTrackFormChange(shape, extra = {}) {
+  try {
+    const payload = {
+      shapeId: shape && shape.id ? String(shape.id) : '',
+      shapeName: shape && shape.name ? String(shape.name) : '',
+      ...extra,
+    };
+    telemetryTrack('form_change', payload);
+  } catch (_) {}
+}
+
+function telemetryCtx(extra = {}) {
+  const shapeId = (typeof state !== 'undefined' && state && state.selectedShape && state.selectedShape.id) ? String(state.selectedShape.id) : '';
+  const tileId = (typeof state !== 'undefined' && state && state.selectedTile && state.selectedTile.id) ? String(state.selectedTile.id) : '';
+  const phase = (typeof state !== 'undefined' && state && state.phase) ? String(state.phase) : '';
+  return { shapeId, tileId, phase, ...extra };
+}
 
 // Remote surface palettes (Object Storage).
 // Override by setting window.__SURFACE_PALETTE_BASE_URL__ before loading app.js
@@ -166,6 +193,8 @@ const UI = {
   layoutRow: document.getElementById('layoutRow'),
   colorRow: document.getElementById('colorRow'),
   btnViewAR: document.getElementById('btnViewAR'),
+  btnManagerCall: document.getElementById('btnManagerCall'),
+  btnProducerSite: document.getElementById('btnProducerSite'),
 
   // AR
   btnArBack: document.getElementById('btnArBack'),
@@ -207,7 +236,6 @@ const UI = {
   btnCalibrationScalePlus: document.getElementById('btnCalibrationScalePlus'),
   calibrationScaleValue: document.getElementById('calibrationScaleValue'),
   calibrationScaleSlider: document.getElementById('calibrationScaleSlider'),
-  calibrationVisualParams: document.getElementById('calibrationVisualParams'),
   calibrationStatus: document.getElementById('calibrationStatus'),
   snapshotToast: document.getElementById('snapshotToast'),
   snapshotLogoOverlay: document.getElementById('snapshotLogoOverlay'),
@@ -443,7 +471,6 @@ const state = {
   adminArEnabled: ADMIN_AR_ENABLED,
   adminCalibrationOpen: false,
   adminCalibrationScale: 1.0,
-  adminCalibrationValues: null,
   adminCalibrationSaveTimer: 0,
   adminCalibrationSavePromise: null,
   adminCalibrationStatusTimer: 0,
@@ -691,6 +718,9 @@ const { setLayout, setTextureRotationDeg, selectTile: baseSelectTile, disposeSel
 async function selectTile(tileOrId) {
   const result = await baseSelectTile(tileOrId);
   syncAdminCalibrationUi();
+  if (state && state.selectedTile) {
+    telemetryTrack('texture_select', telemetryCtx({ selectedTileId: String(state.selectedTile.id || ''), selectedTileName: String(state.selectedTile.name || '') }));
+  }
   return result;
 }
 
@@ -736,45 +766,6 @@ function comparableTextureKey(shapeId, value) {
   return String(value || '').trim().toLowerCase().replace(/[^a-z0-9_\-]+/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
 }
 
-const CALIBRATION_DEFAULTS = Object.freeze({
-  uvScale: 1.0,
-  exposureMult: 1.0,
-  contrast: 1.0,
-  saturation: 1.0,
-  roughnessMult: 1.0,
-  specStrength: 1.0,
-  normalScale: 1.0,
-  bumpScale: 1.0,
-});
-
-const CALIBRATION_SCHEMA = Object.freeze([
-  { key: 'uvScale', label: 'Масштаб', hint: 'Размер рисунка на поверхности', min: 0.35, max: 3.00, step: 0.01, format: (v) => `${(Number(v) || 0).toFixed(2)}x` },
-  { key: 'exposureMult', label: 'Яркость', hint: 'Светлее / темнее', min: 0.60, max: 1.60, step: 0.01, format: (v) => `${(Number(v) || 0).toFixed(2)}` },
-  { key: 'contrast', label: 'Контраст', hint: 'Выразительность рисунка', min: 0.70, max: 1.30, step: 0.01, format: (v) => `${(Number(v) || 0).toFixed(2)}` },
-  { key: 'saturation', label: 'Насыщенность', hint: 'Интенсивность цвета', min: 0.00, max: 1.50, step: 0.01, format: (v) => `${(Number(v) || 0).toFixed(2)}` },
-  { key: 'roughnessMult', label: 'Матовость', hint: 'Меньше / больше бликов', min: 0.50, max: 1.60, step: 0.01, format: (v) => `${(Number(v) || 0).toFixed(2)}` },
-  { key: 'specStrength', label: 'Сила блика', hint: 'Выраженность отражений', min: 0.00, max: 1.20, step: 0.01, format: (v) => `${(Number(v) || 0).toFixed(2)}` },
-  { key: 'normalScale', label: 'Рельеф normal', hint: 'Микрорельеф поверхности', min: 0.00, max: 2.00, step: 0.01, format: (v) => `${(Number(v) || 0).toFixed(2)}` },
-  { key: 'bumpScale', label: 'Рельеф height', hint: 'Глубина карты высот', min: 0.00, max: 2.00, step: 0.01, format: (v) => `${(Number(v) || 0).toFixed(2)}` },
-]);
-const CALIBRATION_SCHEMA_BY_KEY = new Map(CALIBRATION_SCHEMA.map((entry) => [entry.key, entry]));
-
-function formatCalibrationParamValue(key, value) {
-  const entry = CALIBRATION_SCHEMA_BY_KEY.get(String(key || ''));
-  if (entry && typeof entry.format === 'function') return entry.format(value);
-  const n = Number(value);
-  return Number.isFinite(n) ? n.toFixed(2) : '1.00';
-}
-
-function clampCalibrationParam(key, value) {
-  const entry = CALIBRATION_SCHEMA_BY_KEY.get(String(key || ''));
-  const fallback = CALIBRATION_DEFAULTS[String(key || '')] ?? 1.0;
-  const num = Number(value);
-  const safe = Number.isFinite(num) ? num : fallback;
-  if (!entry) return safe;
-  return clamp(safe, entry.min, entry.max);
-}
-
 function formatCalibrationScale(value) {
   const n = Number(value);
   return `${Number.isFinite(n) ? n.toFixed(2) : '1.00'}x`;
@@ -815,125 +806,44 @@ function setAdminCalibrationStatus(message, kind = '', hold = false) {
   }
 }
 
-function getSelectedTileCalibrationValues() {
-  const params = (state.selectedTile && state.selectedTile.params && typeof state.selectedTile.params === 'object') ? state.selectedTile.params : null;
-  const values = {};
-  for (const entry of CALIBRATION_SCHEMA) {
-    const raw = params && Object.prototype.hasOwnProperty.call(params, entry.key) ? params[entry.key] : CALIBRATION_DEFAULTS[entry.key];
-    values[entry.key] = clampCalibrationParam(entry.key, raw);
-  }
-  return values;
-}
-
 function getSelectedTileUvScaleValue() {
-  return getSelectedTileCalibrationValues().uvScale;
+  const params = (state.selectedTile && state.selectedTile.params && typeof state.selectedTile.params === 'object') ? state.selectedTile.params : null;
+  const raw = params && (params.uvScale ?? params.repeatScale);
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) return raw;
+  if (raw && typeof raw === 'object') {
+    const x = Number(raw.x);
+    const y = Number(raw.y);
+    if (Number.isFinite(x) && x > 0 && Number.isFinite(y) && y > 0) return (x + y) / 2;
+    if (Number.isFinite(x) && x > 0) return x;
+    if (Number.isFinite(y) && y > 0) return y;
+  }
+  return 1.0;
 }
 
-function ensureCalibrationVisualControls() {
-  if (!UI.calibrationVisualParams || UI.calibrationVisualParams.__built) return;
-  const frag = document.createDocumentFragment();
-  CALIBRATION_SCHEMA.filter((entry) => entry.key !== 'uvScale').forEach((entry) => {
-    const row = document.createElement('div');
-    row.className = 'calibrationParamRow';
-    row.dataset.key = entry.key;
-
-    const meta = document.createElement('div');
-    meta.className = 'calibrationParamMeta';
-
-    const label = document.createElement('div');
-    label.className = 'calibrationParamLabel';
-    label.textContent = entry.label;
-    meta.appendChild(label);
-
-    const hint = document.createElement('div');
-    hint.className = 'calibrationParamHint';
-    hint.textContent = entry.hint || '';
-    meta.appendChild(hint);
-
-    const value = document.createElement('div');
-    value.className = 'calibrationParamValue';
-    value.dataset.role = 'value';
-    value.textContent = formatCalibrationParamValue(entry.key, CALIBRATION_DEFAULTS[entry.key]);
-
-    const slider = document.createElement('input');
-    slider.className = 'calibrationParamSlider';
-    slider.type = 'range';
-    slider.min = String(entry.min);
-    slider.max = String(entry.max);
-    slider.step = String(entry.step);
-    slider.value = String(CALIBRATION_DEFAULTS[entry.key]);
-    slider.dataset.key = entry.key;
-    slider.setAttribute('aria-label', entry.label);
-    slider.addEventListener('input', (ev) => {
-      const key = String(ev.currentTarget?.dataset?.key || entry.key);
-      const rawValue = ev && ev.target ? ev.target.value : slider.value;
-      const nextValues = applySelectedTileCalibrationLive({ [key]: rawValue });
-      updateCalibrationUiValues(nextValues);
-      scheduleAdminCalibrationSave();
-    });
-
-    row.appendChild(meta);
-    row.appendChild(value);
-    row.appendChild(slider);
-    frag.appendChild(row);
-  });
-  UI.calibrationVisualParams.appendChild(frag);
-  UI.calibrationVisualParams.__built = true;
+function updateCalibrationUiValue(value) {
+  const safe = clamp(Number(value) || 1, 0.70, 1.50);
+  state.adminCalibrationScale = safe;
+  if (UI.calibrationScaleValue) UI.calibrationScaleValue.textContent = formatCalibrationScale(safe);
+  if (UI.calibrationScaleSlider) UI.calibrationScaleSlider.value = safe.toFixed(2);
 }
 
-function updateCalibrationUiValues(values) {
-  const nextValues = {};
-  for (const entry of CALIBRATION_SCHEMA) {
-    const raw = values && Object.prototype.hasOwnProperty.call(values, entry.key) ? values[entry.key] : CALIBRATION_DEFAULTS[entry.key];
-    nextValues[entry.key] = clampCalibrationParam(entry.key, raw);
-  }
-  state.adminCalibrationValues = nextValues;
-  state.adminCalibrationScale = nextValues.uvScale;
-  if (UI.calibrationScaleValue) UI.calibrationScaleValue.textContent = formatCalibrationParamValue('uvScale', nextValues.uvScale);
-  if (UI.calibrationScaleSlider) UI.calibrationScaleSlider.value = nextValues.uvScale.toFixed(2);
-  if (UI.calibrationVisualParams) {
-    UI.calibrationVisualParams.querySelectorAll('.calibrationParamRow[data-key]').forEach((row) => {
-      const key = String(row.dataset.key || '');
-      if (!key || !Object.prototype.hasOwnProperty.call(nextValues, key)) return;
-      const valueEl = row.querySelector('[data-role="value"]');
-      if (valueEl) valueEl.textContent = formatCalibrationParamValue(key, nextValues[key]);
-      const sliderEl = row.querySelector('input[type="range"]');
-      if (sliderEl) sliderEl.value = nextValues[key].toFixed(2);
-    });
-  }
-}
-
-function applySelectedTileCalibrationLive(nextPartial = {}) {
-  if (!state.selectedTile) return state.adminCalibrationValues || getSelectedTileCalibrationValues();
-  const current = state.adminCalibrationValues || getSelectedTileCalibrationValues();
-  const nextValues = { ...current };
-  for (const entry of CALIBRATION_SCHEMA) {
-    if (!Object.prototype.hasOwnProperty.call(nextPartial, entry.key)) continue;
-    nextValues[entry.key] = clampCalibrationParam(entry.key, nextPartial[entry.key]);
-  }
-
+function applySelectedTileUvScaleLive(value) {
+  const safe = clamp(Number(value) || 1, 0.70, 1.50);
+  if (!state.selectedTile) return safe;
   const params = (state.selectedTile.params && typeof state.selectedTile.params === 'object') ? { ...state.selectedTile.params } : {};
-  for (const entry of CALIBRATION_SCHEMA) params[entry.key] = nextValues[entry.key];
+  params.uvScale = safe;
   state.selectedTile.params = params;
 
   const mat = tileMaterial;
   const fill = fillMesh;
   const preview = previewPlane;
   const size = (state.selectedTile && state.selectedTile.tileSizeM) ? state.selectedTile.tileSizeM : { w: 0.2, h: 0.2 };
-  const safeScale = nextValues.uvScale;
-  const repeatX = (3 / Math.max(0.001, Number(size.w) || 0.2)) * safeScale;
-  const repeatY = (3 / Math.max(0.001, Number(size.h) || 0.2)) * safeScale;
+  const repeatX = (3 / Math.max(0.001, Number(size.w) || 0.2)) * safe;
+  const repeatY = (3 / Math.max(0.001, Number(size.h) || 0.2)) * safe;
 
   try {
-    if (mat && mat.uniforms) {
-      if (mat.uniforms.uUvScale) mat.uniforms.uUvScale.value.set(safeScale, safeScale);
-      if (mat.uniforms.uExposureMult) mat.uniforms.uExposureMult.value = nextValues.exposureMult;
-      if (mat.uniforms.uContrast) mat.uniforms.uContrast.value = nextValues.contrast;
-      if (mat.uniforms.uSaturation) mat.uniforms.uSaturation.value = nextValues.saturation;
-      if (mat.uniforms.uRoughnessMult) mat.uniforms.uRoughnessMult.value = nextValues.roughnessMult;
-      if (mat.uniforms.uSpecStrength) mat.uniforms.uSpecStrength.value = nextValues.specStrength;
-      if (mat.uniforms.uNormalScale) mat.uniforms.uNormalScale.value = nextValues.normalScale;
-      if (mat.uniforms.uBumpScale) mat.uniforms.uBumpScale.value = nextValues.bumpScale;
+    if (mat && mat.uniforms && mat.uniforms.uUvScale) {
+      mat.uniforms.uUvScale.value.set(safe, safe);
       mat.needsUpdate = true;
     }
     if (fill && fill.material) fill.material.needsUpdate = true;
@@ -942,90 +852,82 @@ function applySelectedTileCalibrationLive(nextPartial = {}) {
       preview.material.needsUpdate = true;
     }
   } catch (_) {}
-  return nextValues;
+  return safe;
 }
 
-async function saveAdminCalibrationNow(shapeId, tileId, values) {
+async function saveAdminCalibrationNow() {
   if (!state.adminArEnabled) return false;
   const token = getAdminSessionToken();
   if (!token) throw new Error('admin_token_missing');
-  const safeShapeId = String(shapeId || '').trim();
-  const safeTileId = String(tileId || '').trim();
-  if (!safeShapeId || !safeTileId) return false;
-  const payloadValues = {};
-  for (const entry of CALIBRATION_SCHEMA) {
-    const raw = values && Object.prototype.hasOwnProperty.call(values, entry.key) ? values[entry.key] : CALIBRATION_DEFAULTS[entry.key];
-    payloadValues[entry.key] = Number(clampCalibrationParam(entry.key, raw).toFixed(4));
-  }
+  const shapeId = state.selectedShape && state.selectedShape.id ? String(state.selectedShape.id) : '';
+  const tileId = state.selectedTile && state.selectedTile.id ? String(state.selectedTile.id) : '';
+  if (!shapeId || !tileId) return false;
 
   setAdminCalibrationStatus('Сохраняем…', 'progress', true);
-  const palette = await fetchAdminPalettePayload(safeShapeId, token);
+  const palette = await fetchAdminPalettePayload(shapeId, token);
   const items = Array.isArray(palette && palette.items) ? palette.items.slice() : [];
-  const targetKey = comparableTextureKey(safeShapeId, safeTileId);
-  const idx = items.findIndex((it) => comparableTextureKey(safeShapeId, it && (it.id || it.textureId || '')) === targetKey);
-  if (idx < 0) throw new Error(`texture_not_found_in_palette:${safeTileId}`);
+  const targetKey = comparableTextureKey(shapeId, tileId);
+  const idx = items.findIndex((it) => comparableTextureKey(shapeId, it && (it.id || it.textureId || '')) === targetKey);
+  if (idx < 0) throw new Error(`texture_not_found_in_palette:${tileId}`);
 
   const nextItem = { ...items[idx] };
   const nextParams = (nextItem.params && typeof nextItem.params === 'object') ? { ...nextItem.params } : {};
-  for (const entry of CALIBRATION_SCHEMA) nextParams[entry.key] = payloadValues[entry.key];
+  nextParams.uvScale = Number(state.adminCalibrationScale.toFixed(4));
   nextItem.params = nextParams;
   items[idx] = nextItem;
 
   const apiBase = String(ADMIN_API_BASE_URL || API_BASE_URL || '').trim().replace(/\/+$/, '');
   if (!apiBase) throw new Error('admin_api_missing');
   const headers = new Headers({ Accept: 'application/json', Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' });
-  const apiUrl = `${apiBase}/api/palettes/${encodeURIComponent(safeShapeId)}`;
+  const apiUrl = `${apiBase}/api/palettes/${encodeURIComponent(shapeId)}`;
   const res = await fetch(apiUrl, {
     method: 'POST',
     headers,
     cache: 'no-store',
-    body: JSON.stringify({ shapeId: safeShapeId, items }),
+    body: JSON.stringify({ shapeId, items }),
   });
   let json = null;
   try { json = await res.json(); } catch (_) {}
   if (!res.ok) throw new Error((json && (json.message || json.error)) || `${res.status} ${res.statusText}`);
 
-  state._allowedTilesByShape.delete(`${safeShapeId}|fallback:1`);
-  state._allowedTilesByShape.delete(`${safeShapeId}|fallback:0`);
+  state._allowedTilesByShape.delete(`${shapeId}|fallback:1`);
+  state._allowedTilesByShape.delete(`${shapeId}|fallback:0`);
   for (const key of Array.from(state._paletteCache.keys())) {
-    if (String(key).includes(safeShapeId)) state._paletteCache.delete(key);
+    if (String(key).includes(shapeId)) state._paletteCache.delete(key);
   }
-  const applyToTile = (tile) => {
-    if (!tile || comparableTextureKey(safeShapeId, tile.id) !== targetKey) return tile;
-    const p = (tile.params && typeof tile.params === 'object') ? { ...tile.params } : {};
-    for (const entry of CALIBRATION_SCHEMA) p[entry.key] = payloadValues[entry.key];
-    return { ...tile, params: p };
-  };
   if (Array.isArray(state.currentAllowedTiles)) {
-    state.currentAllowedTiles = state.currentAllowedTiles.map(applyToTile);
+    state.currentAllowedTiles = state.currentAllowedTiles.map((tile) => {
+      if (!tile || comparableTextureKey(shapeId, tile.id) !== targetKey) return tile;
+      const p = (tile.params && typeof tile.params === 'object') ? { ...tile.params } : {};
+      p.uvScale = Number(state.adminCalibrationScale.toFixed(4));
+      return { ...tile, params: p };
+    });
   }
   if (Array.isArray(state.arTextureGroups)) {
     state.arTextureGroups = state.arTextureGroups.map((group) => {
-      if (!group || String(group.shapeId || '') !== safeShapeId) return group;
-      const tiles = Array.isArray(group.tiles) ? group.tiles.map(applyToTile) : group.tiles;
+      if (!group || String(group.shapeId || '') !== shapeId) return group;
+      const tiles = Array.isArray(group.tiles) ? group.tiles.map((tile) => {
+        if (!tile || comparableTextureKey(shapeId, tile.id) !== targetKey) return tile;
+        const p = (tile.params && typeof tile.params === 'object') ? { ...tile.params } : {};
+        p.uvScale = Number(state.adminCalibrationScale.toFixed(4));
+        return { ...tile, params: p };
+      }) : group.tiles;
       return { ...group, tiles };
     });
   }
-  if (state.selectedTile && comparableTextureKey(safeShapeId, state.selectedTile.id) === targetKey) {
-    const p = (state.selectedTile.params && typeof state.selectedTile.params === 'object') ? { ...state.selectedTile.params } : {};
-    for (const entry of CALIBRATION_SCHEMA) p[entry.key] = payloadValues[entry.key];
-    state.selectedTile.params = p;
-    updateCalibrationUiValues(p);
-  }
   setAdminCalibrationStatus('Сохранено', 'ok');
+  telemetryTrack('admin_ar_calibration_saved', telemetryCtx({ uvScale: Number(state.adminCalibrationScale.toFixed(4)) }));
   return true;
 }
 
 function scheduleAdminCalibrationSave() {
-  if (!state.adminArEnabled || !state.selectedShape || !state.selectedTile) return;
-  const shapeId = String(state.selectedShape.id || '').trim();
-  const tileId = String(state.selectedTile.id || '').trim();
-  const valuesSnapshot = { ...(state.adminCalibrationValues || getSelectedTileCalibrationValues()) };
+  if (!state.adminArEnabled) return;
   if (state.adminCalibrationSaveTimer) clearTimeout(state.adminCalibrationSaveTimer);
   state.adminCalibrationSaveTimer = setTimeout(() => {
     state.adminCalibrationSaveTimer = 0;
-    state.adminCalibrationSavePromise = saveAdminCalibrationNow(shapeId, tileId, valuesSnapshot).catch((err) => {
+    state.adminCalibrationSavePromise = saveAdminCalibrationNow().catch((err) => {
       console.warn('admin calibration save failed', err);
+      telemetryError('admin_ar_calibration_save_failed', err, telemetryCtx({ uvScale: Number(state.adminCalibrationScale.toFixed(4)) }));
       setAdminCalibrationStatus('Ошибка сохранения', 'err', true);
       return false;
     }).finally(() => {
@@ -1035,15 +937,12 @@ function scheduleAdminCalibrationSave() {
 }
 
 function stepAdminCalibrationScale(delta) {
-  const current = state.adminCalibrationValues || getSelectedTileCalibrationValues();
-  const next = clampCalibrationParam('uvScale', (Number(current.uvScale) || 1) + Number(delta || 0));
-  const values = applySelectedTileCalibrationLive({ uvScale: next });
-  updateCalibrationUiValues(values);
+  const next = clamp((Number(state.adminCalibrationScale) || 1) + Number(delta || 0), 0.70, 1.50);
+  updateCalibrationUiValue(applySelectedTileUvScaleLive(next));
   scheduleAdminCalibrationSave();
 }
 
 function syncAdminCalibrationUi() {
-  ensureCalibrationVisualControls();
   const enabled = !!(state.adminArEnabled && state.selectedShape && state.selectedTile);
   if (UI.btnArCalibrate) {
     UI.btnArCalibrate.hidden = !enabled;
@@ -1051,14 +950,13 @@ function syncAdminCalibrationUi() {
   }
   if (!enabled) {
     state.adminCalibrationTargetKey = '';
-    state.adminCalibrationValues = null;
     if (state.adminCalibrationOpen) setCalibrationPanelOpen(false);
     return;
   }
   const nextKey = `${state.selectedShape.id}::${state.selectedTile.id}`;
   const changed = state.adminCalibrationTargetKey !== nextKey;
   state.adminCalibrationTargetKey = nextKey;
-  updateCalibrationUiValues(getSelectedTileCalibrationValues());
+  updateCalibrationUiValue(getSelectedTileUvScaleValue());
   if (changed) setAdminCalibrationStatus('Автосохранение включено', '', false);
 }
 
@@ -1202,10 +1100,11 @@ async function handleArTextureRailTileClick(tile) {
     if (state._switchingShapeInAr) return;
     state._switchingShapeInAr = true;
     try {
-      await openDetail(tileShapeId, { preserveScreen: true, preferredTileId: tile.id });
+      await openDetail(tileShapeId, { preserveScreen: true, preferredTileId: tile.id, changeSource: 'texture_rail', source: 'texture_rail' });
       renderArTextureRail();
     } catch (e) {
       console.error('in-rail shape switch failed', e);
+      telemetryError('ar_texture_rail_shape_switch_failed', e, telemetryCtx({ targetShapeId: tileShapeId }));
     } finally {
       state._switchingShapeInAr = false;
     }
@@ -1301,6 +1200,7 @@ async function ensureArTextureGroupsBuilt(opts = {}) {
         });
       } catch (err) {
         console.warn('AR texture rail group skipped:', shape && shape.id ? shape.id : 'unknown-shape', err);
+        telemetryError('ar_texture_group_skipped', err, { shapeId: shape && shape.id ? String(shape.id) : 'unknown-shape' });
       }
     }
     if (seq !== state._arTextureGroupsSeq) return state.arTextureGroups;
@@ -1320,6 +1220,10 @@ async function ensureArTextureGroupsBuilt(opts = {}) {
 async function openDetail(shapeId, opts = {}) {
   const s = state.shapes.find(x => x.id === shapeId);
   if (!s) return null;
+  const prevShapeId = state.selectedShape && state.selectedShape.id ? String(state.selectedShape.id) : '';
+  const prevShapeName = state.selectedShape && state.selectedShape.name ? String(state.selectedShape.name) : '';
+  telemetryPage('detail', { shapeId: String(s.id || ''), shapeName: String(s.name || ''), preserveScreen: !!opts.preserveScreen, preferredTileId: opts.preferredTileId ? String(opts.preferredTileId) : '' });
+  telemetryTrackFormChange(s, { prevShapeId, prevShapeName, source: opts.changeSource || opts.source || (state.xrSession ? 'ar_context' : 'detail_open'), inAr: !!state.xrSession, via: opts.preferredTileId ? 'preferred_tile' : '' });
   state.selectedShape = s;
   fillShapeDetailUI(s);
 
@@ -1429,6 +1333,7 @@ async function launchQuickArPreset(item) {
   state._launchingQuickAr = true;
   const restoreStatus = UI.quickArStatus ? UI.quickArStatus.textContent : '';
   try {
+    telemetryTrack('quick_ar_launch', { shapeId: String(item.shapeId || ''), tileId: String(item.tileId || ''), shapeName: String(item.shapeName || ''), tileName: String(item.tileName || '') });
     setQuickArStatus(`Подготавливаем AR: ${item.shapeName} — ${item.tileName}`);
     await openDetail(item.shapeId, {
       preserveScreen: true,
@@ -1439,6 +1344,7 @@ async function launchQuickArPreset(item) {
     setQuickArStatus(`AR готов: ${item.shapeName} — ${item.tileName}`);
   } catch (e) {
     console.error('quick AR launch failed', e);
+    telemetryError('quick_ar_launch_failed', e, { shapeId: String(item.shapeId || ''), tileId: String(item.tileId || '') });
     setQuickArStatus('Не удалось запустить AR. Попробуйте ещё раз.');
   } finally {
     state._launchingQuickAr = false;
@@ -1453,20 +1359,24 @@ async function launchQuickArPreset(item) {
 async function startAR() {
   if (state._startingAR) return;
   state._startingAR = true;
+  telemetryTrack('ar_session_start_requested', telemetryCtx());
   try {
 
   const env = getArEnv();
   if (env.isAndroid && !env.isChrome) {
+    telemetryTrack('ar_session_blocked', telemetryCtx({ reason: 'need_chrome' }));
     showArHelp('NEED_CHROME');
     return;
   }
 
   if (!navigator.xr) {
+    telemetryTrack('ar_session_blocked', telemetryCtx({ reason: 'no_webxr' }));
     showArHelp('NO_WEBXR');
     return;
   }
   const supported = await checkXrSupport();
   if (!supported) {
+    telemetryTrack('ar_session_blocked', telemetryCtx({ reason: 'not_supported' }));
     showArHelp('AR_NOT_SUPPORTED');
     return;
   }
@@ -1497,6 +1407,7 @@ async function startAR() {
     session = await navigator.xr.requestSession('immersive-ar', sessionInit);
   } catch (e) {
     console.error(e);
+    telemetryError('ar_session_start_failed', e, telemetryCtx({ stage: 'request_session' }));
     showArHelp('AR_START_FAILED', e);
     return;
   }
@@ -1538,8 +1449,10 @@ async function startAR() {
   } catch (_) {
     state.cameraAccessEnabled = false;
   }
+  telemetryTrack('ar_session_started', telemetryCtx({ cameraAccess: !!state.cameraAccessEnabled, depthSupported: !!state.depthSupported, anchorsSupported: !!state.anchorsSupported }));
 
   session.addEventListener('end', () => {
+    telemetryTrack('ar_session_end', telemetryCtx());
     cleanupXR();
   });
 
@@ -1923,7 +1836,10 @@ function addPointFromReticle() {
   if (!state.xrSession) return;
   if (!state.floorLocked || state.phase === 'ar_scan') return;
   if (!reticle.visible) return;
+  const isFirstPoint = state.phase === 'ar_draw' && state.points.length === 0;
   addPointAtWorld(reticle.position);
+  if (isFirstPoint) telemetryTrack('ar_first_point', telemetryCtx({ points: state.points.length }));
+  else telemetryTrack('ar_point_add', telemetryCtx({ points: state.points.length, mode: state.phase }));
 }
 
 function addHolePointLocal(local) {
@@ -1951,6 +1867,7 @@ function addHolePointLocal(local) {
 
 function closeHole() {
   if (state.holePoints.length < 3) return;
+  telemetryTrack('ar_cutout_closed', telemetryCtx({ cutoutPoints: state.holePoints.length, totalHolesNext: state.holes.length + 1 }));
   // store hole and exit cut mode
   state.holes.push(state.holePoints.map(p => p.clone()));
   state.holePoints = [];
@@ -1977,6 +1894,7 @@ function closeHole() {
 
 function closeContour() {
   if (state.points.length < 3) return;
+  telemetryTrack('ar_contour_closed', telemetryCtx({ points: state.points.length, areaM2: Number(computeAreaM2().toFixed ? computeAreaM2().toFixed(3) : computeAreaM2()) }));
   state.closed = true;
   state.phase = 'ar_mask';
   state.hasEverClosedContour = true;
@@ -2309,6 +2227,7 @@ async function captureBrandedSnapshot() {
     await waitForAnimationFrames(3);
     const blob = await buildBrandedSnapshotBlob();
     await exportSnapshotBlob(blob);
+    telemetryTrack('ar_snapshot_exported', telemetryCtx({ mode: 'built_in' }));
     return true;
   } finally {
     state.snapshotInProgress = false;
@@ -2317,6 +2236,7 @@ async function captureBrandedSnapshot() {
 }
 
 function openSystemScreenshotFallback() {
+  telemetryTrack('ar_snapshot_fallback_open', telemetryCtx({ mode: 'system_screenshot' }));
   hideArBottomMenusForSnapshot();
   setSnapshotFallbackActive(true);
   showSnapshotToast('Сделайте системный скриншот. Нижнее меню скрыто, логотип уже добавлен. После снимка коснитесь экрана для возврата меню.', 2600);
@@ -2334,6 +2254,7 @@ async function handleArSnapshotRequest() {
       if (ok) return;
     } catch (err) {
       console.warn('built-in AR snapshot failed, switching to fallback', err);
+      telemetryError('ar_snapshot_builtin_failed', err, telemetryCtx({ mode: 'built_in' }));
     }
   }
 
@@ -2985,6 +2906,7 @@ UI.overlay?.addEventListener('pointerdown', (e) => {
 ensureArFinalControlsBound();
 
 UI.btnQuickArToggle?.addEventListener('click', () => {
+  telemetryTrack('quick_ar_toggle', telemetryCtx({ expandedNext: !state.quickLaunchExpanded }));
   toggleQuickLaunchExpanded();
 });
 
@@ -2995,8 +2917,17 @@ UI.catalogSearch?.addEventListener('input', () => {
 });
 
 UI.btnDetailBack?.addEventListener('click', () => {
+  telemetryPage('catalog', telemetryCtx({ source: 'detail_back' }));
   setActiveScreen('catalog', UI);
   state.phase = 'catalog';
+});
+
+UI.btnManagerCall?.addEventListener('click', () => {
+  telemetryTrack('cta_manager_call', telemetryCtx({ phone: '+79780224411' }));
+});
+
+UI.btnProducerSite?.addEventListener('click', () => {
+  telemetryTrack('cta_site_click', telemetryCtx({ destination: 'https://ag-ru.com/' }));
 });
 
 // Аккордеон характеристик (по умолчанию скрыто)
@@ -3014,8 +2945,9 @@ UI.btnTechClose?.addEventListener('click', (e) => {
 });
 UI.btnViewAR?.addEventListener('click', async (ev) => {
   const env = getArEnv();
+  telemetryTrack('ar_launch_click', telemetryCtx({ isAndroid: !!env.isAndroid, isChrome: !!env.isChrome }));
   if (env.isAndroid && !env.isChrome) {
-    // Do not start AR outside Chrome on Android
+    telemetryTrack('ar_launch_blocked', telemetryCtx({ reason: 'need_chrome' }));
     showArHelp('NEED_CHROME');
     return;
   }
@@ -3023,11 +2955,13 @@ UI.btnViewAR?.addEventListener('click', async (ev) => {
 });
 
 UI.btnArBack?.addEventListener('click', async () => {
+  telemetryTrack('ar_back_click', telemetryCtx());
   setCalibrationPanelOpen(false);
   await stopAR();
 });
 
 UI.btnArReset?.addEventListener('click', async () => {
+  telemetryTrack('ar_reset_click', telemetryCtx());
   setCalibrationPanelOpen(false);
   await fullRestartAR();
 });
@@ -3073,6 +3007,7 @@ function stepTextureRotation(deltaDeg) {
 }
 
 UI.btnEditShape?.addEventListener('click', () => {
+  telemetryTrack('ar_edit_shape', telemetryCtx({ points: state.points.length, holes: state.holes.length }));
   // return to drawing mode, keep points
   show(UI.finalColors, false);
   // Do not re-show the initial contour hint: the user is already in the flow.
@@ -3105,6 +3040,7 @@ UI.btnEditShape?.addEventListener('click', () => {
 });
 
 UI.btnCutout?.addEventListener('click', () => {
+  telemetryTrack('ar_cutout_start', telemetryCtx({ holes: state.holes.length }));
   // cutout mode
   show(UI.finalColors, false);
   show(UI.contourHint, false);
@@ -3137,6 +3073,7 @@ function ensureArFinalControlsBound() {
   if (UI.btnTextureRotate && !UI.btnTextureRotate.__arBound) {
     UI.btnTextureRotate.addEventListener('click', () => {
       const shouldOpen = UI.rotationPanel ? UI.rotationPanel.hidden : !state.rotationPanelOpen;
+      telemetryTrack('ar_rotation_panel_toggle', telemetryCtx({ open: !!shouldOpen }));
       setRotationPanelOpen(shouldOpen);
     });
     UI.btnTextureRotate.__arBound = true;
@@ -3144,6 +3081,7 @@ function ensureArFinalControlsBound() {
 
   if (UI.btnRotateMinus && !UI.btnRotateMinus.__arBound) {
     UI.btnRotateMinus.addEventListener('click', () => {
+      telemetryTrack('ar_rotation_step', telemetryCtx({ deltaDeg: -15 }));
       stepTextureRotation(-15);
     });
     UI.btnRotateMinus.__arBound = true;
@@ -3151,6 +3089,7 @@ function ensureArFinalControlsBound() {
 
   if (UI.btnRotatePlus && !UI.btnRotatePlus.__arBound) {
     UI.btnRotatePlus.addEventListener('click', () => {
+      telemetryTrack('ar_rotation_step', telemetryCtx({ deltaDeg: 15 }));
       stepTextureRotation(15);
     });
     UI.btnRotatePlus.__arBound = true;
@@ -3158,6 +3097,7 @@ function ensureArFinalControlsBound() {
 
   if (UI.btnRotationReset && !UI.btnRotationReset.__arBound) {
     UI.btnRotationReset.addEventListener('click', () => {
+      telemetryTrack('ar_rotation_reset', telemetryCtx({}));
       applyTextureRotationDeg(0);
     });
     UI.btnRotationReset.__arBound = true;
@@ -3174,6 +3114,7 @@ function ensureArFinalControlsBound() {
   if (UI.btnArCalibrate && !UI.btnArCalibrate.__arBound) {
     UI.btnArCalibrate.addEventListener('click', () => {
       const shouldOpen = UI.calibrationPanel ? UI.calibrationPanel.hidden : !state.adminCalibrationOpen;
+      telemetryTrack('admin_ar_calibration_toggle', telemetryCtx({ open: !!shouldOpen }));
       if (shouldOpen) setRotationPanelOpen(false);
       syncAdminCalibrationUi();
       setCalibrationPanelOpen(shouldOpen);
@@ -3182,19 +3123,19 @@ function ensureArFinalControlsBound() {
   }
 
   if (UI.btnCalibrationScaleMinus && !UI.btnCalibrationScaleMinus.__arBound) {
-    UI.btnCalibrationScaleMinus.addEventListener('click', () => stepAdminCalibrationScale(-0.05));
+    UI.btnCalibrationScaleMinus.addEventListener('click', () => { telemetryTrack('admin_ar_calibration_scale_step', telemetryCtx({ delta: -0.05 })); stepAdminCalibrationScale(-0.05); });
     UI.btnCalibrationScaleMinus.__arBound = true;
   }
 
   if (UI.btnCalibrationScalePlus && !UI.btnCalibrationScalePlus.__arBound) {
-    UI.btnCalibrationScalePlus.addEventListener('click', () => stepAdminCalibrationScale(0.05));
+    UI.btnCalibrationScalePlus.addEventListener('click', () => { telemetryTrack('admin_ar_calibration_scale_step', telemetryCtx({ delta: 0.05 })); stepAdminCalibrationScale(0.05); });
     UI.btnCalibrationScalePlus.__arBound = true;
   }
 
   if (UI.btnCalibrationReset && !UI.btnCalibrationReset.__arBound) {
     UI.btnCalibrationReset.addEventListener('click', () => {
-      const values = applySelectedTileCalibrationLive({ ...CALIBRATION_DEFAULTS });
-      updateCalibrationUiValues(values);
+      telemetryTrack('admin_ar_calibration_reset', telemetryCtx());
+      updateCalibrationUiValue(applySelectedTileUvScaleLive(1.0));
       scheduleAdminCalibrationSave();
     });
     UI.btnCalibrationReset.__arBound = true;
@@ -3203,8 +3144,8 @@ function ensureArFinalControlsBound() {
   if (UI.calibrationScaleSlider && !UI.calibrationScaleSlider.__arBound) {
     UI.calibrationScaleSlider.addEventListener('input', (ev) => {
       const rawValue = ev && ev.target ? ev.target.value : UI.calibrationScaleSlider.value;
-      const values = applySelectedTileCalibrationLive({ uvScale: rawValue });
-      updateCalibrationUiValues(values);
+      const applied = updateCalibrationUiValue(applySelectedTileUvScaleLive(rawValue));
+      telemetryTrack('admin_ar_calibration_scale_slider_change', telemetryCtx({ value: Number(Number(applied || rawValue).toFixed ? Number(applied || rawValue).toFixed(4) : rawValue) }));
       scheduleAdminCalibrationSave();
     });
     UI.calibrationScaleSlider.__arBound = true;
@@ -3213,6 +3154,7 @@ function ensureArFinalControlsBound() {
   if (UI.btnShapePicker && !UI.btnShapePicker.__arBound) {
     UI.btnShapePicker.addEventListener('click', () => {
       if (!UI.shapePickerPanel || !UI.shapePickerList) return;
+      telemetryTrack('ar_shape_picker_toggle', telemetryCtx());
       setRotationPanelOpen(false);
       setCalibrationPanelOpen(false);
       try {
@@ -3224,6 +3166,7 @@ function ensureArFinalControlsBound() {
         });
       } catch (e) {
         console.warn('shape picker build failed', e);
+        telemetryError('ar_shape_picker_build_failed', e, telemetryCtx());
         return;
       }
       const isOpen = !UI.shapePickerPanel.hidden && UI.shapePickerPanel.classList.contains('open');
@@ -3240,8 +3183,10 @@ function ensureArFinalControlsBound() {
   if (UI.btnArSnapshot && !UI.btnArSnapshot.__arBound) {
     UI.btnArSnapshot.addEventListener('click', () => {
       setCalibrationPanelOpen(false);
+      telemetryTrack('ar_snapshot_click', telemetryCtx({ cameraAccess: !!state.cameraAccessEnabled }));
       handleArSnapshotRequest().catch((err) => {
         console.warn('AR snapshot request failed', err);
+        telemetryError('ar_snapshot_request_failed', err, telemetryCtx());
         openSystemScreenshotFallback();
       });
     });
@@ -3257,6 +3202,7 @@ function ensureArFinalControlsBound() {
 }
 
 UI.btnDone?.addEventListener('click', async () => {
+  telemetryTrack('ar_visualization_ready', telemetryCtx({ points: state.points.length, holes: state.holes.length, areaM2: Number(computeAreaM2().toFixed ? computeAreaM2().toFixed(3) : computeAreaM2()) }));
   state.phase = 'ar_final';
   setRotationPanelOpen(false);
   show(UI.contourHint, false);
@@ -3292,6 +3238,7 @@ UI.btnDone?.addEventListener('click', async () => {
   renderArTextureRail();
   ensureArTextureGroupsBuilt().catch((e) => {
     console.warn('AR texture rail build failed', e);
+    telemetryError('ar_texture_rail_build_failed', e, telemetryCtx());
     renderArTextureRail();
   });
 
@@ -3326,12 +3273,14 @@ if (window.visualViewport) {
 // Main
 // ------------------------
 async function init() {
+  telemetryPage('catalog', { source: 'init' });
   updateArTopInsetVar();
   let data = null;
   try {
     data = await loadTiles();
   } catch (e) {
     console.error('tiles.json недоступен, приложение переведено в безопасный режим каталога:', e);
+    telemetryError('tiles_load_failed', e, { resource: 'tiles.json' });
     state.tiles = [];
     state.shapes = [];
     renderCatalog([], { UI, emptyMessage: 'Каталог временно недоступен. Проверьте tiles.json и сетевые пути.' });
@@ -3349,6 +3298,7 @@ async function init() {
     try { buildShapePickerList({ UI, state, setShapePickerOpen: (open) => setShapePickerOpen(open, { UI, updateArTopStripVar, updateArBottomStripVar }), onShapeSelect: handleShapePickerSelection }); } catch (e) {}
   } catch (e) {
     console.warn('shapes.json не найден или повреждён — используем плитки как каталог', e);
+    telemetryError('shapes_load_failed', e, { resource: 'shapes.json', fallback: 'tiles_as_catalog' });
     // fallback: каждая плитка как отдельная "форма"
     state.shapes = buildFallbackShapesFromTiles(state.tiles);
     try { buildShapePickerList({ UI, state, setShapePickerOpen: (open) => setShapePickerOpen(open, { UI, updateArTopStripVar, updateArBottomStripVar }), onShapeSelect: handleShapePickerSelection }); } catch (e) {}
@@ -3380,6 +3330,7 @@ async function init() {
 
   buildQuickLaunchItems().catch((e) => {
     console.warn('quick AR rail build failed', e);
+    telemetryError('quick_ar_rail_build_failed', e, {});
     setQuickArStatus('Быстрый запуск временно недоступен.');
   });
 }
@@ -3395,6 +3346,7 @@ renderer.setAnimationLoop((t, frame) => {
 
 init().catch(err => {
   console.error(err);
+  telemetryError('app_init_failed', err, {});
   alert('Ошибка инициализации: ' + (err?.message || err));
 });
 
@@ -3407,6 +3359,7 @@ async function handleShapePickerSelection(shapeId) {
 
   const targetShapeId = shapeId != null ? String(shapeId) : '';
   if (!targetShapeId) return;
+  telemetryTrack('ar_shape_picker_select', telemetryCtx({ targetShapeId }));
 
   if (state.xrSession && state.phase === 'ar_final') {
     requestArTextureRailScroll(targetShapeId, { behavior: 'smooth' });
@@ -3422,7 +3375,7 @@ async function handleShapePickerSelection(shapeId) {
     state._switchingShapeInAr = true;
     const prevTileId = state.selectedTile ? state.selectedTile.id : null;
     try {
-      const result = await openDetail(targetShapeId, { preserveScreen: true, keepCurrentTile: true });
+      const result = await openDetail(targetShapeId, { preserveScreen: true, keepCurrentTile: true, changeSource: 'shape_picker', source: 'shape_picker' });
       if (state.phase === 'ar_final') {
         show(UI.finalBar, true);
         show(UI.finalColors, true);
@@ -3431,6 +3384,7 @@ async function handleShapePickerSelection(shapeId) {
           requestArTextureRailScroll(targetShapeId, { behavior: 'smooth' });
         }).catch((e) => {
           console.warn('AR texture rail refresh failed', e);
+      telemetryError('ar_texture_rail_refresh_failed', e, telemetryCtx({ targetShapeId }));
           renderArTextureRail();
         });
       }
@@ -3439,6 +3393,7 @@ async function handleShapePickerSelection(shapeId) {
       }
     } catch (e) {
       console.error('in-AR shape switch failed', e);
+      telemetryError('ar_shape_switch_failed', e, telemetryCtx({ targetShapeId }));
     } finally {
       state._switchingShapeInAr = false;
     }
@@ -3446,8 +3401,9 @@ async function handleShapePickerSelection(shapeId) {
   }
 
   try {
-    await openDetail(shapeId);
+    await openDetail(shapeId, { changeSource: 'shape_picker', source: 'shape_picker' });
   } catch (e) {
     console.error('openDetail failed', e);
+    telemetryError('detail_open_failed', e, { targetShapeId });
   }
 }

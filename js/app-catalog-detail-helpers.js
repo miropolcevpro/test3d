@@ -1,5 +1,30 @@
 const detailHeroGalleryCache = new Map();
 
+
+const missingGalleryAssetDedupe = new Set();
+
+function getTelemetryApi() {
+  try {
+    return (typeof globalThis !== 'undefined' && globalThis.__APP_TELEMETRY__) ? globalThis.__APP_TELEMETRY__ : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function telemetryTrackError(name, err, props = {}) {
+  try {
+    const api = getTelemetryApi();
+    if (api && typeof api.trackError === 'function') api.trackError(name, err, props);
+  } catch (_) {}
+}
+
+function trackMissingGalleryAssetOnce(key, props = {}) {
+  const safeKey = String(key || '').trim();
+  if (!safeKey || missingGalleryAssetDedupe.has(safeKey)) return;
+  missingGalleryAssetDedupe.add(safeKey);
+  telemetryTrackError('gallery_asset_missing', new Error('gallery asset missing'), props);
+}
+
 function readCssPxVar(name, fallback = 0) {
   try {
     const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -127,7 +152,14 @@ async function resolveSequentialDetailGallery(shape) {
 
     const filtered = [];
     for (const src of explicit) {
-      if (await probeAssetExists(src)) filtered.push(withRuntimeAssetVersion(src));
+      const exists = await probeAssetExists(src);
+      if (exists) filtered.push(withRuntimeAssetVersion(src));
+      else trackMissingGalleryAssetOnce(`explicit:${shapeId || 'unknown'}:${src}`, {
+        shapeId,
+        assetType: 'gallery',
+        source: 'explicit_gallery',
+        assetUrl: String(src || ''),
+      });
     }
     return filtered;
   })().catch(() => []);
@@ -219,11 +251,23 @@ export function renderDetailHero(detailHeroEl, shape) {
   detailHeroEl.dataset.heroRequestId = requestId;
   renderDetailHeroFallback(detailHeroEl, shape);
 
-  resolveSequentialDetailGallery(shape).then((gallery) => {
+  resolveSequentialDetailGallery(shape).then(async (gallery) => {
     if (!detailHeroEl || detailHeroEl.dataset.heroRequestId !== requestId) return;
     if (Array.isArray(gallery) && gallery.length) {
       renderDetailHeroCarousel(detailHeroEl, gallery);
       return;
+    }
+    const fallbackAsset = shape?.hero || shape?.icon || '';
+    if (fallbackAsset) {
+      const exists = await probeAssetExists(fallbackAsset);
+      if (!exists) {
+        trackMissingGalleryAssetOnce(`fallback:${shape && shape.id ? shape.id : 'unknown'}:${fallbackAsset}`, {
+          shapeId: shape && shape.id ? String(shape.id) : '',
+          assetType: shape && shape.hero ? 'hero' : 'icon',
+          source: 'fallback_asset',
+          assetUrl: String(fallbackAsset || ''),
+        });
+      }
     }
     renderDetailHeroFallback(detailHeroEl, shape);
   }).catch(() => {

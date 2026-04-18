@@ -366,8 +366,6 @@ export function createSelectionHelpers(ctx) {
     const em = (params && typeof params.exposureMult === 'number')
       ? params.exposureMult
       : ctx.computeAutoExposureMultFromTexture(albedoTex);
-    const contrast = (params && typeof params.contrast === 'number') ? params.contrast : 1.0;
-    const saturation = (params && typeof params.saturation === 'number') ? params.saturation : 1.0;
 
     const previewPlane = ctx.getPreviewPlane();
     if (previewPlane && previewPlane.material) {
@@ -431,8 +429,6 @@ export function createSelectionHelpers(ctx) {
     if (mat.uniforms.uRoughnessMult) mat.uniforms.uRoughnessMult.value = rm;
     if (mat.uniforms.uSpecStrength) mat.uniforms.uSpecStrength.value = ss;
     if (mat.uniforms.uExposureMult) mat.uniforms.uExposureMult.value = em;
-    if (mat.uniforms.uContrast) mat.uniforms.uContrast.value = contrast;
-    if (mat.uniforms.uSaturation) mat.uniforms.uSaturation.value = saturation;
 
     ctx.applyMapToTileMaterial(mat, 'roughness', roughTex);
     ctx.applyMapToTileMaterial(mat, 'ao', aoTexCore);

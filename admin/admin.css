@@ -495,3 +495,373 @@ input:focus,select:focus{border-color:rgba(78,118,137,.65)}
 .pill{ display:inline-block; padding:2px 8px; border-radius:999px; border:1px solid rgba(255,255,255,.12); font-size:11px; color:var(--muted); }
 .pill--set{ color:var(--ok); border-color: rgba(50,205,155,.35); }
 .pill--warn{ color: var(--warn); border-color: rgba(255,209,102,.35); }
+
+.telemetryCard {
+  margin: 16px 0 20px;
+  padding: 16px;
+  border: 1px solid rgba(99, 150, 255, 0.18);
+  border-radius: 18px;
+  background: rgba(255,255,255,0.72);
+}
+.telemetryStats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.telemetryToolbar {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+.telemetryFilters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.telemetryFilter {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 160px;
+  font-size: 12px;
+  color: var(--muted, #667085);
+}
+.telemetrySelect {
+  width: 100%;
+  min-height: 40px;
+  border-radius: 12px;
+  border: 1px solid var(--line, #e6eaf2);
+  background: #fff;
+  color: #111827;
+  padding: 0 12px;
+}
+.telemetryStat {
+  border: 1px solid var(--line, #e6eaf2);
+  border-radius: 14px;
+  padding: 10px 12px;
+  background: #fff;
+}
+.telemetryStat__label {
+  font-size: 12px;
+  color: var(--muted, #667085);
+}
+.telemetryStat__value {
+  margin-top: 4px;
+  font-size: 18px;
+  font-weight: 700;
+}
+.telemetryList {
+  margin-top: 14px;
+  display: grid;
+  gap: 8px;
+  max-height: 340px;
+  overflow: auto;
+}
+.telemetryItem {
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: #fff;
+  border: 1px solid var(--line, #e6eaf2);
+}
+.telemetryItem--error {
+  border-color: rgba(220, 38, 38, 0.26);
+  background: rgba(254, 242, 242, 0.9);
+}
+.telemetryItem__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: baseline;
+}
+.telemetryItem__name {
+  font-weight: 700;
+  font-size: 13px;
+}
+.telemetryItem__meta {
+  font-size: 11px;
+  color: var(--muted, #667085);
+}
+.telemetryItem__body {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #344054;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+@media (max-width: 640px) {
+  .telemetryCard {
+    padding: 12px;
+    margin: 12px 0 16px;
+  }
+  .telemetryToolbar,
+  .telemetryFilters {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .telemetryFilter {
+    min-width: 0;
+  }
+  .telemetryStats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.telemetryKpis,
+.telemetryBreakdown {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+.telemetryKpi,
+.telemetryPanel {
+  border: 1px solid var(--line, #e6eaf2);
+  border-radius: 14px;
+  padding: 10px 12px;
+  background: #fff;
+}
+.telemetryKpi__label,
+.telemetryPanel__label {
+  font-size: 12px;
+  color: var(--muted, #667085);
+}
+.telemetryKpi__value {
+  margin-top: 4px;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.telemetryKpi__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.telemetryKpi__badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid rgba(148,163,184,.28);
+  background: rgba(248,250,252,.95);
+  color: #475467;
+  white-space: nowrap;
+}
+.telemetryKpi__badge--good {
+  color: #067647;
+  background: rgba(236,253,243,.95);
+  border-color: rgba(6,118,71,.22);
+}
+.telemetryKpi__badge--warn {
+  color: #b54708;
+  background: rgba(255,250,235,.95);
+  border-color: rgba(181,71,8,.22);
+}
+.telemetryKpi__badge--risk {
+  color: #b42318;
+  background: rgba(254,243,242,.95);
+  border-color: rgba(180,35,24,.22);
+}
+.telemetryKpi__badge--nodata {
+  color: #667085;
+  background: rgba(248,250,252,.95);
+  border-color: rgba(102,112,133,.18);
+}
+.telemetryKpi__target {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--muted, #667085);
+}
+.telemetryKpi__sub {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--muted, #667085);
+}
+.telemetryPanel__list {
+  margin-top: 8px;
+  display: grid;
+  gap: 6px;
+}
+.telemetryPanel__item {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+.telemetryPanel__item b {
+  font-weight: 700;
+}
+@media (max-width: 640px) {
+  .telemetryKpis,
+  .telemetryBreakdown {
+    grid-template-columns: 1fr;
+  }
+}
+
+.telemetryFunnelStep {
+  display: grid;
+  grid-template-columns: minmax(88px, 118px) 1fr auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+}
+.telemetryFunnelStep__label {
+  color: var(--muted, #667085);
+}
+.telemetryFunnelStep__bar {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.08);
+  overflow: hidden;
+}
+.telemetryFunnelStep__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(68,122,255,.9), rgba(93,138,255,.55));
+}
+.telemetryFunnelStep__meta {
+  text-align: right;
+  white-space: nowrap;
+}
+.telemetryPanel__sub {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--muted, #667085);
+}
+.telemetryDeviceGrid {
+  margin-top: 8px;
+  display: grid;
+  gap: 8px;
+}
+.telemetryDeviceCard {
+  border: 1px solid var(--line, #e6eaf2);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(255,255,255,.9);
+}
+.telemetryDeviceCard__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+}
+.telemetryDeviceCard__name {
+  font-weight: 700;
+}
+.telemetryDeviceCard__meta {
+  margin-top: 6px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0,1fr));
+  gap: 6px 10px;
+  font-size: 11px;
+  color: var(--muted, #667085);
+}
+.telemetryDeviceCard__meta b {
+  display: block;
+  color: #111827;
+  font-size: 13px;
+}
+@media (max-width: 640px) {
+  .telemetryFunnelStep {
+    grid-template-columns: 1fr;
+  }
+  .telemetryFunnelStep__meta {
+    text-align: left;
+  }
+}
+
+
+.telemetryAudience {
+  margin-top: 12px;
+}
+.telemetryAudienceGrid {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+.telemetryHeroStat {
+  border: 1px solid rgba(68,122,255,.12);
+  border-radius: 14px;
+  padding: 12px;
+  background: linear-gradient(180deg, rgba(248,250,255,.98), rgba(255,255,255,.96));
+}
+.telemetryHeroStat__label {
+  font-size: 12px;
+  color: var(--muted, #667085);
+}
+.telemetryHeroStat__value {
+  margin-top: 6px;
+  font-size: 24px;
+  font-weight: 800;
+  color: #111827;
+}
+.telemetryHeroStat__hint {
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--muted, #667085);
+}
+.telemetryTrendList {
+  margin-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+.telemetryTrendRow {
+  display: grid;
+  grid-template-columns: minmax(72px, 100px) 1fr auto;
+  gap: 10px;
+  align-items: center;
+}
+.telemetryTrendRow__label {
+  font-size: 12px;
+  color: var(--muted, #667085);
+}
+.telemetryTrendRow__bar {
+  position: relative;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.08);
+  overflow: hidden;
+}
+.telemetryTrendRow__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(68,122,255,.94), rgba(96,165,250,.64));
+}
+.telemetryTrendRow__meta {
+  display: grid;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--muted, #667085);
+  text-align: right;
+}
+.telemetryTrendRow__meta b {
+  color: #111827;
+}
+.telemetryPanel--hero {
+  border-color: rgba(68,122,255,.16);
+  background: linear-gradient(180deg, rgba(247,250,255,.98), rgba(255,255,255,.96));
+}
+@media (max-width: 640px) {
+  .telemetryAudienceGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .telemetryTrendRow {
+    grid-template-columns: 1fr;
+  }
+  .telemetryTrendRow__meta {
+    text-align: left;
+  }
+}

@@ -1,5 +1,5 @@
 // BUILD: v28 2026-01-16f (runtime-config)
-const __BUILD_ID__ = "20260418-f24aa";
+const __BUILD_ID__ = "20260418-f24ah";
 console.log("[Admin] build", __BUILD_ID__);
 /* Admin (Step 3 start) — shapes list + shape details (read-only palette), router scaffold */
 (async () => {
@@ -7,6 +7,10 @@ console.log("[Admin] build", __BUILD_ID__);
   const API_BASE_URL = (window.API_BASE_URL || '').replace(/\/+$/, '');
   const TOKEN_KEY = 'admin_jwt';
   const contentIdentity = (typeof window !== 'undefined' && window.__CONTENT_IDENTITY__) ? window.__CONTENT_IDENTITY__ : null;
+  const telemetry = (typeof window !== 'undefined' && window.__APP_TELEMETRY__) ? window.__APP_TELEMETRY__ : null;
+  function telemetryTrack(name, props = {}) { try { telemetry && telemetry.track && telemetry.track(name, props); } catch (_) {} }
+  function telemetryPage(name, props = {}) { try { telemetry && telemetry.trackPageView && telemetry.trackPageView(name, props); } catch (_) {} }
+  function telemetryError(name, err, props = {}) { try { telemetry && telemetry.trackError && telemetry.trackError(name, err, props); } catch (_) {} }
 
   // Remote runtime config (safe, non-breaking):
   // - Tries to GET ${API_BASE_URL}/api/config
@@ -227,6 +231,22 @@ function pickMediaUrl(candidates, opts) {
   const elLoginStatus = $('loginStatus');
   const elStatus = $('status');
   const elReload = $('reloadBtn');
+  const elTelemetryCard = $('telemetryCard');
+  const elTelemetryStatus = $('telemetryStatus');
+  const elTelemetryStats = $('telemetryStats');
+  const elTelemetryAudience = $('telemetryAudience');
+  const elTelemetryKpis = $('telemetryKpis');
+  const elTelemetryDynamics = $('telemetryDynamics');
+  const elTelemetryBreakdown = $('telemetryBreakdown');
+  const elTelemetryFunnel = $('telemetryFunnel');
+  const elTelemetryDevices = $('telemetryDevices');
+  const elTelemetryList = $('telemetryList');
+  const elTelemetryRefreshBtn = $('telemetryRefreshBtn');
+  const elTelemetryFlushBtn = $('telemetryFlushBtn');
+  const elTelemetryExportBtn = $('telemetryExportBtn');
+  const elTelemetryClearBtn = $('telemetryClearBtn');
+  const elTelemetryPeriodSelect = $('telemetryPeriodSelect');
+  const elTelemetryDeviceSelect = $('telemetryDeviceSelect');
 
   // Views
   const elViewShapes = $('viewShapes');
@@ -339,6 +359,20 @@ function pickMediaUrl(candidates, opts) {
   const elTexSaveBtn = $('texSaveBtn');
   const elTexOpenArCalibBtn = $('texOpenArCalibBtn');
 
+
+  const visualParamTelemetryTimers = new Map();
+
+  function scheduleVisualParamTelemetry(name, props = {}) {
+    const key = `${String(name || 'event')}|${String(props.shapeId || '')}|${String(props.textureId || '')}|${String(props.param || '')}`;
+    const prev = visualParamTelemetryTimers.get(key);
+    if (prev) clearTimeout(prev);
+    const timer = setTimeout(() => {
+      visualParamTelemetryTimers.delete(key);
+      telemetryTrack(name, props);
+    }, 250);
+    visualParamTelemetryTimers.set(key, timer);
+  }
+
   /** @type {{ shapes: any[], paletteByShapeId: Map<string, any> }} */
   const state = {
     shapes: [],
@@ -371,8 +405,8 @@ function pickMediaUrl(candidates, opts) {
     {
       key: 'uvScale',
       label: 'uvScale (масштаб узора)',
-      min: 0.35,
-      max: 3.0,
+      min: 0.5,
+      max: 2.0,
       step: 0.01,
       help: 'Размер узора на поверхности. < 1 делает узор крупнее, > 1 делает узор мельче. Используйте, если масштаб визуально не совпадает с реальным.',
     },
@@ -866,81 +900,456 @@ function normalizeTextureId(v, shapeId) {
     };
   }
 
-function getToken() {
-    return sessionStorage.getItem(TOKEN_KEY) || '';
+function setTelemetryStatus(message, kind) {
+    if (!elTelemetryStatus) return;
+    elTelemetryStatus.textContent = String(message || '').trim();
+    elTelemetryStatus.className = 'status' + (kind ? (' ' + kind) : '');
   }
 
-  async function setToken(t) {
-    if (t) sessionStorage.setItem(TOKEN_KEY, t);
-    else sessionStorage.removeItem(TOKEN_KEY);
-  }
-
-  async function apiFetch(path, opts = {}) {
-    const url = API_BASE_URL + path;
-    const headers = new Headers(opts.headers || {});
-    headers.set('Accept', 'application/json');
-    const token = getToken();
-    if (token) headers.set('Authorization', `Bearer ${token}`);
-    if (opts.body && !(opts.body instanceof FormData)) headers.set('Content-Type', 'application/json');
-
-    const res = await fetch(url,{cache:"no-store", ...opts, headers, cache: 'no-store' });
-    let json = null;
-    const ct = res.headers.get('content-type') || '';
-    if (ct.includes('application/json')) json = await res.json().catch(() => null);
-    else {
-      const text = await res.text().catch(() => '');
-      json = text ? { message: text } : null;
+  function downloadJson(filename, data) {
+    try {
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => { try { URL.revokeObjectURL(url); } catch (_) {} }, 300);
+    } catch (e) {
+      console.warn(e);
     }
-    if (!res.ok) {
-      const msg = json?.message || json?.error || `${res.status} ${res.statusText}`;
-      const err = new Error(msg);
-      err.status = res.status;
-      err.data = json;
-      throw err;
+  }
+
+
+  function formatTelemetryPercent(value) {
+    const n = Number(value || 0);
+    if (!Number.isFinite(n)) return '—';
+    return `${(n * 100).toFixed(0)}%`;
+  }
+
+  function formatTelemetryFloat(value) {
+    const n = Number(value || 0);
+    if (!Number.isFinite(n)) return '—';
+    return n.toFixed(2);
+  }
+
+
+  function telemetryEventLabel(name) {
+    const map = {
+      page_view: 'Просмотр страницы',
+      screen_view: 'Просмотр экрана',
+      cta_manager_call: 'Клик «Связь с менеджером»',
+      cta_site_click: 'Клик «Сайт»',
+      ar_launch_click: 'Запуск AR — клик',
+      ar_session_start_requested: 'Запрос запуска AR',
+      ar_session_started: 'AR успешно запущен',
+      ar_session_start_failed: 'AR не запустился',
+      ar_first_point: 'Первая точка AR-контура',
+      ar_point_added: 'Добавлена точка AR-контура',
+      ar_contour_closed: 'Контур замкнут',
+      ar_cut_contour_closed: 'Вырез замкнут',
+      ar_visualization_ready: 'Визуализация готова',
+      texture_select: 'Выбор текстуры',
+      form_change: 'Смена формы',
+      ar_shape_picker_toggle: 'Открытие выбора формы',
+      ar_shape_picker_select: 'Выбор формы через picker',
+      ar_rotation_step: 'Поворот текстуры',
+      ar_rotation_reset: 'Сброс поворота',
+      ar_snapshot_click: 'Нажатие «Снимок»',
+      ar_snapshot_exported: 'Снимок экспортирован',
+      ar_snapshot_fallback_open: 'Открыт fallback скриншота',
+      ar_snapshot_request_failed: 'Ошибка запроса снимка',
+      ar_snapshot_builtin_failed: 'Ошибка встроенного снимка',
+      admin_ar_calibration_open: 'Открыта AR-калибровка',
+      admin_ar_calibration_toggle: 'Панель AR-калибровки',
+      admin_ar_calibration_scale_change: 'Шаг масштаба в AR-калибровке',
+      admin_ar_calibration_scale_slider_change: 'Слайдер масштаба в AR-калибровке',
+      admin_visual_param_change: 'Изменён визуальный параметр текстуры',
+      admin_ar_calibration_saved: 'Параметры AR-калибровки сохранены',
+      admin_ar_calibration_save_failed: 'Ошибка сохранения AR-калибровки',
+      texture_map_load_failed: 'Не загрузилась карта текстуры',
+      palette_load_failed: 'Не загрузилась палитра',
+      palette_parse_failed: 'Ошибка разбора палитры',
+      gallery_asset_missing: 'Не найден файл шапки/галереи',
+      window_error: 'Глобальная ошибка окна',
+      unhandled_rejection: 'Необработанный промис',
+      admin_api_error: 'Ошибка admin API',
+      tiles_load_failed: 'Не загрузился каталог текстур',
+      shapes_load_failed: 'Не загрузился каталог форм',
+      ar_texture_rail_build_failed: 'Ошибка сборки AR-ленты текстур',
+      ar_texture_rail_refresh_failed: 'Ошибка обновления AR-ленты текстур'
+    };
+    return map[name] || name || '—';
+  }
+
+  function telemetryDeviceLabel(deviceType) {
+    const map = { mobile: 'Телефоны', tablet: 'Планшеты', desktop: 'Компьютеры', unknown: 'Не определено' };
+    return map[deviceType] || deviceType || 'Не определено';
+  }
+
+
+  function telemetryPeriodLabel(days) {
+    const n = Math.max(1, Math.min(365, Number(days || 7) || 7));
+    if (n === 1) return 'за 1 день';
+    if (n === 7) return 'за 7 дней';
+    if (n === 30) return 'за 30 дней';
+    if (n === 90) return 'за квартал';
+    if (n === 365) return 'за год';
+    return `за ${n} дней`;
+  }
+
+  function normalizeTelemetryDays(value) {
+    const n = Number(value || 7) || 7;
+    if ([1, 7, 30, 90, 365].includes(n)) return String(n);
+    return '7';
+  }
+
+  function normalizeTelemetryDevice(value) {
+    const key = String(value || 'all').toLowerCase();
+    return ['all', 'mobile', 'tablet', 'desktop', 'unknown'].includes(key) ? key : 'all';
+  }
+
+  function getTelemetryFilters() {
+    return {
+      days: Number(normalizeTelemetryDays(elTelemetryPeriodSelect && elTelemetryPeriodSelect.value)),
+      deviceType: normalizeTelemetryDevice(elTelemetryDeviceSelect && elTelemetryDeviceSelect.value)
+    };
+  }
+
+  function telemetrySourceLabel(baseLabel, filters) {
+    const parts = [String(baseLabel || '').trim(), telemetryPeriodLabel(filters && filters.days)];
+    if (filters && filters.deviceType && filters.deviceType !== 'all') parts.push(telemetryDeviceLabel(filters.deviceType));
+    return parts.filter(Boolean).join(' · ');
+  }
+
+  const TELEMETRY_KPI_STANDARDS = {
+    arStartRate: { direction: 'higher', good: 0.70, warn: 0.50, target: 'Цель ≥ 70%, внимание < 50%' },
+    arCompletionRate: { direction: 'higher', good: 0.35, warn: 0.20, target: 'Цель ≥ 35%, внимание < 20%' },
+    textureInteractionRate: { direction: 'higher', good: 0.45, warn: 0.25, target: 'Цель ≥ 45%, внимание < 25%' },
+    ctaClickRate: { direction: 'higher', good: 0.08, warn: 0.03, target: 'Цель ≥ 8%, внимание < 3%' },
+    adminCalibrationUsage: { direction: 'higher', good: 0.40, warn: 0.15, target: 'Цель ≥ 40%, внимание < 15%' },
+    errorRatePerSession: { direction: 'lower', good: 0.10, warn: 0.25, target: 'Цель ≤ 0.10, риск > 0.25' }
+  };
+
+  function evaluateTelemetryKpi(key, value, basisCount) {
+    const cfg = TELEMETRY_KPI_STANDARDS[key] || null;
+    if (!cfg) return { status: 'nodata', label: 'Нет стандарта', target: '' };
+    if (!(Number(basisCount || 0) > 0)) return { status: 'nodata', label: 'Нет базы', target: cfg.target };
+    const n = Number(value || 0);
+    if (!Number.isFinite(n)) return { status: 'nodata', label: 'Нет данных', target: cfg.target };
+    if (cfg.direction === 'lower') {
+      if (n <= cfg.good) return { status: 'good', label: 'Норма', target: cfg.target };
+      if (n <= cfg.warn) return { status: 'warn', label: 'Внимание', target: cfg.target };
+      return { status: 'risk', label: 'Риск', target: cfg.target };
     }
-    return json;
+    if (n >= cfg.good) return { status: 'good', label: 'Норма', target: cfg.target };
+    if (n >= cfg.warn) return { status: 'warn', label: 'Внимание', target: cfg.target };
+    return { status: 'risk', label: 'Риск', target: cfg.target };
   }
 
-  async function apiDeletePaletteItem(shapeId, textureId) {
-    return apiFetch(`/api/palettes/${encodeURIComponent(shapeId)}/items/${encodeURIComponent(textureId)}`, {
-      method: 'DELETE',
-    });
+  function renderTelemetryKpiCard(key, label, valueText, subText, basisCount, rawValue) {
+    const verdict = evaluateTelemetryKpi(key, rawValue, basisCount);
+    return `
+      <div class="telemetryKpi telemetryKpi--${escapeHtml(verdict.status)}">
+        <div class="telemetryKpi__head">
+          <div class="telemetryKpi__label">${escapeHtml(label)}</div>
+          <span class="telemetryKpi__badge telemetryKpi__badge--${escapeHtml(verdict.status)}">${escapeHtml(verdict.label)}</span>
+        </div>
+        <div class="telemetryKpi__value">${escapeHtml(String(valueText || '—'))}</div>
+        <div class="telemetryKpi__sub">${escapeHtml(subText || '')}</div>
+        <div class="telemetryKpi__target">${escapeHtml(verdict.target || '')}</div>
+      </div>
+    `;
   }
 
-  async function apiDeleteSurfacePrefix(shapeId, textureId) {
-    return apiFetch(`/api/surfaces/${encodeURIComponent(shapeId)}/${encodeURIComponent(textureId)}`, {
-      method: 'DELETE',
-    });
+  function formatTelemetryTopList(items, emptyLabel, opts) {
+    const arr = Array.isArray(items) ? items : [];
+    const mode = opts && opts.mode ? String(opts.mode) : 'default';
+    if (!arr.length) return `<div class="muted">${escapeHtml(emptyLabel || '—')}</div>`;
+    return arr.map((item) => {
+      const label = mode === 'events' ? telemetryEventLabel(String(item.name || item.id || '')) : String(item.name || item.id || '—');
+      return `
+        <div class="telemetryPanel__item">
+          <span>${escapeHtml(label)}</span>
+          <b>${escapeHtml(String(item.sessions || item.count || 0))}</b>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function renderTelemetryFunnel(funnel, sourceLabel) {
+    const data = funnel && Array.isArray(funnel.steps) ? funnel.steps : [];
+    if (!data.length) {
+      return `
+        <div class="telemetryPanel">
+          <div class="telemetryPanel__label">Воронка AR (${escapeHtml(sourceLabel)})</div>
+          <div class="muted">Пока нет данных по воронке AR</div>
+        </div>
+      `;
+    }
+    const maxValue = Math.max(...data.map((step) => Number(step.sessions || 0)), 1);
+    return `
+      <div class="telemetryPanel">
+        <div class="telemetryPanel__label">Воронка AR (${escapeHtml(sourceLabel)})</div>
+        <div class="telemetryPanel__sub">Показывает путь от клика по запуску AR до готовой визуализации</div>
+        <div class="telemetryPanel__list">${data.map((step) => {
+          const width = Math.max(6, Math.round((Number(step.sessions || 0) / maxValue) * 100));
+          const conv = formatTelemetryPercent(step.conversionFromLaunch);
+          const stepConv = formatTelemetryPercent(step.conversionFromPrev);
+          return `
+            <div class="telemetryFunnelStep">
+              <div class="telemetryFunnelStep__label">${escapeHtml(String(step.label || '—'))}</div>
+              <div class="telemetryFunnelStep__bar"><div class="telemetryFunnelStep__fill" style="width:${width}%"></div></div>
+              <div class="telemetryFunnelStep__meta"><b>${escapeHtml(String(step.sessions || 0))}</b><br /><span class="muted">от запуска ${conv} · шаг ${stepConv}</span></div>
+            </div>
+          `;
+        }).join('')}</div>
+      </div>
+    `;
+  }
+
+  function renderTelemetryDevices(devices, sourceLabel) {
+    const arr = Array.isArray(devices) ? devices : [];
+    if (!arr.length) {
+      return `
+        <div class="telemetryPanel">
+          <div class="telemetryPanel__label">Сегментация по устройствам (${escapeHtml(sourceLabel)})</div>
+          <div class="muted">Пока нет данных по устройствам</div>
+        </div>
+      `;
+    }
+    return `
+      <div class="telemetryPanel">
+        <div class="telemetryPanel__label">Сегментация по устройствам (${escapeHtml(sourceLabel)})</div>
+        <div class="telemetryPanel__sub">Сессии, запуск AR, завершение визуализации и ошибки по типу устройства</div>
+        <div class="telemetryDeviceGrid">${arr.map((item) => `
+          <div class="telemetryDeviceCard">
+            <div class="telemetryDeviceCard__head"><span class="telemetryDeviceCard__name">${escapeHtml(telemetryDeviceLabel(item.deviceType))}</span><span class="muted">${escapeHtml(String(item.shareLabel || ''))}</span></div>
+            <div class="telemetryDeviceCard__meta">
+              <div>Сессий<b>${escapeHtml(String(item.sessions || 0))}</b></div>
+              <div>Запустили AR<b>${escapeHtml(String(item.arLaunchSessions || 0))}</b></div>
+              <div>Вошли в AR<b>${escapeHtml(String(item.arStartedSessions || 0))}</b></div>
+              <div>Дошли до заливки<b>${escapeHtml(String(item.arCompletedSessions || 0))}</b></div>
+              <div>Конверсия в заливку<b>${formatTelemetryPercent(item.arCompletionRate)}</b></div>
+              <div>Ошибок на сессию<b>${formatTelemetryFloat(item.errorRatePerSession)}</b></div>
+            </div>
+          </div>
+        `).join('')}</div>
+      </div>
+    `;
+  }
+
+  function renderTelemetryAudience(audience, sourceLabel) {
+    const data = audience || {};
+    const cards = [
+      ['Уникальные посетители', data.uniqueVisitors || 0, 'Уникальные браузеры/устройства за выбранный период'],
+      ['Сессии', data.sessions || 0, 'Все отдельные визиты пользователей'],
+      ['Повторные заходы', data.repeatVisits || 0, 'Дополнительные сессии с тех же устройств'],
+      ['Возвращающиеся устройства', data.returningVisitors || 0, `${formatTelemetryPercent(data.repeatVisitorRate)} от всех уникальных устройств`],
+      ['Сессий на устройство', formatTelemetryFloat(data.avgSessionsPerVisitor), 'Среднее число сессий на 1 устройство']
+    ];
+    return `
+      <div class="telemetryPanel telemetryPanel--hero">
+        <div class="telemetryPanel__label">Аудитория и посещаемость (${escapeHtml(sourceLabel)})</div>
+        <div class="telemetryPanel__sub">В метрика-подобной сводке: уникальные устройства, сессии и повторные визиты</div>
+        <div class="telemetryAudienceGrid">${cards.map(([label, value, hint]) => `
+          <div class="telemetryHeroStat">
+            <div class="telemetryHeroStat__label">${escapeHtml(String(label))}</div>
+            <div class="telemetryHeroStat__value">${escapeHtml(String(value))}</div>
+            <div class="telemetryHeroStat__hint">${escapeHtml(String(hint || ''))}</div>
+          </div>
+        `).join('')}</div>
+      </div>
+    `;
+  }
+
+  function pickTelemetrySeries(timeSeries, days) {
+    const series = timeSeries || {};
+    if (Number(days || 7) >= 365) return { mode: 'year', label: 'Годы', items: Array.isArray(series.byYear) ? series.byYear : [] };
+    if (Number(days || 7) >= 90) return { mode: 'quarter', label: 'Кварталы', items: Array.isArray(series.byQuarter) ? series.byQuarter : [] };
+    if (Number(days || 7) >= 30) return { mode: 'month', label: 'Месяцы', items: Array.isArray(series.byMonth) ? series.byMonth : [] };
+    return { mode: 'day', label: 'Дни', items: Array.isArray(series.byDay) ? series.byDay : [] };
+  }
+
+  function renderTelemetryDynamics(timeSeries, days, sourceLabel) {
+    const picked = pickTelemetrySeries(timeSeries, days);
+    const arr = Array.isArray(picked.items) ? picked.items : [];
+    if (!arr.length) {
+      return `
+        <div class="telemetryPanel">
+          <div class="telemetryPanel__label">Динамика (${escapeHtml(sourceLabel)})</div>
+          <div class="muted">Пока нет данных по выбранному периоду</div>
+        </div>
+      `;
+    }
+    const maxSessions = Math.max(...arr.map((item) => Number(item.sessions || 0)), 1);
+    return `
+      <div class="telemetryPanel">
+        <div class="telemetryPanel__label">Динамика (${escapeHtml(sourceLabel)})</div>
+        <div class="telemetryPanel__sub">Сессии, уникальные посетители и ошибки по шкале «${escapeHtml(picked.label)}»</div>
+        <div class="telemetryTrendList">${arr.map((item) => {
+          const width = Math.max(6, Math.round((Number(item.sessions || 0) / maxSessions) * 100));
+          return `
+            <div class="telemetryTrendRow">
+              <div class="telemetryTrendRow__label">${escapeHtml(String(item.label || item.key || '—'))}</div>
+              <div class="telemetryTrendRow__bar"><div class="telemetryTrendRow__fill" style="width:${width}%"></div></div>
+              <div class="telemetryTrendRow__meta">
+                <div>Сессии <b>${escapeHtml(String(item.sessions || 0))}</b></div>
+                <div>Уникальные <b>${escapeHtml(String(item.uniqueVisitors || 0))}</b></div>
+                <div>Ошибки <b>${escapeHtml(String(item.errors || 0))}</b></div>
+              </div>
+            </div>
+          `;
+        }).join('')}</div>
+      </div>
+    `;
   }
 
 
-async function apiDeleteTexture(shapeId, textureId, opts = {}) {
-  const palette = opts.palette !== false;
-  const files = opts.files !== false;
-  const qs = `?palette=${palette ? 1 : 0}&files=${files ? 1 : 0}`;
-  return apiFetch(`/api/textures/${encodeURIComponent(shapeId)}/${encodeURIComponent(textureId)}${qs}`, {
-    method: 'DELETE',
-  });
-}
+  async function renderTelemetryPanel() {
+    if (!elTelemetryCard || !telemetry) return;
+    if (elTelemetryPeriodSelect && !elTelemetryPeriodSelect.value) elTelemetryPeriodSelect.value = '7';
+    if (elTelemetryDeviceSelect && !elTelemetryDeviceSelect.value) elTelemetryDeviceSelect.value = 'all';
+    const filters = getTelemetryFilters();
+    const summary = telemetry.getSummary ? telemetry.getSummary(filters) : { total: 0, events: 0, errors: 0, pending: 0, endpoint: '' };
+    const localDashboard = telemetry.getDashboardSummary ? telemetry.getDashboardSummary(filters) : null;
+    const recent = telemetry.getRecent ? telemetry.getRecent(18, filters) : [];
+    const topNames = Object.entries(summary.byName || {}).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([name, count]) => `${telemetryEventLabel(name)} × ${count}`).join(' · ');
 
+    let remote = null;
+    try {
+      remote = telemetry.getRemoteSummary ? await telemetry.getRemoteSummary({ days: filters.days, deviceType: (filters.deviceType === 'all' ? '' : filters.deviceType), limit: 400 }) : null;
+    } catch (_) {
+      remote = null;
+    }
 
-async function apiGetConfig() {
-  return apiFetch('/api/config', { method: 'GET' });
-}
+    const remoteEventCount = remote && remote.totals ? Number(remote.totals.events || 0) : 0;
+    const remoteErrorCount = remote && remote.totals ? Number(remote.totals.errors || 0) : 0;
+    const remoteBatchCount = remote && remote.totals ? Number(remote.totals.batches || 0) : 0;
+    const remoteSessions = remote && remote.totals ? Number(remote.totals.sessions || 0) : 0;
+    const remoteTop = Array.isArray(remote && remote.byName)
+      ? remote.byName.slice(0, 3).map((entry) => `${telemetryEventLabel(entry.name)} × ${entry.count}`).join(' · ')
+      : '';
 
-async function apiSyncTexture(shapeId, textureId) {
-    return apiFetch(`/api/textures/${encodeURIComponent(shapeId)}/${encodeURIComponent(textureId)}/sync`, {
-      method: 'POST',
-      body: JSON.stringify({}),
-    });
+    const dashboard = (remote && remote.dashboard) ? remote.dashboard : (localDashboard || null);
+    const metrics = dashboard && dashboard.metrics ? dashboard.metrics : {};
+    const sessions = dashboard && dashboard.sessionMetrics ? dashboard.sessionMetrics : {};
+    const audience = dashboard && dashboard.audience ? dashboard.audience : {};
+    const kpis = dashboard && dashboard.kpis ? dashboard.kpis : {};
+    const sourceLabel = telemetrySourceLabel((remote && remote.dashboard) ? 'общая сводка' : 'локальная история браузера', filters);
+
+    if (elTelemetryStats) {
+      elTelemetryStats.innerHTML = [
+        ['AR запусков', metrics.arLaunches || 0],
+        ['Успешный вход AR', metrics.arStarted || 0],
+        ['Дошли до заливки', metrics.arCompleted || 0],
+        ['Смен текстуры', metrics.textureChanges || 0],
+        ['Связь с менеджером', metrics.managerCtaClicks || 0],
+        ['Уникальных посетителей', audience.uniqueVisitors || sessions.uniqueVisitors || 0],
+        ['Сессий', remote && remote.dashboard ? remoteSessions : (sessions.sessions || 0)],
+        ['Повторных заходов', audience.repeatVisits || sessions.repeatVisits || 0],
+        ['Ошибок', remote ? remoteErrorCount : (metrics.errors || summary.errors || 0)],
+        ['Локально в очереди', summary.pending || 0],
+      ].map(([label, value]) => `
+        <div class="telemetryStat">
+          <div class="telemetryStat__label">${escapeHtml(String(label))}</div>
+          <div class="telemetryStat__value">${escapeHtml(String(value))}</div>
+        </div>
+      `).join('');
+    }
+
+    if (elTelemetryAudience) {
+      elTelemetryAudience.innerHTML = renderTelemetryAudience(audience, sourceLabel);
+    }
+
+    if (elTelemetryKpis) {
+      elTelemetryKpis.innerHTML = [
+        renderTelemetryKpiCard('arStartRate', 'Конверсия запуска AR', formatTelemetryPercent(kpis.arStartRate), `${sessions.arStartedSessions || 0} из ${sessions.arLaunchSessions || 0} сессий с кликом по AR`, sessions.arLaunchSessions || 0, kpis.arStartRate),
+        renderTelemetryKpiCard('arCompletionRate', 'Конверсия до заливки', formatTelemetryPercent(kpis.arCompletionRate), `${sessions.arCompletedSessions || 0} из ${sessions.arLaunchSessions || 0} сессий с запуском AR`, sessions.arLaunchSessions || 0, kpis.arCompletionRate),
+        renderTelemetryKpiCard('textureInteractionRate', 'Интеракция с текстурами', formatTelemetryPercent(kpis.textureInteractionRate), `${sessions.textureInteractionSessions || 0} из ${sessions.arCompletedSessions || 0} сессий с готовой визуализацией`, sessions.arCompletedSessions || 0, kpis.textureInteractionRate),
+        renderTelemetryKpiCard('ctaClickRate', 'CTR «Связь с менеджером»', formatTelemetryPercent(kpis.ctaClickRate), `${sessions.managerCtaSessions || 0} сессий с менеджерским CTA`, sessions.sessions || 0, kpis.ctaClickRate),
+        renderTelemetryKpiCard('adminCalibrationUsage', 'Использование AR-калибровки', formatTelemetryPercent(kpis.adminCalibrationUsage), `${sessions.adminCalibrationSessions || 0} админ-сессий с калибровкой`, sessions.adminSessions || 0, kpis.adminCalibrationUsage),
+        renderTelemetryKpiCard('errorRatePerSession', 'Ошибок на сессию', formatTelemetryFloat(kpis.errorRatePerSession), `${formatTelemetryPercent(kpis.errorSessionRate)} сессий содержали ошибки`, sessions.sessions || 0, kpis.errorRatePerSession),
+      ].join('');
+    }
+
+    if (elTelemetryDynamics) {
+      elTelemetryDynamics.innerHTML = renderTelemetryDynamics(dashboard && dashboard.timeSeries, filters.days, sourceLabel);
+    }
+
+    if (elTelemetryBreakdown) {
+      elTelemetryBreakdown.innerHTML = `
+        <div class="telemetryPanel">
+          <div class="telemetryPanel__label">Топ форм по взаимодействиям (${escapeHtml(sourceLabel)})</div>
+          <div class="telemetryPanel__list">${formatTelemetryTopList(dashboard && dashboard.topShapes, 'Пока нет данных по формам')}</div>
+        </div>
+        <div class="telemetryPanel">
+          <div class="telemetryPanel__label">Топ текстур по взаимодействиям (${escapeHtml(sourceLabel)})</div>
+          <div class="telemetryPanel__list">${formatTelemetryTopList(dashboard && dashboard.topTextures, 'Пока нет данных по текстурам')}</div>
+        </div>
+      `;
+    }
+
+    if (elTelemetryFunnel) {
+      elTelemetryFunnel.innerHTML = renderTelemetryFunnel(dashboard && dashboard.funnel, sourceLabel);
+    }
+
+    if (elTelemetryDevices) {
+      elTelemetryDevices.innerHTML = renderTelemetryDevices(dashboard && dashboard.deviceSegments, sourceLabel);
+    }
+
+    setTelemetryStatus(`Источник: ${sourceLabel}. Уникальных устройств: ${audience.uniqueVisitors || sessions.uniqueVisitors || 0}. Сессий: ${remote && remote.dashboard ? remoteSessions : (sessions.sessions || 0)}. Повторных заходов: ${audience.repeatVisits || sessions.repeatVisits || 0}. Ошибок: ${remote ? remoteErrorCount : (summary.errors || 0)}.`, '');
+
+    if (elTelemetryList) {
+      const parts = [];
+      if (remote) {
+        const topErrors = Array.isArray(remote.topErrors) ? remote.topErrors.slice(0, 5) : [];
+        parts.push(`
+          <div class="hint mtSm">
+            <b>Удалённая сводка</b><br />
+            Пакеты: ${escapeHtml(String(remoteBatchCount || 0))}<br />
+            Топ событий: ${escapeHtml(remoteTop || '—')}<br />
+            Топ ошибок: ${escapeHtml(topErrors.map((entry) => `${telemetryEventLabel(entry.name)} × ${entry.count}`).join(' · ') || '—')}<br />
+            Локальный топ: ${escapeHtml(topNames || '—')}
+          </div>
+        `);
+      }
+      if (!recent.length) {
+        parts.push('<div class="muted">Локальных событий по выбранным фильтрам пока нет.</div>');
+      } else {
+        recent.slice().reverse().forEach((item) => {
+          const kind = item.kind === 'error' ? 'telemetryItem telemetryItem--error' : 'telemetryItem';
+          const meta = [];
+          if (item.iso) meta.push(item.iso.replace('T', ' ').replace('Z', ''));
+          if (item.sessionId) meta.push(item.sessionId);
+          if (item.props && item.props.deviceType) meta.push(telemetryDeviceLabel(item.props.deviceType));
+          parts.push(`
+            <div class="${kind}">
+              <div class="telemetryItem__head">
+                <div class="telemetryItem__name">${escapeHtml(telemetryEventLabel(item.name))}</div>
+                <div class="telemetryItem__meta">${escapeHtml(meta.join(' · '))}</div>
+              </div>
+              <div class="telemetryItem__body">${escapeHtml(JSON.stringify(item.props || {}, null, 2))}</div>
+            </div>
+          `);
+        });
+      }
+      elTelemetryList.innerHTML = parts.join('');
+    }
   }
+
 
   async function showLoggedInUI(isLoggedIn) {
     elLoginCard.hidden = !!isLoggedIn;
     elMainCard.hidden = !isLoggedIn;
+    if (elTelemetryCard) elTelemetryCard.hidden = !isLoggedIn;
+    if (isLoggedIn) renderTelemetryPanel();
   }
 
   async function login(username, password) {
+    telemetryTrack('admin_login_attempt', { username: String(username || '') });
     setStatus(elLoginStatus, '', `Подключение к API: ${API_BASE_URL} ...`);
     const json = await apiFetch('/auth/login', {
       method: 'POST',
@@ -1145,6 +1554,7 @@ async function apiSyncTexture(shapeId, textureId) {
         const r = parseRoute();
         if (r.name !== 'shape') return;
         const shapeId = decodeURIComponent(r.id || '');
+      telemetryPage('admin_shape', { shapeId, tab: String(r.tab || 'textures') });
         openTextureParamsModal(shapeId, id).catch(err => {
           console.warn(err);
           setStatus(elPaletteStatus, 'err', `Не удалось открыть редактор: ${err.message}`);
@@ -1204,6 +1614,7 @@ try {
     if (!res?.ok) {
       const msg = res?.message || 'Delete failed';
       setStatus(elPaletteStatus, 'error', msg);
+      renderTelemetryPanel();
       return;
     }
   
@@ -1971,6 +2382,38 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
     };
   }
 
+
+  function bindPaletteSettingsTelemetry() {
+    const fields = [
+      ['uvScale', elSettingsUvScale],
+      ['exposureMult', elSettingsExposure],
+      ['contrast', elSettingsContrast],
+      ['saturation', elSettingsSaturation],
+      ['roughnessMult', elSettingsRoughness],
+      ['specStrength', elSettingsSpec],
+      ['normalScale', elSettingsNormalScale],
+      ['bumpScale', elSettingsBumpScale],
+    ];
+    fields.forEach(([param, el]) => {
+      if (!el || el.__telemetryBound) return;
+      const handler = () => {
+        const route = typeof parseRoute === 'function' ? parseRoute() : { id: '' };
+        const shapeId = currentTexShapeId || decodeURIComponent(route && route.id ? route.id : '') || '';
+        const n = Number(el.value);
+        scheduleVisualParamTelemetry('admin_visual_param_change', {
+          shapeId: String(shapeId || ''),
+          textureId: '',
+          param: String(param || ''),
+          value: Number.isFinite(n) ? Number(n.toFixed(4)) : el.value,
+          source: 'palette_defaults',
+        });
+      };
+      el.addEventListener('change', handler);
+      el.addEventListener('blur', handler);
+      el.__telemetryBound = true;
+    });
+  }
+
   function getDefaultsForShape(shapeId) {
     const s = state.paletteSettingsByShapeId.get(shapeId);
     const d = (s && s.defaults && typeof s.defaults === 'object') ? s.defaults : {};
@@ -2106,6 +2549,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
     if (elTexOpenArCalibBtn) {
       elTexOpenArCalibBtn.onclick = () => {
         try { sessionStorage.setItem('admin_ar_return_url', window.location.href); } catch (_) {}
+        telemetryTrack('admin_ar_calibration_open', { shapeId: String(shapeId || ''), textureId: String(itemId || '') });
         window.location.assign(buildArCalibrationUrl(shapeId, itemId));
       };
     }
@@ -2168,6 +2612,14 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
       row.addEventListener('param-change', (e) => {
         // store temp on DOM dataset
         row.dataset.value = String(e.detail.value);
+        const nextValue = Number(e && e.detail ? e.detail.value : row.dataset.value);
+        scheduleVisualParamTelemetry('admin_visual_param_change', {
+          shapeId: String(shapeId || ''),
+          textureId: String(itemId || ''),
+          param: String(schema.key || ''),
+          value: Number.isFinite(nextValue) ? Number(nextValue.toFixed(4)) : nextValue,
+          source: 'texture_modal',
+        });
         scheduleTexturePreviewRedraw(shapeId);
       });
       row.dataset.key = schema.key;
@@ -2618,13 +3070,16 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
     // Clear per-view statuses
     setStatus(elPaletteStatus, '', '');
     if (r.name === 'forms') {
+      telemetryPage('admin_forms', { search: String(elShapeSearch && elShapeSearch.value || '') });
       showView('forms');
       renderShapesList(elShapeSearch.value);
+      renderTelemetryPanel();
       return;
     }
 
     if (r.name === 'shape') {
       const shapeId = decodeURIComponent(r.id || '');
+      telemetryPage('admin_shape', { shapeId, tab: String(r.tab || 'textures') });
       if (!shapeId) {
         location.hash = '#/forms';
         return;
@@ -2667,11 +3122,13 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
         const settings = await ensurePaletteSettingsLoaded(shapeId);
         fillPaletteSettingsForm(settings, shapeId);
       }
+      renderTelemetryPanel();
       return;
     }
   }
 
   async function initAfterLogin() {
+    bindPaletteSettingsTelemetry();
     await ensureShapesLoaded();
     state.paletteByShapeId.clear();
     state.paletteSettingsByShapeId.clear();
@@ -2680,6 +3137,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
     // Default route
     if (!location.hash) location.hash = '#/forms';
     await renderRoute();
+    renderTelemetryPanel();
   }
 
   function bindUI() {
@@ -2687,22 +3145,26 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
       const u = (elLoginUser.value || '').trim();
       const p = (elLoginPass.value || '').trim();
       if (!API_BASE_URL) {
+        telemetryError('admin_login_config_missing', new Error('API_BASE_URL missing'), {});
         setStatus(elLoginStatus, 'err', 'API_BASE_URL не задан. Проверьте admin/config.js');
         return;
       }
       if (!u || !p) {
+        telemetryTrack('admin_login_validation', { reason: 'missing_credentials' });
         setStatus(elLoginStatus, 'warn', 'Введите логин и пароль');
         return;
       }
       elBtnLogin.disabled = true;
       try {
         await login(u, p);
+        telemetryTrack('admin_login_success', { username: u });
         setStatus(elLoginStatus, 'ok', 'Успешно. Загружаем данные…');
         showLoggedInUI(true);
         await initAfterLogin();
         setStatus(elLoginStatus, '', '');
       } catch (e) {
         console.warn(e);
+        telemetryError('admin_login_failed', e, { username: u });
         setToken('');
         setStatus(elLoginStatus, 'err', `Ошибка входа: ${e.message}`);
         showLoggedInUI(false);
@@ -2712,6 +3174,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
     });
 
     elBtnLogout.addEventListener('click', () => {
+      telemetryTrack('admin_logout', {});
       setToken('');
       showLoggedInUI(false);
       setStatus(elStatus, '', '');
@@ -2722,6 +3185,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
     });
 
     elReload.addEventListener('click', async () => {
+      telemetryTrack('admin_reload', {});
       try {
         await ensureShapesLoaded();
         state.paletteByShapeId.clear();
@@ -2730,6 +3194,45 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
         console.warn(e);
         setStatus(elStatus, 'err', `Ошибка обновления: ${e.message}`);
       }
+    });
+
+    [elTelemetryPeriodSelect, elTelemetryDeviceSelect].forEach((el) => {
+      el && el.addEventListener('change', () => {
+        telemetryTrack('admin_telemetry_filter_change', getTelemetryFilters());
+        renderTelemetryPanel();
+      });
+    });
+
+    elTelemetryRefreshBtn && elTelemetryRefreshBtn.addEventListener('click', () => {
+      telemetryTrack('admin_telemetry_refresh', getTelemetryFilters());
+      renderTelemetryPanel();
+    });
+
+    elTelemetryFlushBtn && elTelemetryFlushBtn.addEventListener('click', async () => {
+      telemetryTrack('admin_telemetry_flush_click', {});
+      setTelemetryStatus('Пробуем отправить очередь…', '');
+      try {
+        const ok = telemetry && telemetry.flush ? await telemetry.flush() : false;
+        renderTelemetryPanel();
+        setTelemetryStatus(ok ? 'Очередь отправлена.' : 'Сервер аналитики не подтвердил приём или endpoint недоступен.', ok ? 'ok' : 'warn');
+      } catch (e) {
+        telemetryError('admin_telemetry_flush_failed', e, {});
+        setTelemetryStatus('Ошибка отправки очереди.', 'err');
+      }
+    });
+
+    elTelemetryExportBtn && elTelemetryExportBtn.addEventListener('click', () => {
+      telemetryTrack('admin_telemetry_export', {});
+      const payload = telemetry && telemetry.exportJson ? telemetry.exportJson() : {};
+      downloadJson('webar_telemetry_export.json', payload);
+      renderTelemetryPanel();
+    });
+
+    elTelemetryClearBtn && elTelemetryClearBtn.addEventListener('click', () => {
+      telemetryTrack('admin_telemetry_clear', {});
+      try { telemetry && telemetry.clearAll && telemetry.clearAll(); } catch (_) {}
+      renderTelemetryPanel();
+      setTelemetryStatus('Локальная история очищена.', 'ok');
     });
 
     elShapeSearch.addEventListener('input', () => {
@@ -2764,6 +3267,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
       const r = parseRoute();
       if (r.name !== 'shape') return;
       const shapeId = decodeURIComponent(r.id || '');
+      telemetryPage('admin_shape', { shapeId, tab: String(r.tab || 'textures') });
       if (!shapeId) return;
       try {
         const palette = state.paletteByShapeId.get(shapeId) || (await ensurePaletteLoaded(shapeId));
@@ -2782,6 +3286,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
       const r = parseRoute();
       if (r.name !== 'shape') return;
       const shapeId = decodeURIComponent(r.id || '');
+      telemetryPage('admin_shape', { shapeId, tab: String(r.tab || 'textures') });
       if (!shapeId) return;
       try {
         await ensureBucketIndexLoaded(shapeId, { forceReload: true });
@@ -2794,6 +3299,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
       const r = parseRoute();
       if (r.name !== 'shape') return;
       const shapeId = decodeURIComponent(r.id || '');
+      telemetryPage('admin_shape', { shapeId, tab: String(r.tab || 'textures') });
       if (!shapeId) return;
       renderBucketTextures(shapeId);
     });
@@ -2803,6 +3309,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
       const r = parseRoute();
       if (r.name !== 'shape') return;
       const shapeId = decodeURIComponent(r.id || '');
+      telemetryPage('admin_shape', { shapeId, tab: String(r.tab || 'textures') });
       if (!shapeId) return;
       const palette = state.paletteByShapeId.get(shapeId) || (await ensurePaletteLoaded(shapeId));
       const items = Array.isArray(palette?.items) ? palette.items : [];
@@ -2819,6 +3326,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
       const r = parseRoute();
       if (r.name !== 'shape') return;
       const shapeId = decodeURIComponent(r.id || '');
+      telemetryPage('admin_shape', { shapeId, tab: String(r.tab || 'textures') });
       if (!shapeId) return;
       const set = getSelectedSet(shapeId);
       set.clear();
@@ -2830,6 +3338,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
       const r = parseRoute();
       if (r.name !== 'shape') return;
       const shapeId = decodeURIComponent(r.id || '');
+      telemetryPage('admin_shape', { shapeId, tab: String(r.tab || 'textures') });
       if (!shapeId) return;
       const set = getSelectedSet(shapeId);
       const ids = Array.from(set);
@@ -2852,6 +3361,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
       const r = parseRoute();
       if (r.name !== 'shape') return;
       const shapeId = decodeURIComponent(r.id || '');
+      telemetryPage('admin_shape', { shapeId, tab: String(r.tab || 'textures') });
       if (!shapeId) return;
       try {
         await openBulkParamsModal(shapeId);
@@ -2870,6 +3380,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
           const r = parseRoute();
           if (r.name !== 'shape') return;
           const shapeId = decodeURIComponent(r.id || '');
+      telemetryPage('admin_shape', { shapeId, tab: String(r.tab || 'textures') });
           const quality = String(elUploadQuality?.value || '1k');
           const manualTextureId = normalizeTextureId(elUploadTextureId?.value, shapeId);
           const displayName = String(elUploadTextureName?.value || '').trim();
@@ -3171,6 +3682,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
       const r = parseRoute();
       if (r.name !== 'shape') return;
       const shapeId = decodeURIComponent(r.id || '');
+      telemetryPage('admin_shape', { shapeId, tab: String(r.tab || 'textures') });
       try {
         state.paletteSettingsByShapeId.delete(shapeId);
         const settings = await ensurePaletteSettingsLoaded(shapeId, { forceReload: true });
@@ -3200,6 +3712,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
       const r = parseRoute();
       if (r.name !== 'shape') return;
       const shapeId = decodeURIComponent(r.id || '');
+      telemetryPage('admin_shape', { shapeId, tab: String(r.tab || 'textures') });
       const payload = collectPaletteSettingsFromForm(shapeId);
       elBtnSettingsSave.disabled = true;
       try {
