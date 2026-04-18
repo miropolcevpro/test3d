@@ -367,13 +367,32 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
 /* AR */
 .arTop{
   position:absolute;left:0;right:0;top:0;
-  padding:calc(10px + var(--safe-top)) 12px 10px;
-  display:flex;align-items:center;gap:10px;
+  padding:calc(16px + var(--safe-top)) 12px 12px;
+  display:flex;align-items:flex-start;gap:10px;
+  min-height:calc(72px + var(--safe-top));
   background:linear-gradient(to bottom, rgba(0,0,0,0.55), rgba(0,0,0,0));
 }
-.arTopText{flex:1;min-width:0;}
-.arTitle{font-weight:900;font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.arArea{font-weight:800;font-size:14px;color:rgba(255,255,255,0.80);}
+.arTopText{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:3px;padding-top:2px;}
+.arTitle{
+  font-weight:900;
+  font-size:clamp(15px,4.2vw,18px);
+  line-height:1.12;
+  white-space:normal;
+  overflow:hidden;
+  display:-webkit-box;
+  -webkit-box-orient:vertical;
+  -webkit-line-clamp:2;
+  word-break:break-word;
+}
+.arArea{
+  font-weight:800;
+  font-size:clamp(11px,3.4vw,14px);
+  line-height:1.2;
+  color:rgba(255,255,255,0.80);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
 
 .scanHint{
   position:absolute;left:12px;right:12px;top:90px;
@@ -546,12 +565,12 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   position:absolute;
   right:calc(12px + env(safe-area-inset-right));
   bottom:calc(12px + var(--safe-bottom));
-  width:min(38vw, 176px);
-  padding:8px 10px;
-  border-radius:18px;
-  background:rgba(0,0,0,0.22);
+  width:min(24vw, 112px);
+  padding:6px 8px;
+  border-radius:14px;
+  background:rgba(0,0,0,0.16);
   backdrop-filter: blur(6px);
-  box-shadow:0 10px 28px rgba(0,0,0,0.16);
+  box-shadow:0 8px 22px rgba(0,0,0,0.14);
   z-index:56;
   pointer-events:none;
 }

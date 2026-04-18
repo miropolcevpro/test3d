@@ -1809,21 +1809,21 @@ async function buildBrandedSnapshotBlob() {
 
   const logo = await loadSnapshotLogoImage();
   const shortSide = Math.max(1, Math.min(outCanvas.width, outCanvas.height));
-  const maxLogoWidth = Math.round(shortSide * 0.28);
-  const margin = Math.max(18, Math.round(shortSide * 0.028));
+  const maxLogoWidth = Math.round(shortSide * 0.18);
+  const margin = Math.max(16, Math.round(shortSide * 0.024));
   const logoScale = Math.min(1, maxLogoWidth / Math.max(1, logo.naturalWidth || logo.width || maxLogoWidth));
-  const drawWidth = Math.max(96, Math.round((logo.naturalWidth || logo.width || maxLogoWidth) * logoScale));
-  const drawHeight = Math.max(32, Math.round((logo.naturalHeight || logo.height || Math.max(40, drawWidth * 0.24)) * (drawWidth / Math.max(1, (logo.naturalWidth || logo.width || drawWidth)))));
-  const padX = Math.max(10, Math.round(drawWidth * 0.10));
-  const padY = Math.max(8, Math.round(drawHeight * 0.16));
+  const drawWidth = Math.max(64, Math.round((logo.naturalWidth || logo.width || maxLogoWidth) * logoScale));
+  const drawHeight = Math.max(22, Math.round((logo.naturalHeight || logo.height || Math.max(32, drawWidth * 0.24)) * (drawWidth / Math.max(1, (logo.naturalWidth || logo.width || drawWidth)))));
+  const padX = Math.max(6, Math.round(drawWidth * 0.08));
+  const padY = Math.max(5, Math.round(drawHeight * 0.12));
   const boxX = outCanvas.width - drawWidth - padX * 2 - margin;
   const boxY = outCanvas.height - drawHeight - padY * 2 - margin;
 
   ctx.save();
-  ctx.fillStyle = 'rgba(0,0,0,0.22)';
-  ctx.shadowColor = 'rgba(0,0,0,0.22)';
-  ctx.shadowBlur = Math.max(16, Math.round(shortSide * 0.018));
-  drawRoundedRect(ctx, boxX, boxY, drawWidth + padX * 2, drawHeight + padY * 2, Math.max(18, Math.round(shortSide * 0.018)));
+  ctx.fillStyle = 'rgba(0,0,0,0.14)';
+  ctx.shadowColor = 'rgba(0,0,0,0.14)';
+  ctx.shadowBlur = Math.max(10, Math.round(shortSide * 0.012));
+  drawRoundedRect(ctx, boxX, boxY, drawWidth + padX * 2, drawHeight + padY * 2, Math.max(12, Math.round(shortSide * 0.012)));
   ctx.fill();
   ctx.restore();
 
