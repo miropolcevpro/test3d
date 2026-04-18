@@ -1,5 +1,5 @@
 // BUILD: v28 2026-01-16f (runtime-config)
-const __BUILD_ID__ = "20260418-f24ar";
+const __BUILD_ID__ = "20260418-f24as";
 console.log("[Admin] build", __BUILD_ID__);
 /* Admin (Step 3 start) — shapes list + shape details (read-only palette), router scaffold */
 (async () => {
@@ -289,6 +289,18 @@ function pickMediaUrl(candidates, opts) {
   const elTelemetryClearBtn = $('telemetryClearBtn');
   const elTelemetryPeriodSelect = $('telemetryPeriodSelect');
   const elTelemetryDeviceSelect = $('telemetryDeviceSelect');
+  const elTelemetryErrorReportModal = $('telemetryErrorReportModal');
+  const elTelemetryErrorReportModalCloseBtn = $('telemetryErrorReportModalCloseBtn');
+  const elTelemetryErrorReportCard = $('telemetryErrorReportCard');
+  const elTelemetryErrorReportStatus = $('telemetryErrorReportStatus');
+  const elTelemetryErrorReportRefreshBtn = $('telemetryErrorReportRefreshBtn');
+  const elTelemetryErrorReportCsvBtn = $('telemetryErrorReportCsvBtn');
+  const elTelemetryErrorReportJsonBtn = $('telemetryErrorReportJsonBtn');
+  const elTelemetryErrorSeveritySelect = $('telemetryErrorSeveritySelect');
+  const elTelemetryErrorCategorySelect = $('telemetryErrorCategorySelect');
+  const elTelemetryErrorSourceSelect = $('telemetryErrorSourceSelect');
+  const elTelemetryErrorReportSummary = $('telemetryErrorReportSummary');
+  const elTelemetryErrorReportList = $('telemetryErrorReportList');
 
   // Views
   const elViewShapes = $('viewShapes');
@@ -403,6 +415,8 @@ function pickMediaUrl(candidates, opts) {
 
 
   const visualParamTelemetryTimers = new Map();
+  let telemetryErrorReportState = null;
+  let telemetryErrorReportFiltersState = { severity: 'all', category: 'all', source: 'all' };
 
   function scheduleVisualParamTelemetry(name, props = {}) {
     const key = `${String(name || 'event')}|${String(props.shapeId || '')}|${String(props.textureId || '')}|${String(props.param || '')}`;
@@ -964,6 +978,22 @@ function setTelemetryStatus(message, kind) {
     }
   }
 
+  function downloadTextFile(filename, text, mime) {
+    try {
+      const blob = new Blob([String(text || '')], { type: String(mime || 'text/plain;charset=utf-8') });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => { try { URL.revokeObjectURL(url); } catch (_) {} }, 300);
+    } catch (e) {
+      console.warn(e);
+    }
+  }
+
 
   function formatTelemetryPercent(value) {
     const n = Number(value || 0);
@@ -1084,7 +1114,18 @@ function setTelemetryStatus(message, kind) {
       tiles_load_failed: 'Не загрузился каталог текстур',
       shapes_load_failed: 'Не загрузился каталог форм',
       ar_texture_rail_build_failed: 'Ошибка сборки AR-ленты текстур',
-      ar_texture_rail_refresh_failed: 'Ошибка обновления AR-ленты текстур'
+      ar_texture_rail_refresh_failed: 'Ошибка обновления AR-ленты текстур',
+      ar_texture_rail_shape_switch_failed: 'Ошибка смены формы в AR-ленте',
+      ar_shape_switch_failed: 'Ошибка переключения формы',
+      ar_shape_picker_build_failed: 'Ошибка сборки выбора формы',
+      ar_texture_group_skipped: 'Группа текстур пропущена штатным safeguard',
+      quick_ar_launch_failed: 'Быстрый запуск AR завершился ошибкой',
+      quick_ar_rail_build_failed: 'Ошибка сборки быстрой AR-ленты',
+      detail_open_failed: 'Не удалось открыть карточку формы',
+      app_init_failed: 'Сайт не смог завершить инициализацию',
+      admin_login_config_missing: 'В админке не настроен API base URL',
+      admin_login_failed: 'Ошибка входа в админку',
+      admin_telemetry_flush_failed: 'Ошибка синхронизации аналитики из админки'
     };
     return map[name] || name || '—';
   }
@@ -1127,6 +1168,386 @@ function setTelemetryStatus(message, kind) {
     const parts = [String(baseLabel || '').trim(), telemetryPeriodLabel(filters && filters.days)];
     if (filters && filters.deviceType && filters.deviceType !== 'all') parts.push(telemetryDeviceLabel(filters.deviceType));
     return parts.filter(Boolean).join(' · ');
+  }
+
+  const TELEMETRY_ERROR_SEVERITY_META = {
+    critical: { label: 'Критические', hint: 'Ломают ключевой сценарий или запускают аварийную деградацию.' },
+    medium: { label: 'Средний приоритет', hint: 'Ломают часть UX или отдельный сценарий, но не весь продукт.' },
+    low: { label: 'Некритичные', hint: 'Мягкие деградации и recoverable кейсы.' },
+    diagnostic: { label: 'Служебные', hint: 'Диагностические сигналы и защитные срабатывания.' }
+  };
+
+  const TELEMETRY_ERROR_CATEGORY_META = {
+    ar_session: { label: 'AR / запуск и сессия', hint: 'Ошибки входа в AR, запуска и переключения сценария.' },
+    textures_materials: { label: 'Текстуры и материалы', hint: 'Проблемы загрузки карт, материалов и текстурных рельс.' },
+    palette_content: { label: 'Палитры и контент', hint: 'Ошибки чтения JSON, палитр, каталога форм и контентных файлов.' },
+    snapshot_export: { label: 'Скриншот / snapshot', hint: 'Проблемы запроса и экспорта снимка.' },
+    analytics_backend: { label: 'Аналитика / синхронизация', hint: 'Сбой серверной сводки, синхронизации или telemetry backend.' },
+    admin_save: { label: 'Админка / сохранение', hint: 'Ошибки входа, API и сохранения параметров в админке.' },
+    ui_flow: { label: 'Пользовательский поток / UI', hint: 'Проблемы открытия экранов, переключения формы и secondary flow.' },
+    runtime_js: { label: 'JS runtime', hint: 'Глобальные ошибки окна и необработанные promise rejection.' }
+  };
+
+  const TELEMETRY_ERROR_CATEGORY_ORDER = ['ar_session', 'textures_materials', 'palette_content', 'snapshot_export', 'analytics_backend', 'admin_save', 'ui_flow', 'runtime_js'];
+  const TELEMETRY_ERROR_SEVERITY_ORDER = ['critical', 'medium', 'low', 'diagnostic'];
+
+  const TELEMETRY_ERROR_RULES = {
+    app_init_failed: { severity: 'critical', category: 'ui_flow' },
+    quick_ar_launch_failed: { severity: 'critical', category: 'ar_session' },
+    ar_session_start_failed: { severity: 'critical', category: 'ar_session' },
+    tiles_load_failed: { severity: 'critical', category: 'palette_content' },
+    shapes_load_failed: { severity: 'critical', category: 'palette_content' },
+    palette_load_failed: { severity: 'critical', category: 'palette_content' },
+    palette_parse_failed: { severity: 'critical', category: 'palette_content' },
+    texture_map_load_failed: { severity: 'critical', category: 'textures_materials' },
+    admin_api_error: { severity: 'critical', category: 'admin_save' },
+    admin_ar_calibration_save_failed: { severity: 'critical', category: 'admin_save' },
+    window_error: { severity: 'critical', category: 'runtime_js' },
+    unhandled_rejection: { severity: 'critical', category: 'runtime_js' },
+    ar_texture_rail_build_failed: { severity: 'medium', category: 'textures_materials' },
+    ar_texture_rail_refresh_failed: { severity: 'medium', category: 'textures_materials' },
+    ar_texture_rail_shape_switch_failed: { severity: 'medium', category: 'textures_materials' },
+    ar_shape_switch_failed: { severity: 'medium', category: 'ui_flow' },
+    ar_shape_picker_build_failed: { severity: 'medium', category: 'ui_flow' },
+    detail_open_failed: { severity: 'medium', category: 'ui_flow' },
+    quick_ar_rail_build_failed: { severity: 'medium', category: 'ui_flow' },
+    ar_snapshot_request_failed: { severity: 'medium', category: 'snapshot_export' },
+    ar_snapshot_builtin_failed: { severity: 'medium', category: 'snapshot_export' },
+    gallery_asset_missing: { severity: 'low', category: 'palette_content' },
+    admin_login_failed: { severity: 'medium', category: 'admin_save' },
+    admin_telemetry_flush_failed: { severity: 'medium', category: 'analytics_backend' },
+    admin_login_config_missing: { severity: 'critical', category: 'admin_save' },
+    ar_texture_group_skipped: { severity: 'diagnostic', category: 'textures_materials' }
+  };
+
+  function telemetryErrorSeverityLabel(key) {
+    return (TELEMETRY_ERROR_SEVERITY_META[key] && TELEMETRY_ERROR_SEVERITY_META[key].label) || 'Не определено';
+  }
+
+  function telemetryErrorCategoryLabel(key) {
+    return (TELEMETRY_ERROR_CATEGORY_META[key] && TELEMETRY_ERROR_CATEGORY_META[key].label) || 'Прочее';
+  }
+
+  function telemetryErrorSourceLabel(key) {
+    const map = { site: 'Сайт', admin: 'Админка', all: 'Сайт и админка' };
+    return map[key] || 'Не определено';
+  }
+
+  function normalizeTelemetryErrorSelect(value, allowed, fallback) {
+    const key = String(value || fallback || '').toLowerCase();
+    return allowed.includes(key) ? key : fallback;
+  }
+
+  function getTelemetryErrorReportFilters() {
+    telemetryErrorReportFiltersState = {
+      severity: normalizeTelemetryErrorSelect(elTelemetryErrorSeveritySelect && elTelemetryErrorSeveritySelect.value, ['all'].concat(TELEMETRY_ERROR_SEVERITY_ORDER), 'all'),
+      category: normalizeTelemetryErrorSelect(elTelemetryErrorCategorySelect && elTelemetryErrorCategorySelect.value, ['all'].concat(TELEMETRY_ERROR_CATEGORY_ORDER), 'all'),
+      source: normalizeTelemetryErrorSelect(elTelemetryErrorSourceSelect && elTelemetryErrorSourceSelect.value, ['all', 'site', 'admin'], 'all')
+    };
+    return Object.assign({}, telemetryErrorReportFiltersState);
+  }
+
+  function inferTelemetryErrorSource(item) {
+    const path = String(item && item.path || '');
+    const name = String(item && item.name || '');
+    if (name.startsWith('admin_') || /\/admin(?:\/|$)/i.test(path)) return 'admin';
+    return 'site';
+  }
+
+  function classifyTelemetryError(item) {
+    const name = String(item && item.name || '');
+    const props = item && item.props && typeof item.props === 'object' ? item.props : {};
+    const rule = TELEMETRY_ERROR_RULES[name] || {};
+    let severity = rule.severity || '';
+    let category = rule.category || '';
+    if (!severity) {
+      if (name.includes('window') || name.includes('rejection')) severity = 'critical';
+      else if (name.includes('snapshot')) severity = 'medium';
+      else if (name.includes('palette') || name.includes('tiles') || name.includes('shapes')) severity = 'critical';
+      else if (name.includes('texture') || name.includes('detail_') || name.includes('shape_')) severity = 'medium';
+      else severity = 'diagnostic';
+    }
+    if (!category) {
+      if (name.includes('snapshot')) category = 'snapshot_export';
+      else if (name.includes('palette') || name.includes('tiles') || name.includes('shapes') || name.includes('gallery')) category = 'palette_content';
+      else if (name.includes('texture')) category = 'textures_materials';
+      else if (name.startsWith('admin_')) category = 'admin_save';
+      else if (name.includes('window') || name.includes('rejection')) category = 'runtime_js';
+      else if (name.includes('ar_')) category = 'ar_session';
+      else category = 'ui_flow';
+    }
+    const shapeId = getProp(props, ['shapeId', 'selectedShapeId', 'targetShapeId']);
+    const textureId = getProp(props, ['tileId', 'selectedTileId', 'textureId', 'itemId']);
+    const deviceType = getProp(props, ['deviceType']) || 'unknown';
+    const message = String(props.message || props.reason || props.error || '').trim();
+    const stack = String(props.stack || '').trim();
+    const source = inferTelemetryErrorSource(item);
+    return {
+      raw: item,
+      technicalKey: name || 'error',
+      title: telemetryEventLabel(name || 'error'),
+      severity,
+      severityLabel: telemetryErrorSeverityLabel(severity),
+      category,
+      categoryLabel: telemetryErrorCategoryLabel(category),
+      source,
+      sourceLabel: telemetryErrorSourceLabel(source),
+      iso: String(item && item.iso || ''),
+      ts: Number(item && item.ts || 0) || 0,
+      path: String(item && item.path || ''),
+      version: String(item && item.version || ''),
+      sessionId: String(item && item.sessionId || ''),
+      visitorId: String(item && item.visitorId || props.visitorId || props.deviceId || ''),
+      deviceType,
+      deviceLabel: telemetryDeviceLabel(deviceType),
+      shapeId,
+      textureId,
+      message,
+      stack,
+      summary: message || stack || 'Подробности доступны в техническом payload.',
+      details: Object.assign({}, props)
+    };
+  }
+
+  function buildTelemetryErrorReportItems(rawItems) {
+    return (Array.isArray(rawItems) ? rawItems : [])
+      .map((item) => classifyTelemetryError(item))
+      .sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0) || String(b.iso || '').localeCompare(String(a.iso || '')));
+  }
+
+  function filterTelemetryErrorReportItems(items, filters) {
+    const cfg = filters || {};
+    return (Array.isArray(items) ? items : []).filter((item) => {
+      if (cfg.severity && cfg.severity !== 'all' && item.severity !== cfg.severity) return false;
+      if (cfg.category && cfg.category !== 'all' && item.category !== cfg.category) return false;
+      if (cfg.source && cfg.source !== 'all' && item.source !== cfg.source) return false;
+      return true;
+    });
+  }
+
+  function setTelemetryErrorReportStatus(message, kind) {
+    if (!elTelemetryErrorReportStatus) return;
+    elTelemetryErrorReportStatus.textContent = String(message || '').trim();
+    elTelemetryErrorReportStatus.className = 'status' + (kind ? (' ' + kind) : '');
+  }
+
+  function buildTelemetryErrorSummaryCards(items, sourceLabel, filters, sourceMode) {
+    const arr = Array.isArray(items) ? items : [];
+    const counts = { total: arr.length, critical: 0, medium: 0, low: 0, diagnostic: 0 };
+    arr.forEach((item) => {
+      if (counts[item.severity] != null) counts[item.severity] += 1;
+    });
+    const scopeHint = `${escapeHtml(sourceLabel)} · ${escapeHtml(sourceMode === 'remote' ? 'сводка со всех устройств' : 'только данные этого браузера')}`;
+    const cards = [
+      ['Всего ошибок', counts.total, scopeHint],
+      [telemetryErrorSeverityLabel('critical'), counts.critical, TELEMETRY_ERROR_SEVERITY_META.critical.hint],
+      [telemetryErrorSeverityLabel('medium'), counts.medium, TELEMETRY_ERROR_SEVERITY_META.medium.hint],
+      [telemetryErrorSeverityLabel('low'), counts.low, TELEMETRY_ERROR_SEVERITY_META.low.hint],
+      [telemetryErrorSeverityLabel('diagnostic'), counts.diagnostic, TELEMETRY_ERROR_SEVERITY_META.diagnostic.hint]
+    ];
+    return cards.map(([label, value, hint]) => `
+      <div class="telemetryStat">
+        <div class="telemetryStat__label">${escapeHtml(String(label))}</div>
+        <div class="telemetryStat__value">${escapeHtml(String(value))}</div>
+        <div class="telemetryStat__sub">${escapeHtml(String(hint || ''))}</div>
+      </div>
+    `).join('');
+  }
+
+  function renderTelemetryErrorReportGroups(items) {
+    const arr = Array.isArray(items) ? items : [];
+    if (!arr.length) {
+      return '<div class="muted">По выбранным фильтрам ошибок не найдено.</div>';
+    }
+    return TELEMETRY_ERROR_CATEGORY_ORDER.map((categoryKey) => {
+      const groupItems = arr.filter((item) => item.category === categoryKey);
+      if (!groupItems.length) return '';
+      const meta = TELEMETRY_ERROR_CATEGORY_META[categoryKey] || { label: categoryKey, hint: '' };
+      return `
+        <details class="errorReportGroup" open>
+          <summary class="errorReportGroup__summary">
+            <span>${escapeHtml(meta.label)}</span>
+            <span class="errorReportGroup__count">${escapeHtml(String(groupItems.length))}</span>
+          </summary>
+          <div class="errorReportGroup__hint">${escapeHtml(String(meta.hint || ''))}</div>
+          <div class="errorReportGroup__body">${groupItems.map((item) => {
+            const metaParts = [];
+            if (item.iso) metaParts.push(formatTelemetryDateTime(item.iso));
+            if (item.deviceLabel) metaParts.push(item.deviceLabel);
+            if (item.sourceLabel) metaParts.push(item.sourceLabel);
+            if (item.shapeId) metaParts.push('Форма: ' + item.shapeId);
+            if (item.textureId) metaParts.push('Текстура: ' + item.textureId);
+            if (item.path) metaParts.push(item.path);
+            const detailsPayload = {
+              technicalKey: item.technicalKey,
+              severity: item.severity,
+              category: item.category,
+              source: item.source,
+              sessionId: item.sessionId,
+              visitorId: item.visitorId,
+              version: item.version,
+              path: item.path,
+              deviceType: item.deviceType,
+              shapeId: item.shapeId,
+              textureId: item.textureId,
+              props: item.details || {}
+            };
+            return `
+              <article class="errorReportEntry errorReportEntry--${escapeHtml(item.severity)}">
+                <div class="errorReportEntry__head">
+                  <div class="errorReportEntry__titleWrap">
+                    <div class="errorReportEntry__title">${escapeHtml(item.title)}</div>
+                    <div class="errorReportEntry__meta">${escapeHtml(metaParts.join(' · '))}</div>
+                  </div>
+                  <div class="errorReportEntry__badges">
+                    <span class="telemetryKpi__badge errorBadge errorBadge--${escapeHtml(item.severity)}">${escapeHtml(item.severityLabel)}</span>
+                    <span class="telemetryKpi__badge errorBadge errorBadge--category">${escapeHtml(item.categoryLabel)}</span>
+                  </div>
+                </div>
+                <div class="errorReportEntry__summary">${escapeHtml(item.summary)}</div>
+                <div class="errorReportEntry__tech">technical key: <code>${escapeHtml(item.technicalKey)}</code></div>
+                <details class="errorReportEntry__details">
+                  <summary>Технические детали</summary>
+                  <div class="telemetryItem__body">${escapeHtml(JSON.stringify(detailsPayload, null, 2))}</div>
+                </details>
+              </article>
+            `;
+          }).join('')}</div>
+        </details>
+      `;
+    }).join('');
+  }
+
+  function renderTelemetryErrorReport() {
+    if (!elTelemetryErrorReportCard) return;
+    const state = telemetryErrorReportState || { sourceLabel: '', sourceMode: 'local', baseFilters: getTelemetryFilters(), items: [], visibleItems: [], truncated: false, generatedAt: '' };
+    if (elTelemetryErrorReportSummary) {
+      elTelemetryErrorReportSummary.innerHTML = buildTelemetryErrorSummaryCards(state.visibleItems, state.sourceLabel, state.baseFilters, state.sourceMode);
+    }
+    if (elTelemetryErrorReportList) {
+      const header = [];
+      if (state.truncated) header.push('<div class="hint mtSm">Показана ограниченная выборка последних ошибок. Для стабильности отчёт и экспорт не тянут бесконечный объём записей за раз.</div>');
+      if (state.generatedAt) header.push(`<div class="hint mtSm">Последняя серверная генерация отчёта: ${escapeHtml(formatTelemetryDateTime(state.generatedAt))}</div>`);
+      elTelemetryErrorReportList.innerHTML = header.join('') + renderTelemetryErrorReportGroups(state.visibleItems);
+    }
+    const filterBits = [];
+    if (state.uiFilters && state.uiFilters.severity !== 'all') filterBits.push(telemetryErrorSeverityLabel(state.uiFilters.severity));
+    if (state.uiFilters && state.uiFilters.category !== 'all') filterBits.push(telemetryErrorCategoryLabel(state.uiFilters.category));
+    if (state.uiFilters && state.uiFilters.source !== 'all') filterBits.push(telemetryErrorSourceLabel(state.uiFilters.source));
+    const suffix = filterBits.length ? (' Дополнительные фильтры: ' + filterBits.join(' · ') + '.') : '';
+    setTelemetryErrorReportStatus(`Показаны ошибки: ${state.sourceLabel}. Источник: ${state.sourceMode === 'remote' ? 'сводная аналитика со всех устройств' : 'только данные этого браузера'}. Найдено записей: ${state.visibleItems.length}.${suffix}`, state.truncated ? 'warn' : '');
+  }
+
+  async function loadTelemetryErrorReportData() {
+    const baseFilters = getTelemetryFilters();
+    const uiFilters = getTelemetryErrorReportFilters();
+    let remote = null;
+    try {
+      remote = telemetry && telemetry.getRemoteErrors
+        ? await telemetry.getRemoteErrors({
+            days: baseFilters.days,
+            deviceType: (baseFilters.deviceType === 'all' ? '' : baseFilters.deviceType),
+            limit: 250,
+            items: 1200
+          })
+        : null;
+    } catch (_) {
+      remote = null;
+    }
+
+    const sourceMode = remote && Array.isArray(remote.items) ? 'remote' : 'local';
+    const rawItems = sourceMode === 'remote'
+      ? remote.items
+      : ((telemetry && telemetry.getRecent ? telemetry.getRecent(1200, baseFilters) : []).filter((item) => item && item.kind === 'error'));
+    const items = buildTelemetryErrorReportItems(rawItems);
+    const visibleItems = filterTelemetryErrorReportItems(items, uiFilters);
+    const sourceLabel = telemetrySourceLabel(sourceMode === 'remote' ? 'сводная аналитика' : 'данные этого браузера', baseFilters);
+    telemetryErrorReportState = {
+      remote,
+      sourceMode,
+      sourceLabel,
+      baseFilters,
+      uiFilters,
+      items,
+      visibleItems,
+      truncated: !!(remote && remote.truncated),
+      generatedAt: remote && remote.generatedAt ? remote.generatedAt : ''
+    };
+    renderTelemetryErrorReport();
+    return telemetryErrorReportState;
+  }
+
+  function telemetryErrorExportRows(items) {
+    return (Array.isArray(items) ? items : []).map((item) => ({
+      time: item.iso || '',
+      severity: item.severityLabel,
+      category: item.categoryLabel,
+      source: item.sourceLabel,
+      title: item.title,
+      technicalKey: item.technicalKey,
+      device: item.deviceLabel,
+      shapeId: item.shapeId || '',
+      textureId: item.textureId || '',
+      message: item.message || '',
+      path: item.path || '',
+      sessionId: item.sessionId || '',
+      visitorId: item.visitorId || ''
+    }));
+  }
+
+  function exportTelemetryErrorReportCsv() {
+    const state = telemetryErrorReportState;
+    if (!state) return;
+    const rows = telemetryErrorExportRows(state.visibleItems);
+    const columns = ['time', 'severity', 'category', 'source', 'title', 'technicalKey', 'device', 'shapeId', 'textureId', 'message', 'path', 'sessionId', 'visitorId'];
+    const csv = [columns.join(',')].concat(rows.map((row) => columns.map((key) => {
+      const value = row[key] == null ? '' : String(row[key]);
+      return '"' + value.replace(/"/g, '""') + '"';
+    }).join(','))).join('\n');
+    downloadTextFile('webar_error_report.csv', csv, 'text/csv;charset=utf-8');
+  }
+
+  function exportTelemetryErrorReportJson() {
+    const state = telemetryErrorReportState;
+    if (!state) return;
+    downloadJson('webar_error_report.json', {
+      exportedAt: new Date().toISOString(),
+      scope: {
+        sourceMode: state.sourceMode,
+        sourceLabel: state.sourceLabel,
+        baseFilters: state.baseFilters,
+        reportFilters: state.uiFilters,
+        truncated: state.truncated,
+        generatedAt: state.generatedAt
+      },
+      items: state.visibleItems.map((item) => ({
+        title: item.title,
+        technicalKey: item.technicalKey,
+        severity: item.severity,
+        severityLabel: item.severityLabel,
+        category: item.category,
+        categoryLabel: item.categoryLabel,
+        source: item.source,
+        sourceLabel: item.sourceLabel,
+        iso: item.iso,
+        path: item.path,
+        version: item.version,
+        sessionId: item.sessionId,
+        visitorId: item.visitorId,
+        deviceType: item.deviceType,
+        deviceLabel: item.deviceLabel,
+        shapeId: item.shapeId,
+        textureId: item.textureId,
+        message: item.message,
+        stack: item.stack,
+        props: item.details
+      }))
+    });
+  }
+
+  function syncTelemetryModalBodyState() {
+    const isOpen = !!((elTelemetryModal && !elTelemetryModal.hidden) || (elTelemetryErrorReportModal && !elTelemetryErrorReportModal.hidden));
+    document.body.classList.toggle('modal-open', isOpen);
   }
 
   const TELEMETRY_KPI_STANDARDS = {
@@ -1351,21 +1772,23 @@ function setTelemetryStatus(message, kind) {
     }
 
     if (elTelemetryStats) {
-      elTelemetryStats.innerHTML = [
-        ['AR запусков', metrics.arLaunches || 0],
-        ['Успешный вход AR', metrics.arStarted || 0],
-        ['Дошли до заливки', metrics.arCompleted || 0],
-        ['Смен текстуры', metrics.textureChanges || 0],
-        ['Связь с менеджером', metrics.managerCtaClicks || 0],
-        ['Уникальных посетителей', audience.uniqueVisitors || sessions.uniqueVisitors || 0],
-        ['Сессий', remote && remote.dashboard ? remoteSessions : (sessions.sessions || 0)],
-        ['Повторных заходов', audience.repeatVisits || sessions.repeatVisits || 0],
-        ['Ошибок', remote ? remoteErrorCount : (metrics.errors || summary.errors || 0)],
-        ['Не передано с этого устройства', summary.pending || 0],
-      ].map(([label, value]) => `
-        <div class="telemetryStat">
-          <div class="telemetryStat__label">${escapeHtml(String(label))}</div>
-          <div class="telemetryStat__value">${escapeHtml(String(value))}</div>
+      const stats = [
+        { label: 'AR запусков', value: metrics.arLaunches || 0 },
+        { label: 'Успешный вход AR', value: metrics.arStarted || 0 },
+        { label: 'Дошли до заливки', value: metrics.arCompleted || 0 },
+        { label: 'Смен текстуры', value: metrics.textureChanges || 0 },
+        { label: 'Связь с менеджером', value: metrics.managerCtaClicks || 0 },
+        { label: 'Уникальных посетителей', value: audience.uniqueVisitors || sessions.uniqueVisitors || 0 },
+        { label: 'Сессий', value: remote && remote.dashboard ? remoteSessions : (sessions.sessions || 0) },
+        { label: 'Повторных заходов', value: audience.repeatVisits || sessions.repeatVisits || 0 },
+        { label: 'Ошибок', value: remote ? remoteErrorCount : (metrics.errors || summary.errors || 0), interactive: true, sub: 'Нажмите, чтобы открыть подробный отчёт по ошибкам' },
+        { label: 'Не передано с этого устройства', value: summary.pending || 0 },
+      ];
+      elTelemetryStats.innerHTML = stats.map((item) => `
+        <div class="telemetryStat${item.interactive ? ' telemetryStat--interactive' : ''}"${item.interactive ? ' role="button" tabindex="0" data-error-report="1"' : ''}>
+          <div class="telemetryStat__label">${escapeHtml(String(item.label))}</div>
+          <div class="telemetryStat__value">${escapeHtml(String(item.value))}</div>
+          ${item.interactive ? '<div class="telemetryStat__sub">' + escapeHtml(String(item.sub || '')) + '</div><button class="telemetryStat__cta" type="button" data-action="open-error-report">Подробнее</button>' : ''}
         </div>
       `).join('');
     }
@@ -1454,7 +1877,13 @@ function setTelemetryStatus(message, kind) {
   function showTelemetryModal(open) {
     if (!elTelemetryModal) return;
     elTelemetryModal.hidden = !open;
-    document.body.classList.toggle('modal-open', !!open);
+    syncTelemetryModalBodyState();
+  }
+
+  function showTelemetryErrorReportModal(open) {
+    if (!elTelemetryErrorReportModal) return;
+    elTelemetryErrorReportModal.hidden = !open;
+    syncTelemetryModalBodyState();
   }
 
   async function openTelemetryModal() {
@@ -1464,7 +1893,22 @@ function setTelemetryStatus(message, kind) {
     try { await renderTelemetryPanel(); } catch (_) {}
   }
 
+  async function openTelemetryErrorReportModal() {
+    if (elMainCard && elMainCard.hidden) return;
+    showTelemetryErrorReportModal(true);
+    telemetryTrack('admin_error_report_open', Object.assign({}, getTelemetryFilters(), getTelemetryErrorReportFilters()));
+    try { await loadTelemetryErrorReportData(); } catch (e) {
+      telemetryError('admin_error_report_render_failed', e, getTelemetryFilters());
+      setTelemetryErrorReportStatus('Не удалось построить отчёт по ошибкам.', 'err');
+    }
+  }
+
+  function closeTelemetryErrorReportModal() {
+    showTelemetryErrorReportModal(false);
+  }
+
   function closeTelemetryModal() {
+    closeTelemetryErrorReportModal();
     showTelemetryModal(false);
   }
 
@@ -3338,21 +3782,61 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
         node.addEventListener('click', () => closeTelemetryModal());
       });
     }
+    if (elTelemetryErrorReportModal) {
+      elTelemetryErrorReportModal.querySelectorAll('[data-action="close"]').forEach((node) => {
+        node.addEventListener('click', () => closeTelemetryErrorReportModal());
+      });
+    }
     elTelemetryModalCloseBtn && elTelemetryModalCloseBtn.addEventListener('click', () => closeTelemetryModal());
+    elTelemetryErrorReportModalCloseBtn && elTelemetryErrorReportModalCloseBtn.addEventListener('click', () => closeTelemetryErrorReportModal());
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && elTelemetryModal && !elTelemetryModal.hidden) closeTelemetryModal();
+      if (e.key !== 'Escape') return;
+      if (elTelemetryErrorReportModal && !elTelemetryErrorReportModal.hidden) { closeTelemetryErrorReportModal(); return; }
+      if (elTelemetryModal && !elTelemetryModal.hidden) closeTelemetryModal();
     });
 
     [elTelemetryPeriodSelect, elTelemetryDeviceSelect].forEach((el) => {
       el && el.addEventListener('change', () => {
         telemetryTrack('admin_telemetry_filter_change', getTelemetryFilters());
         renderTelemetryPanel();
+        if (elTelemetryErrorReportModal && !elTelemetryErrorReportModal.hidden) loadTelemetryErrorReportData();
       });
+    });
+
+    [elTelemetryErrorSeveritySelect, elTelemetryErrorCategorySelect, elTelemetryErrorSourceSelect].forEach((el) => {
+      el && el.addEventListener('change', () => {
+        telemetryTrack('admin_error_report_filter_change', Object.assign({}, getTelemetryFilters(), getTelemetryErrorReportFilters()));
+        if (telemetryErrorReportState) {
+          telemetryErrorReportState.uiFilters = getTelemetryErrorReportFilters();
+          telemetryErrorReportState.visibleItems = filterTelemetryErrorReportItems(telemetryErrorReportState.items, telemetryErrorReportState.uiFilters);
+          renderTelemetryErrorReport();
+        }
+      });
+    });
+
+    elTelemetryStats && elTelemetryStats.addEventListener('click', async (e) => {
+      const trigger = e.target.closest('[data-action="open-error-report"], [data-error-report="1"]');
+      if (!trigger) return;
+      e.preventDefault();
+      await openTelemetryErrorReportModal();
+    });
+    elTelemetryStats && elTelemetryStats.addEventListener('keydown', async (e) => {
+      const trigger = e.target.closest('[data-error-report="1"]');
+      if (!trigger) return;
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      await openTelemetryErrorReportModal();
     });
 
     elTelemetryRefreshBtn && elTelemetryRefreshBtn.addEventListener('click', () => {
       telemetryTrack('admin_telemetry_refresh', getTelemetryFilters());
       renderTelemetryPanel();
+      if (elTelemetryErrorReportModal && !elTelemetryErrorReportModal.hidden) loadTelemetryErrorReportData();
+    });
+
+    elTelemetryErrorReportRefreshBtn && elTelemetryErrorReportRefreshBtn.addEventListener('click', async () => {
+      telemetryTrack('admin_error_report_refresh', Object.assign({}, getTelemetryFilters(), getTelemetryErrorReportFilters()));
+      await loadTelemetryErrorReportData();
     });
 
     elTelemetryFlushBtn && elTelemetryFlushBtn.addEventListener('click', async () => {
@@ -3361,6 +3845,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
       try {
         const ok = telemetry && telemetry.flush ? await telemetry.flush() : false;
         renderTelemetryPanel();
+        if (elTelemetryErrorReportModal && !elTelemetryErrorReportModal.hidden) await loadTelemetryErrorReportData();
         setTelemetryStatus(ok ? 'Данные этого браузера переданы на сервер.' : 'Сервер не подтвердил приём данных этого браузера или сводка временно недоступна.', ok ? 'ok' : 'warn');
       } catch (e) {
         telemetryError('admin_telemetry_flush_failed', e, {});
@@ -3375,10 +3860,21 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
       renderTelemetryPanel();
     });
 
+    elTelemetryErrorReportCsvBtn && elTelemetryErrorReportCsvBtn.addEventListener('click', () => {
+      telemetryTrack('admin_error_report_export_csv', Object.assign({}, getTelemetryFilters(), getTelemetryErrorReportFilters()));
+      exportTelemetryErrorReportCsv();
+    });
+
+    elTelemetryErrorReportJsonBtn && elTelemetryErrorReportJsonBtn.addEventListener('click', () => {
+      telemetryTrack('admin_error_report_export_json', Object.assign({}, getTelemetryFilters(), getTelemetryErrorReportFilters()));
+      exportTelemetryErrorReportJson();
+    });
+
     elTelemetryClearBtn && elTelemetryClearBtn.addEventListener('click', () => {
       telemetryTrack('admin_telemetry_clear', {});
       try { telemetry && telemetry.clearAll && telemetry.clearAll(); } catch (_) {}
       renderTelemetryPanel();
+      if (elTelemetryErrorReportModal && !elTelemetryErrorReportModal.hidden) loadTelemetryErrorReportData();
       setTelemetryStatus('Журнал этого браузера очищен.', 'ok');
     });
 

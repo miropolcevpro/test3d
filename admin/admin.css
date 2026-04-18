@@ -1124,6 +1124,192 @@ input:focus,select:focus{border-color:rgba(78,118,137,.65)}
   }
 }
 
+.telemetryStat__sub {
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--tele-muted);
+}
+.telemetryStat--interactive {
+  position: relative;
+  cursor: pointer;
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+.telemetryStat--interactive:hover,
+.telemetryStat--interactive:focus-visible {
+  transform: translateY(-1px);
+  border-color: rgba(37,99,235,.28);
+  box-shadow: 0 16px 30px rgba(37,99,235,.10);
+}
+.telemetryStat--interactive:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px rgba(37,99,235,.14), 0 16px 30px rgba(37,99,235,.10);
+}
+.telemetryStat__cta {
+  margin-top: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(37,99,235,.20);
+  background: rgba(37,99,235,.08);
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 800;
+}
+.telemetryErrorModal__card {
+  width: min(1320px, calc(100vw - 28px));
+}
+.errorReportCard .telemetryGuide { margin-top: 16px; }
+.errorReportToolbar { margin-top: 16px; }
+.errorReportSummary { margin-top: 16px; }
+.errorReportList {
+  max-height: calc(100dvh - 360px);
+}
+.errorReportGroup {
+  margin-top: 14px;
+  border: 1px solid var(--tele-line);
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(248,250,255,.96));
+  box-shadow: 0 10px 24px rgba(15,23,42,.06);
+  overflow: hidden;
+}
+.errorReportGroup__summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--tele-text);
+}
+.errorReportGroup__summary::-webkit-details-marker { display: none; }
+.errorReportGroup__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(37,99,235,.10);
+  color: #1d4ed8;
+  font-size: 12px;
+}
+.errorReportGroup__hint {
+  padding: 0 18px 14px;
+  color: var(--tele-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.errorReportGroup__body {
+  display: grid;
+  gap: 12px;
+  padding: 0 14px 14px;
+}
+.errorReportEntry {
+  border: 1px solid rgba(148,163,184,.18);
+  border-radius: 18px;
+  padding: 14px;
+  background: rgba(248,250,255,.88);
+}
+.errorReportEntry--critical {
+  border-color: rgba(180,35,24,.22);
+  background: linear-gradient(180deg, rgba(254,243,242,.92), rgba(255,251,251,.96));
+}
+.errorReportEntry--medium {
+  border-color: rgba(181,71,8,.22);
+  background: linear-gradient(180deg, rgba(255,250,235,.92), rgba(255,252,245,.96));
+}
+.errorReportEntry--low {
+  border-color: rgba(37,99,235,.16);
+}
+.errorReportEntry--diagnostic {
+  border-color: rgba(102,112,133,.16);
+  background: linear-gradient(180deg, rgba(248,250,252,.96), rgba(255,255,255,.96));
+}
+.errorReportEntry__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+.errorReportEntry__title {
+  font-size: 15px;
+  line-height: 1.35;
+  font-weight: 800;
+  color: var(--tele-text);
+}
+.errorReportEntry__meta {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--tele-muted);
+}
+.errorReportEntry__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.errorBadge--critical {
+  color: var(--tele-risk);
+  background: rgba(254,243,242,.98);
+  border-color: rgba(180,35,24,.18);
+}
+.errorBadge--medium {
+  color: var(--tele-warn);
+  background: rgba(255,250,235,.98);
+  border-color: rgba(181,71,8,.18);
+}
+.errorBadge--low {
+  color: #1d4ed8;
+  background: rgba(239,246,255,.98);
+  border-color: rgba(37,99,235,.18);
+}
+.errorBadge--diagnostic {
+  color: #475467;
+  background: rgba(248,250,252,.98);
+  border-color: rgba(102,112,133,.16);
+}
+.errorBadge--category {
+  color: #334155;
+  background: rgba(255,255,255,.90);
+}
+.errorReportEntry__summary {
+  margin-top: 12px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--tele-text);
+}
+.errorReportEntry__tech {
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--tele-muted);
+}
+.errorReportEntry__details {
+  margin-top: 12px;
+}
+.errorReportEntry__details > summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  color: #1d4ed8;
+}
+@media (max-width: 860px) {
+  .errorReportEntry__head { grid-template-columns: 1fr; display: grid; }
+  .errorReportEntry__badges { justify-content: flex-start; }
+}
+@media (max-width: 560px) {
+  .telemetryErrorModal__card { inset: 0; width: 100vw; max-height: 100dvh; height: 100dvh; border-radius: 0; left: 0; top: 0; transform: none; }
+  .errorReportList { max-height: calc(100dvh - 320px); }
+}
 
 .telemetryCard .hint,
 .telemetryCard .status,

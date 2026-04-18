@@ -5,7 +5,7 @@
   <link rel="icon" href="../favicon.ico" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Админка контента — WebAR плитка</title>
-  <link rel="stylesheet" href="./admin.css?v=20260418-f24ar" />
+  <link rel="stylesheet" href="./admin.css?v=20260418-f24as" />
 </head>
 <body>
   <header class="topbar">
@@ -147,6 +147,74 @@
           </div>
         </div>
       </div>
+
+  <div class="modal telemetryModal telemetryErrorModal" id="telemetryErrorReportModal" hidden>
+    <div class="modal__backdrop" data-action="close"></div>
+    <div class="modal__card telemetryModal__card telemetryErrorModal__card">
+      <div class="modal__head telemetryModal__head">
+        <div>
+          <div class="modal__title">Отчёт по ошибкам</div>
+          <div class="modal__subtitle">Отдельный отчёт по ошибкам за выбранный период и тип устройства. Классификация по критичности и категориям делается поверх уже собранных telemetry error events.</div>
+        </div>
+        <button class="btn btn--ghost telemetryModal__close" id="telemetryErrorReportModalCloseBtn" type="button">Закрыть</button>
+      </div>
+      <div class="modal__body telemetryModal__body">
+        <section class="telemetryCard errorReportCard" id="telemetryErrorReportCard">
+          <div class="paneHead">
+            <h3>Журнал ошибок</h3>
+            <div class="row telemetryActionRow" style="gap:8px; margin:0;">
+              <button class="btn btn--ghost btn--sm telemetryActionBtn" id="telemetryErrorReportRefreshBtn" type="button">Обновить отчёт</button>
+              <button class="btn btn--ghost btn--sm telemetryActionBtn" id="telemetryErrorReportCsvBtn" type="button">Скачать CSV</button>
+              <button class="btn btn--ghost btn--sm telemetryActionBtn telemetryActionBtn--primary" id="telemetryErrorReportJsonBtn" type="button">Скачать JSON</button>
+            </div>
+          </div>
+          <div class="status" id="telemetryErrorReportStatus"></div>
+          <div class="telemetryGuide telemetryGuide--subtle">
+            <div class="telemetryGuide__title">Как читать отчёт</div>
+            <div class="telemetryGuide__text">Сначала идут сводные карточки по критичности, затем фильтры и группировка по категориям. У каждой записи есть понятное название, технический ключ и раскрывающиеся детали.</div>
+          </div>
+          <div class="telemetryToolbar errorReportToolbar">
+            <div class="telemetryFilters">
+              <label class="telemetryFilter">
+                <span>Критичность</span>
+                <select id="telemetryErrorSeveritySelect" class="telemetrySelect">
+                  <option value="all" selected>Все уровни</option>
+                  <option value="critical">Только критические</option>
+                  <option value="medium">Средний приоритет</option>
+                  <option value="low">Некритичные</option>
+                  <option value="diagnostic">Служебные</option>
+                </select>
+              </label>
+              <label class="telemetryFilter">
+                <span>Категория</span>
+                <select id="telemetryErrorCategorySelect" class="telemetrySelect">
+                  <option value="all" selected>Все категории</option>
+                  <option value="ar_session">AR / запуск и сессия</option>
+                  <option value="textures_materials">Текстуры и материалы</option>
+                  <option value="palette_content">Палитры и контент</option>
+                  <option value="snapshot_export">Скриншот / snapshot</option>
+                  <option value="analytics_backend">Аналитика / синхронизация</option>
+                  <option value="admin_save">Админка / сохранение</option>
+                  <option value="ui_flow">Пользовательский поток / UI</option>
+                  <option value="runtime_js">JS runtime</option>
+                </select>
+              </label>
+              <label class="telemetryFilter">
+                <span>Источник</span>
+                <select id="telemetryErrorSourceSelect" class="telemetrySelect">
+                  <option value="all" selected>Сайт и админка</option>
+                  <option value="site">Только сайт</option>
+                  <option value="admin">Только админка</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <div class="telemetryStats errorReportSummary" id="telemetryErrorReportSummary"></div>
+          <div class="telemetryList errorReportList" id="telemetryErrorReportList"></div>
+        </section>
+      </div>
+    </div>
+  </div>
 
       <!-- VIEW: shapes list -->
       <section id="viewShapes">
@@ -582,11 +650,11 @@
     We intentionally do NOT register SW here.
     Cache-busting query params force browsers/CDN to fetch the latest scripts after deploy.
   -->
-  <script src="../js/runtime-config.js?v=20260418-f24ar"></script>
-  <script src="../js/site-env.js?v=20260418-f24ar"></script>
-  <script src="../js/content-identity.js?v=20260418-f24ar"></script>
-  <script src="./config.js?v=20260418-f24ar"></script>
-  <script src="../js/telemetry.js?v=20260418-f24ar"></script>
-  <script src="./admin.js?v=20260418-f24ar"></script>
+  <script src="../js/runtime-config.js?v=20260418-f24as"></script>
+  <script src="../js/site-env.js?v=20260418-f24as"></script>
+  <script src="../js/content-identity.js?v=20260418-f24as"></script>
+  <script src="./config.js?v=20260418-f24as"></script>
+  <script src="../js/telemetry.js?v=20260418-f24as"></script>
+  <script src="./admin.js?v=20260418-f24as"></script>
 </body>
 </html>

@@ -825,6 +825,10 @@
     return fetchRemoteJson(buildRemoteUrl('summary', params || {}));
   }
 
+  function getRemoteErrors(params) {
+    return fetchRemoteJson(buildRemoteUrl('errors', params || {}));
+  }
+
   function getRemoteHealth() {
     return fetchRemoteJson(buildRemoteUrl('health', {}));
   }
@@ -903,6 +907,7 @@
     getSummary: getSummary,
     getDashboardSummary: function (params) { return computeDashboardSummaryFromHistory(filterHistoryRecords(readStorage(STORAGE_HISTORY_KEY, []), params || {})); },
     getRemoteSummary: getRemoteSummary,
+    getRemoteErrors: getRemoteErrors,
     getRemoteHealth: getRemoteHealth,
     getSyncStatus: getSyncStatus,
     clearAll: clearAll,

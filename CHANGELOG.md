@@ -1,3 +1,11 @@
+## 20260418-f24as — admin error report modal with classification and export
+- Release token: `20260418-f24as`
+- Карточка «Ошибок» в аналитике стала точкой входа в отдельный отчёт по ошибкам.
+- Добавлен read-only режим `mode=errors` в telemetry collector без изменения текущего ingestion pipeline и KPI-сводки.
+- В админке появился модальный отчёт по ошибкам: критичность, категории, источник, группировка, раскрытие технических деталей.
+- Добавлен экспорт отчёта в CSV и JSON, плюс честный fallback на локальные ошибки браузера, если серверная сводка недоступна.
+- Дополнительно выровнен `health` version telemetry collector до актуального release token.
+
 ## 20260418-f24ar — admin analytics wording and diagnostics ux polish
 - Release token: `20260418-f24ar`
 - Переименованы технические блоки аналитики в более понятный для администратора язык.
