@@ -1,7 +1,7 @@
-## 20260418-f24au — admin telemetry summary hotfix
-- Release token: `20260418-f24au`
-- Fixed missing telemetry collector dashboard helper functions (`extractVisitorId`, `extractDeviceType`, `pushSeriesBucket`, `formatPercentText`) that caused server `mode=summary` requests to fail with HTTP 500.
-- Preserved the new admin error report modal and export flow from `f24as` without changing telemetry ingestion or AR logic.
+## 20260418-f24av — admin error report getprop hotfix
+- Release token: `20260418-f24av`
+- Fixed admin-side `ReferenceError: getProp is not defined` in the error report classifier, which prevented the detailed error report modal from rendering.
+- Added the missing `getProp()` helper to `admin/admin.js` without changing telemetry ingestion, backend report flow, or AR logic.
 
 ## 20260418-f24as — admin error report modal with classification and export
 - Release token: `20260418-f24as`

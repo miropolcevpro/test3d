@@ -1,5 +1,5 @@
 // BUILD: v28 2026-01-16f (runtime-config)
-const __BUILD_ID__ = "20260418-f24au";
+const __BUILD_ID__ = "20260418-f24av";
 console.log("[Admin] build", __BUILD_ID__);
 /* Admin (Step 3 start) — shapes list + shape details (read-only palette), router scaffold */
 (async () => {
@@ -1248,6 +1248,17 @@ function setTelemetryStatus(message, kind) {
       source: normalizeTelemetryErrorSelect(elTelemetryErrorSourceSelect && elTelemetryErrorSourceSelect.value, ['all', 'site', 'admin'], 'all')
     };
     return Object.assign({}, telemetryErrorReportFiltersState);
+  }
+
+  function getProp(obj, keys) {
+    const source = obj && typeof obj === 'object' ? obj : {};
+    const list = Array.isArray(keys) ? keys : [keys];
+    for (const key of list) {
+      if (!key) continue;
+      const value = source[key];
+      if (value !== undefined && value !== null && value !== '') return value;
+    }
+    return '';
   }
 
   function inferTelemetryErrorSource(item) {
