@@ -1,3 +1,9 @@
+## Fix24x — Admin AR texture calibration via admin session
+- Added an admin-only AR calibration entry from the texture settings modal in the existing admin panel.
+- The site now honors a secure admin AR session and opens the requested shape/texture directly for calibration.
+- Added a calibration panel in AR final mode for live `uvScale` adjustment with autosave back to the palette via the admin API.
+- Release token: `20260418-f24x`
+
 ## Fix24w — AR top title safe offset hotfix
 - Added a dynamic top safe offset for the AR title bar so the form/color label stays visible below Android browser chrome, status bars, notches, and tablet overlays.
 - Lowered the AR header and made the title/subtitle sizing calmer on narrow screens without changing the AR pipeline.

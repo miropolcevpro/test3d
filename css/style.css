@@ -546,6 +546,8 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   font-weight:900;
 }
 .patternTab.active{background:rgba(90,167,255,0.92);}
+.patternTab--admin{display:none;}
+.patternTab--admin.is-enabled{display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;}
 .patternTab--snapshot{white-space:nowrap;}
 .snapshotToast{
   position:absolute;
@@ -649,6 +651,8 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   width:100%;
   margin:2px 0 0;
 }
+.calibrationPanel{gap:10px;}
+.calibrationStepRow .rotationValue{min-width:72px;}
 .finalColors{display:flex;gap:12px;overflow-x:auto;overflow-y:hidden;padding:2px 0 4px;align-items:flex-start;-webkit-overflow-scrolling:touch;}
 .finalColors .swatch{flex:0 0 77px;width:77px;height:77px;border-radius:16px;border-color:rgba(255,255,255,0.20);background-color:rgba(255,255,255,0.04);}
 .finalColors--grouped{gap:10px;align-items:center;}

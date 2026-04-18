@@ -1,5 +1,5 @@
 // BUILD: v28 2026-01-16f (runtime-config)
-const __BUILD_ID__ = "20260418-f24w";
+const __BUILD_ID__ = "20260418-f24x";
 console.log("[Admin] build", __BUILD_ID__);
 /* Admin (Step 3 start) — shapes list + shape details (read-only palette), router scaffold */
 (async () => {
@@ -83,6 +83,14 @@ console.log("[Admin] build", __BUILD_ID__);
     } catch {
       return u;
     }
+  }
+
+  function buildArCalibrationUrl(shapeId, itemId) {
+    const url = new URL(resolveSiteUrl('index.html'));
+    url.searchParams.set('admin_ar', '1');
+    if (shapeId) url.searchParams.set('shape', String(shapeId));
+    if (itemId) url.searchParams.set('texture', String(itemId));
+    return url.toString();
   }
 
   // Bucket base for palette assets (maps, previews). Can be overridden in admin/config.js:
@@ -329,6 +337,7 @@ function pickMediaUrl(candidates, opts) {
   const elTexResetBtn = $('texResetBtn');
   const elTexRevertBtn = $('texRevertBtn');
   const elTexSaveBtn = $('texSaveBtn');
+  const elTexOpenArCalibBtn = $('texOpenArCalibBtn');
 
   /** @type {{ shapes: any[], paletteByShapeId: Map<string, any> }} */
   const state = {
@@ -2093,6 +2102,13 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
 
     elTexModalTitle.textContent = 'Настройка текстуры';
     elTexModalSubtitle.textContent = `Форма: ${shapeId} • Текстура: ${itemId}`;
+
+    if (elTexOpenArCalibBtn) {
+      elTexOpenArCalibBtn.onclick = () => {
+        try { sessionStorage.setItem('admin_ar_return_url', window.location.href); } catch (_) {}
+        window.location.assign(buildArCalibrationUrl(shapeId, itemId));
+      };
+    }
 
     const previewUrl = pickMediaUrl([
       item?.maps?.albedoUrl,

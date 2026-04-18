@@ -12,7 +12,7 @@
     skipWaiting: 'SKIP_WAITING',
     getVersion: 'GET_VERSION',
     activated: 'SW_ACTIVATED',
-    version: 'SW_VERSION'
+    version: '20260418-f24x'
   });
 
   function safeString(value) {
@@ -129,7 +129,7 @@
   if (!siteBasePath.endsWith('/')) siteBasePath += '/';
 
   var config = Object.freeze({
-    version: '20260418-f24w',
+    version: '20260418-f24x',
     site: Object.freeze({
       siteBaseUrl: siteBaseUrl,
       siteBasePath: siteBasePath,
@@ -138,7 +138,7 @@
       isSpecialUrl: isSpecialUrl
     }),
     sw: Object.freeze({
-      version: '20260418-f24w',
+      version: '20260418-f24x',
       scriptFilename: 'sw.js',
       messages: SW_MESSAGES
     }),

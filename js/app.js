@@ -80,6 +80,29 @@ function readBoolQueryFlag(name, defaultValue = false) {
   }
 }
 
+const ADMIN_SESSION_TOKEN_KEY = 'admin_jwt';
+function getAdminSessionToken() {
+  try {
+    return sessionStorage.getItem(ADMIN_SESSION_TOKEN_KEY) || '';
+  } catch (_) {
+    return '';
+  }
+}
+function getAdminArRequest() {
+  try {
+    const q = new URLSearchParams(window.location.search || '');
+    return {
+      enabled: readBoolQueryFlag('admin_ar', false),
+      shapeId: (q.get('shape') || '').trim(),
+      textureId: (q.get('texture') || '').trim(),
+    };
+  } catch (_) {
+    return { enabled: false, shapeId: '', textureId: '' };
+  }
+}
+const ADMIN_AR_REQUEST = getAdminArRequest();
+const ADMIN_AR_ENABLED = !!(ADMIN_AR_REQUEST.enabled && getAdminSessionToken());
+
 // Plane refinement flag: enable with ?planeRefine=1, disable with ?planeRefine=0. Default: enabled.
 const PLANE_REFINE_ENABLED = (() => {
   try {
@@ -174,6 +197,14 @@ const UI = {
   shapePickerList: document.getElementById('shapePickerList'),
   finalColors: document.getElementById('finalColors'),
   btnArSnapshot: document.getElementById('btnArSnapshot'),
+  btnArCalibrate: document.getElementById('btnArCalibrate'),
+  calibrationPanel: document.getElementById('calibrationPanel'),
+  btnCalibrationReset: document.getElementById('btnCalibrationReset'),
+  btnCalibrationScaleMinus: document.getElementById('btnCalibrationScaleMinus'),
+  btnCalibrationScalePlus: document.getElementById('btnCalibrationScalePlus'),
+  calibrationScaleValue: document.getElementById('calibrationScaleValue'),
+  calibrationScaleSlider: document.getElementById('calibrationScaleSlider'),
+  calibrationStatus: document.getElementById('calibrationStatus'),
   snapshotToast: document.getElementById('snapshotToast'),
   snapshotLogoOverlay: document.getElementById('snapshotLogoOverlay'),
   snapshotDismissLayer: document.getElementById('snapshotDismissLayer'),
@@ -405,6 +436,13 @@ const state = {
   snapshotRestoreTimer: 0,
   snapshotToastTimer: 0,
   _snapshotLogoImagePromise: null,
+  adminArEnabled: ADMIN_AR_ENABLED,
+  adminCalibrationOpen: false,
+  adminCalibrationScale: 1.0,
+  adminCalibrationSaveTimer: 0,
+  adminCalibrationSavePromise: null,
+  adminCalibrationStatusTimer: 0,
+  adminCalibrationTargetKey: '',
 
   // internal guards
   _restartingAR: false,
@@ -644,7 +682,12 @@ const selectionHelpers = createSelectionHelpers({
   touchMaterialTextures,
   trimTextureCaches,
 });
-const { setLayout, setTextureRotationDeg, selectTile, disposeSelectionRuntime } = selectionHelpers;
+const { setLayout, setTextureRotationDeg, selectTile: baseSelectTile, disposeSelectionRuntime } = selectionHelpers;
+async function selectTile(tileOrId) {
+  const result = await baseSelectTile(tileOrId);
+  syncAdminCalibrationUi();
+  return result;
+}
 
 const arSessionHelpers = createArSessionHelpers({
   state,
@@ -680,6 +723,214 @@ const computeAreaM2 = () => computeAreaM2FromContours(state.points, state.holes)
 // ------------------------
 // Catalog + Detail rendering (Формы -> деталка формы -> выбор цветов/текстур)
 // ------------------------
+
+function comparableTextureKey(shapeId, value) {
+  if (contentIdentity && typeof contentIdentity.comparableTextureKey === 'function') {
+    return contentIdentity.comparableTextureKey(shapeId, value);
+  }
+  return String(value || '').trim().toLowerCase().replace(/[^a-z0-9_\-]+/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+function formatCalibrationScale(value) {
+  const n = Number(value);
+  return `${Number.isFinite(n) ? n.toFixed(2) : '1.00'}x`;
+}
+
+function clearAdminCalibrationStatusTimer() {
+  if (state.adminCalibrationStatusTimer) {
+    clearTimeout(state.adminCalibrationStatusTimer);
+    state.adminCalibrationStatusTimer = 0;
+  }
+}
+
+function setAdminCalibrationStatus(message, kind = '', hold = false) {
+  if (!UI.calibrationStatus) return;
+  clearAdminCalibrationStatusTimer();
+  UI.calibrationStatus.textContent = String(message || '').trim();
+  UI.calibrationStatus.dataset.kind = kind || '';
+  if (!hold && UI.calibrationStatus.textContent) {
+    state.adminCalibrationStatusTimer = setTimeout(() => {
+      try {
+        UI.calibrationStatus.textContent = '';
+        UI.calibrationStatus.dataset.kind = '';
+      } catch (_) {}
+    }, 1800);
+  }
+}
+
+function getSelectedTileUvScaleValue() {
+  const params = (state.selectedTile && state.selectedTile.params && typeof state.selectedTile.params === 'object') ? state.selectedTile.params : null;
+  const raw = params && (params.uvScale ?? params.repeatScale);
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) return raw;
+  if (raw && typeof raw === 'object') {
+    const x = Number(raw.x);
+    const y = Number(raw.y);
+    if (Number.isFinite(x) && x > 0 && Number.isFinite(y) && y > 0) return (x + y) / 2;
+    if (Number.isFinite(x) && x > 0) return x;
+    if (Number.isFinite(y) && y > 0) return y;
+  }
+  return 1.0;
+}
+
+function updateCalibrationUiValue(value) {
+  const safe = clamp(Number(value) || 1, 0.70, 1.50);
+  state.adminCalibrationScale = safe;
+  if (UI.calibrationScaleValue) UI.calibrationScaleValue.textContent = formatCalibrationScale(safe);
+  if (UI.calibrationScaleSlider) UI.calibrationScaleSlider.value = safe.toFixed(2);
+}
+
+function applySelectedTileUvScaleLive(value) {
+  const safe = clamp(Number(value) || 1, 0.70, 1.50);
+  if (!state.selectedTile) return safe;
+  const params = (state.selectedTile.params && typeof state.selectedTile.params === 'object') ? { ...state.selectedTile.params } : {};
+  params.uvScale = safe;
+  state.selectedTile.params = params;
+
+  const mat = tileMaterial;
+  const fill = fillMesh;
+  const preview = previewPlane;
+  const size = (state.selectedTile && state.selectedTile.tileSizeM) ? state.selectedTile.tileSizeM : { w: 0.2, h: 0.2 };
+  const repeatX = (3 / Math.max(0.001, Number(size.w) || 0.2)) * safe;
+  const repeatY = (3 / Math.max(0.001, Number(size.h) || 0.2)) * safe;
+
+  try {
+    if (mat && mat.uniforms && mat.uniforms.uUvScale) {
+      mat.uniforms.uUvScale.value.set(safe, safe);
+      mat.needsUpdate = true;
+    }
+    if (fill && fill.material) fill.material.needsUpdate = true;
+    if (preview && preview.material && preview.material.map && preview.material.map.repeat) {
+      preview.material.map.repeat.set(repeatX, repeatY);
+      preview.material.needsUpdate = true;
+    }
+  } catch (_) {}
+  return safe;
+}
+
+async function saveAdminCalibrationNow() {
+  if (!state.adminArEnabled || !API_BASE_URL) return false;
+  const token = getAdminSessionToken();
+  if (!token) return false;
+  const shapeId = state.selectedShape && state.selectedShape.id ? String(state.selectedShape.id) : '';
+  const tileId = state.selectedTile && state.selectedTile.id ? String(state.selectedTile.id) : '';
+  if (!shapeId || !tileId) return false;
+  const directPaletteUrl = getDirectPaletteUrlForShape(state.selectedShape, SURFACE_PALETTE_BASE_URL);
+  if (!directPaletteUrl) throw new Error('palette_url_missing');
+
+  setAdminCalibrationStatus('Сохраняем…', 'progress', true);
+  const rawPalette = await fetchJsonResource(directPaletteUrl, { label: `palette ${shapeId}`, cache: 'no-store' });
+  const { payload } = sanitizePalettePayload(rawPalette, { context: directPaletteUrl });
+  const items = Array.isArray(payload && payload.items) ? payload.items.slice() : [];
+  const targetKey = comparableTextureKey(shapeId, tileId);
+  const idx = items.findIndex((it) => comparableTextureKey(shapeId, it && (it.id || it.textureId || '')) === targetKey);
+  if (idx < 0) throw new Error(`texture_not_found_in_palette:${tileId}`);
+
+  const nextItem = { ...items[idx] };
+  const nextParams = (nextItem.params && typeof nextItem.params === 'object') ? { ...nextItem.params } : {};
+  nextParams.uvScale = Number(state.adminCalibrationScale.toFixed(4));
+  nextItem.params = nextParams;
+  items[idx] = nextItem;
+
+  const headers = new Headers({ Accept: 'application/json', Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' });
+  const apiUrl = `${String(API_BASE_URL).replace(/\/+$/, '')}/api/palettes/${encodeURIComponent(shapeId)}`;
+  const res = await fetch(apiUrl, { method: 'POST', headers, cache: 'no-store', body: JSON.stringify({ shapeId, items }) });
+  let json = null;
+  try { json = await res.json(); } catch (_) {}
+  if (!res.ok) throw new Error((json && (json.message || json.error)) || `${res.status} ${res.statusText}`);
+
+  state._allowedTilesByShape.delete(`${shapeId}|fallback:1`);
+  state._allowedTilesByShape.delete(`${shapeId}|fallback:0`);
+  for (const key of Array.from(state._paletteCache.keys())) {
+    if (String(key).includes(shapeId)) state._paletteCache.delete(key);
+  }
+  if (Array.isArray(state.currentAllowedTiles)) {
+    state.currentAllowedTiles = state.currentAllowedTiles.map((tile) => {
+      if (!tile || comparableTextureKey(shapeId, tile.id) !== targetKey) return tile;
+      const p = (tile.params && typeof tile.params === 'object') ? { ...tile.params } : {};
+      p.uvScale = Number(state.adminCalibrationScale.toFixed(4));
+      return { ...tile, params: p };
+    });
+  }
+  if (Array.isArray(state.arTextureGroups)) {
+    state.arTextureGroups = state.arTextureGroups.map((group) => {
+      if (!group || String(group.shapeId || '') !== shapeId) return group;
+      const tiles = Array.isArray(group.tiles) ? group.tiles.map((tile) => {
+        if (!tile || comparableTextureKey(shapeId, tile.id) !== targetKey) return tile;
+        const p = (tile.params && typeof tile.params === 'object') ? { ...tile.params } : {};
+        p.uvScale = Number(state.adminCalibrationScale.toFixed(4));
+        return { ...tile, params: p };
+      }) : group.tiles;
+      return { ...group, tiles };
+    });
+  }
+  setAdminCalibrationStatus('Сохранено', 'ok');
+  return true;
+}
+
+function scheduleAdminCalibrationSave() {
+  if (!state.adminArEnabled) return;
+  if (state.adminCalibrationSaveTimer) clearTimeout(state.adminCalibrationSaveTimer);
+  state.adminCalibrationSaveTimer = setTimeout(() => {
+    state.adminCalibrationSaveTimer = 0;
+    state.adminCalibrationSavePromise = saveAdminCalibrationNow().catch((err) => {
+      console.warn('admin calibration save failed', err);
+      setAdminCalibrationStatus('Ошибка сохранения', 'err', true);
+      return false;
+    }).finally(() => {
+      state.adminCalibrationSavePromise = null;
+    });
+  }, 700);
+}
+
+function stepAdminCalibrationScale(delta) {
+  const next = clamp((Number(state.adminCalibrationScale) || 1) + Number(delta || 0), 0.70, 1.50);
+  updateCalibrationUiValue(applySelectedTileUvScaleLive(next));
+  scheduleAdminCalibrationSave();
+}
+
+function syncAdminCalibrationUi() {
+  const enabled = !!(state.adminArEnabled && state.selectedShape && state.selectedTile);
+  if (UI.btnArCalibrate) {
+    UI.btnArCalibrate.hidden = !enabled;
+    UI.btnArCalibrate.classList.toggle('is-enabled', enabled);
+  }
+  if (!enabled) {
+    state.adminCalibrationTargetKey = '';
+    if (state.adminCalibrationOpen) setCalibrationPanelOpen(false);
+    return;
+  }
+  const nextKey = `${state.selectedShape.id}::${state.selectedTile.id}`;
+  const changed = state.adminCalibrationTargetKey !== nextKey;
+  state.adminCalibrationTargetKey = nextKey;
+  updateCalibrationUiValue(getSelectedTileUvScaleValue());
+  if (changed) setAdminCalibrationStatus('Автосохранение включено', '', false);
+}
+
+function setCalibrationPanelOpen(open) {
+  const next = !!open && state.phase === 'ar_final' && state.adminArEnabled && !!state.selectedTile;
+  state.adminCalibrationOpen = next;
+  if (UI.calibrationPanel) show(UI.calibrationPanel, next);
+  if (UI.btnArCalibrate) {
+    UI.btnArCalibrate.classList.toggle('active', next);
+    UI.btnArCalibrate.setAttribute('aria-expanded', next ? 'true' : 'false');
+  }
+  updateArBottomStripVar(UI);
+}
+
+function applyAdminArEntryContext() {
+  if (!state.adminArEnabled) return false;
+  const shapeId = ADMIN_AR_REQUEST.shapeId ? String(ADMIN_AR_REQUEST.shapeId) : '';
+  if (!shapeId) return false;
+  const shape = state.shapes.find((item) => item && String(item.id) === shapeId);
+  if (!shape) return false;
+  return openDetail(shapeId, { preferredTileId: ADMIN_AR_REQUEST.textureId || '' }).then(() => {
+    syncAdminCalibrationUi();
+    return true;
+  }).catch((err) => {
+    console.warn('admin AR entry failed', err);
+    return false;
+  });
+}
 
 function fillShapeDetailUI(shape) {
   if (!shape) return;
@@ -2616,10 +2867,12 @@ UI.btnViewAR?.addEventListener('click', async (ev) => {
 });
 
 UI.btnArBack?.addEventListener('click', async () => {
+  setCalibrationPanelOpen(false);
   await stopAR();
 });
 
 UI.btnArReset?.addEventListener('click', async () => {
+  setCalibrationPanelOpen(false);
   await fullRestartAR();
 });
 
@@ -2645,6 +2898,7 @@ function normalizeTextureRotationDeg(value, preserveFullCircle = false) {
 function setRotationPanelOpen(open) {
   const next = !!open && state.phase === 'ar_final';
   state.rotationPanelOpen = next;
+  if (next) setCalibrationPanelOpen(false);
   if (UI.rotationPanel) show(UI.rotationPanel, next);
   if (UI.btnTextureRotate) {
     UI.btnTextureRotate.classList.toggle('active', next);
@@ -2761,10 +3015,48 @@ function ensureArFinalControlsBound() {
     UI.rotationSlider.__arBound = true;
   }
 
+  if (UI.btnArCalibrate && !UI.btnArCalibrate.__arBound) {
+    UI.btnArCalibrate.addEventListener('click', () => {
+      const shouldOpen = UI.calibrationPanel ? UI.calibrationPanel.hidden : !state.adminCalibrationOpen;
+      if (shouldOpen) setRotationPanelOpen(false);
+      syncAdminCalibrationUi();
+      setCalibrationPanelOpen(shouldOpen);
+    });
+    UI.btnArCalibrate.__arBound = true;
+  }
+
+  if (UI.btnCalibrationScaleMinus && !UI.btnCalibrationScaleMinus.__arBound) {
+    UI.btnCalibrationScaleMinus.addEventListener('click', () => stepAdminCalibrationScale(-0.05));
+    UI.btnCalibrationScaleMinus.__arBound = true;
+  }
+
+  if (UI.btnCalibrationScalePlus && !UI.btnCalibrationScalePlus.__arBound) {
+    UI.btnCalibrationScalePlus.addEventListener('click', () => stepAdminCalibrationScale(0.05));
+    UI.btnCalibrationScalePlus.__arBound = true;
+  }
+
+  if (UI.btnCalibrationReset && !UI.btnCalibrationReset.__arBound) {
+    UI.btnCalibrationReset.addEventListener('click', () => {
+      updateCalibrationUiValue(applySelectedTileUvScaleLive(1.0));
+      scheduleAdminCalibrationSave();
+    });
+    UI.btnCalibrationReset.__arBound = true;
+  }
+
+  if (UI.calibrationScaleSlider && !UI.calibrationScaleSlider.__arBound) {
+    UI.calibrationScaleSlider.addEventListener('input', (ev) => {
+      const rawValue = ev && ev.target ? ev.target.value : UI.calibrationScaleSlider.value;
+      updateCalibrationUiValue(applySelectedTileUvScaleLive(rawValue));
+      scheduleAdminCalibrationSave();
+    });
+    UI.calibrationScaleSlider.__arBound = true;
+  }
+
   if (UI.btnShapePicker && !UI.btnShapePicker.__arBound) {
     UI.btnShapePicker.addEventListener('click', () => {
       if (!UI.shapePickerPanel || !UI.shapePickerList) return;
       setRotationPanelOpen(false);
+      setCalibrationPanelOpen(false);
       try {
         buildShapePickerList({
           UI,
@@ -2789,6 +3081,7 @@ function ensureArFinalControlsBound() {
 
   if (UI.btnArSnapshot && !UI.btnArSnapshot.__arBound) {
     UI.btnArSnapshot.addEventListener('click', () => {
+      setCalibrationPanelOpen(false);
       handleArSnapshotRequest().catch((err) => {
         console.warn('AR snapshot request failed', err);
         openSystemScreenshotFallback();
@@ -2830,6 +3123,8 @@ UI.btnDone?.addEventListener('click', async () => {
   }
 
   ensureArFinalControlsBound();
+  syncAdminCalibrationUi();
+  setCalibrationPanelOpen(false);
   setLayout(state.layout);
   applyTextureRotationDeg(state.textureRotationDeg, { preserveFullCircle: state.textureRotationDeg === 360 });
 
@@ -2907,9 +3202,13 @@ async function init() {
   setActiveScreen('catalog', UI);
   state.phase = 'catalog';
 
+  if (state.adminArEnabled) {
+    try { await applyAdminArEntryContext(); } catch (_) {}
+  }
+
   // choose default tile
   const defaultId = state.tiles[0]?.id;
-  if (defaultId) await selectTile(defaultId);
+  if (!state.selectedTile && defaultId) await selectTile(defaultId);
 
   // AR title
   if (UI.arProductTitle && state.selectedTile) UI.arProductTitle.textContent = state.selectedTile.name;
