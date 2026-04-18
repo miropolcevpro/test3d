@@ -21,12 +21,14 @@ body{
               var(--bg);
   color:var(--text);
 }
+body.modal-open{overflow:hidden;}
 
 code{background:rgba(255,255,255,.06); padding:.1em .35em; border-radius:.35em}
 
 .topbar{
   position:sticky; top:0;
   display:flex; align-items:center; justify-content:space-between;
+  flex-wrap:wrap; gap:12px 16px;
   padding:14px 18px;
   background: rgba(18,25,36,.9);
   backdrop-filter: blur(10px);
@@ -38,19 +40,23 @@ code{background:rgba(255,255,255,.06); padding:.1em .35em; border-radius:.35em}
 .dot{width:14px;height:14px;border-radius:50%;background:var(--accent); box-shadow:0 0 0 6px rgba(78,118,137,.18)}
 .title{font-weight:700; font-size:14px; letter-spacing:.2px}
 .subtitle{font-size:12px; color:var(--muted)}
-.links{display:flex; gap:10px}
+.links{display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end}
 .link{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-height:38px;
   font-size:12px;
   color:var(--text);
   text-decoration:none;
-  padding:8px 10px;
+  padding:8px 12px;
   border:1px solid var(--line);
   border-radius:10px;
   background:rgba(0,0,0,.12);
 }
 .link:hover{border-color:rgba(255,255,255,.18)}
 
-.wrap{max-width:1100px; margin:18px auto; padding:0 16px 26px}
+.wrap{max-width:1160px; margin:18px auto; padding:0 16px 26px}
 
 .card{
   background: linear-gradient(180deg, rgba(18,25,36,.92), rgba(15,21,31,.92));
@@ -66,6 +72,7 @@ h3{margin:10px 0 10px; font-size:14px}
 .mt{margin-top:16px}
 
 .row{display:flex; gap:10px; align-items:end; flex-wrap:wrap}
+.row--toolbar{align-items:center}
 .tileActions{justify-content:flex-end; gap:8px; margin-top:10px; flex-wrap:wrap}
 .grow{flex:1 1 340px}
 .field{display:flex; flex-direction:column; gap:6px; min-width:220px}
@@ -80,6 +87,10 @@ input,select{
 }
 input:focus,select:focus{border-color:rgba(78,118,137,.65)}
 .btn{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
   background:var(--accent);
   border:none;
   color:#fff;
@@ -87,6 +98,7 @@ input:focus,select:focus{border-color:rgba(78,118,137,.65)}
   border-radius:12px;
   font-weight:700;
   cursor:pointer;
+  text-align:center;
 }
 .btn:hover{filter:brightness(1.05)}
 .btn:disabled{opacity:.5; cursor:not-allowed}
@@ -495,6 +507,57 @@ input:focus,select:focus{border-color:rgba(78,118,137,.65)}
 .pill{ display:inline-block; padding:2px 8px; border-radius:999px; border:1px solid rgba(255,255,255,.12); font-size:11px; color:var(--muted); }
 .pill--set{ color:var(--ok); border-color: rgba(50,205,155,.35); }
 .pill--warn{ color: var(--warn); border-color: rgba(255,209,102,.35); }
+
+.adminLaunchCard{
+  margin-top:14px;
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:14px;
+  align-items:center;
+  padding:16px 18px;
+  border-radius:18px;
+  border:1px solid rgba(255,255,255,.08);
+  background:linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03));
+  box-shadow:0 14px 30px rgba(0,0,0,.18);
+}
+.adminLaunchCard__title{font-size:14px; font-weight:800; color:var(--text);}
+.adminLaunchCard__text{margin-top:6px; font-size:12px; line-height:1.55; color:var(--muted);}
+.adminLaunchCard__btn{min-height:46px; min-width:190px;}
+
+.telemetryModal{ z-index:10030; }
+.telemetryModal__card{
+  width:min(1460px, calc(100vw - 28px));
+  max-height:calc(100dvh - 24px);
+  border-radius:28px;
+  border:1px solid rgba(148,163,184,.22);
+  background:linear-gradient(180deg, rgba(250,252,255,.98), rgba(242,246,252,.98));
+  box-shadow:0 32px 90px rgba(2,6,23,.32);
+}
+.telemetryModal__head{
+  align-items:center;
+  padding:18px 20px 14px;
+  border-bottom:1px solid rgba(148,163,184,.18);
+  background:linear-gradient(180deg, rgba(255,255,255,.92), rgba(248,250,252,.88));
+  backdrop-filter:blur(18px);
+}
+.telemetryModal__head .modal__title{ font-size:18px; color:#08101d; }
+.telemetryModal__head .modal__subtitle{ font-size:12px; color:#415066; max-width:760px; line-height:1.5; }
+.telemetryModal__close{ min-height:42px; min-width:132px; }
+.telemetryModal__body{
+  padding:0 18px 18px;
+  max-height:calc(100dvh - 118px);
+  background:transparent;
+}
+.telemetryModal .telemetryCard{
+  margin:0;
+  padding:14px 2px 2px;
+  border:none;
+  border-radius:0;
+  background:transparent;
+  box-shadow:none;
+}
+.telemetryModal .telemetryToolbar{ margin-top:18px; }
+.telemetryModal .telemetryActionRow{ justify-content:flex-end; }
 
 
 .telemetryCard {
@@ -1063,3 +1126,45 @@ input:focus,select:focus{border-color:rgba(78,118,137,.65)}
 .telemetryCard .telemetryDeviceCard__name,
 .telemetryCard .telemetryTrendRow__label,
 .telemetryCard .telemetryFunnelStep__label { color: var(--tele-text); }
+
+@media (max-width: 920px){
+  .topbar{ align-items:flex-start; }
+  .links{ width:100%; justify-content:flex-start; }
+  .row--toolbar .grow{ flex:1 1 100%; }
+  .adminLaunchCard{ grid-template-columns:1fr; }
+  .adminLaunchCard__btn{ width:100%; }
+  .telemetryModal__card{ width:calc(100vw - 18px); max-height:calc(100dvh - 18px); border-radius:22px; }
+}
+
+@media (max-width: 720px){
+  .wrap{ margin:14px auto; padding:0 12px 20px; }
+  .card{ padding:14px; border-radius:18px; }
+  .links .link{ flex:1 1 calc(50% - 5px); }
+  .row--login, .row--toolbar{ align-items:stretch; }
+  .row--login .field, .row--toolbar .field, .row--toolbar .grow{ min-width:0; width:100%; flex:1 1 100%; }
+  .row--login > .btn, .row--toolbar > .btn, .row--toolbar > .btn--ghost{ width:100%; min-height:44px; }
+  .shapeTop{ gap:10px; align-items:flex-start; flex-direction:column; }
+  .shapeTitle{ width:100%; }
+  .paneHead{ align-items:flex-start; }
+  .telemetryModal__head{ padding:16px 16px 12px; }
+  .telemetryModal__body{ padding:0 14px 14px; max-height:calc(100dvh - 108px); }
+}
+
+@media (max-width: 560px){
+  .topbar{ padding:12px 14px; }
+  .brand{ width:100%; align-items:flex-start; }
+  .links{ gap:8px; }
+  .links .link{ flex:1 1 100%; }
+  .adminLaunchCard{ padding:14px; border-radius:16px; }
+  .telemetryModal__card{ inset:0; width:100vw; max-height:100dvh; height:100dvh; border-radius:0; left:0; top:0; transform:none; }
+  .telemetryModal__head{ padding:14px 14px 12px; }
+  .telemetryModal__close{ width:auto; min-width:108px; }
+  .telemetryModal__body{ padding:0 12px 12px; max-height:calc(100dvh - 96px); }
+  .telemetryModal .telemetryActionRow{ display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); width:100%; }
+  .telemetryModal .telemetryActionBtn{ width:100%; }
+}
+
+@media (max-width: 420px){
+  .telemetryModal .telemetryActionRow{ grid-template-columns:1fr; }
+  .telemetryModal__close{ width:100%; }
+}

@@ -1,5 +1,5 @@
 // BUILD: v28 2026-01-16f (runtime-config)
-const __BUILD_ID__ = "20260418-f24ao";
+const __BUILD_ID__ = "20260418-f24ap";
 console.log("[Admin] build", __BUILD_ID__);
 /* Admin (Step 3 start) — shapes list + shape details (read-only palette), router scaffold */
 (async () => {
@@ -268,6 +268,10 @@ function pickMediaUrl(candidates, opts) {
   const elLoginStatus = $('loginStatus');
   const elStatus = $('status');
   const elReload = $('reloadBtn');
+  const elBtnOpenTelemetry = $('btnOpenTelemetry');
+  const elBtnOpenTelemetryInline = $('btnOpenTelemetryInline');
+  const elTelemetryModal = $('telemetryModal');
+  const elTelemetryModalCloseBtn = $('telemetryModalCloseBtn');
   const elTelemetryCard = $('telemetryCard');
   const elTelemetryStatus = $('telemetryStatus');
   const elTelemetrySources = $('telemetrySources');
@@ -1321,7 +1325,7 @@ function setTelemetryStatus(message, kind) {
 
     let remote = null;
     try {
-      remote = telemetry.getRemoteSummary ? await telemetry.getRemoteSummary({ days: filters.days, deviceType: (filters.deviceType === 'all' ? '' : filters.deviceType), limit: 120 }) : null;
+      remote = telemetry.getRemoteSummary ? await telemetry.getRemoteSummary({ days: filters.days, deviceType: (filters.deviceType === 'all' ? '' : filters.deviceType), limit: 400 }) : null;
     } catch (_) {
       remote = null;
     }
@@ -1447,10 +1451,29 @@ function setTelemetryStatus(message, kind) {
   }
 
 
+  function showTelemetryModal(open) {
+    if (!elTelemetryModal) return;
+    elTelemetryModal.hidden = !open;
+    document.body.classList.toggle('modal-open', !!open);
+  }
+
+  async function openTelemetryModal() {
+    if (elMainCard && elMainCard.hidden) return;
+    showTelemetryModal(true);
+    telemetryTrack('admin_telemetry_open', getTelemetryFilters());
+    try { await renderTelemetryPanel(); } catch (_) {}
+  }
+
+  function closeTelemetryModal() {
+    showTelemetryModal(false);
+  }
+
+
   async function showLoggedInUI(isLoggedIn) {
     elLoginCard.hidden = !!isLoggedIn;
     elMainCard.hidden = !isLoggedIn;
     if (elTelemetryCard) elTelemetryCard.hidden = !isLoggedIn;
+    if (!isLoggedIn) closeTelemetryModal();
     if (isLoggedIn) renderTelemetryPanel();
   }
 
@@ -3300,6 +3323,24 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
         console.warn(e);
         setStatus(elStatus, 'err', `Ошибка обновления: ${e.message}`);
       }
+    });
+
+    const bindTelemetryLauncher = (el) => {
+      el && el.addEventListener('click', async () => {
+        await openTelemetryModal();
+      });
+    };
+    bindTelemetryLauncher(elBtnOpenTelemetry);
+    bindTelemetryLauncher(elBtnOpenTelemetryInline);
+
+    if (elTelemetryModal) {
+      elTelemetryModal.querySelectorAll('[data-action="close"]').forEach((node) => {
+        node.addEventListener('click', () => closeTelemetryModal());
+      });
+    }
+    elTelemetryModalCloseBtn && elTelemetryModalCloseBtn.addEventListener('click', () => closeTelemetryModal());
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && elTelemetryModal && !elTelemetryModal.hidden) closeTelemetryModal();
     });
 
     [elTelemetryPeriodSelect, elTelemetryDeviceSelect].forEach((el) => {
