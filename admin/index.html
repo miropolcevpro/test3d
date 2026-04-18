@@ -5,7 +5,7 @@
   <link rel="icon" href="../favicon.ico" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Админка контента — WebAR плитка</title>
-  <link rel="stylesheet" href="./admin.css?v=20260418-f24ap" />
+  <link rel="stylesheet" href="./admin.css?v=20260418-f24ar" />
 </head>
 <body>
   <header class="topbar">
@@ -59,7 +59,7 @@
           <input id="shapeSearch" type="text" placeholder="Например: klassika или Классика" />
         </label>
 
-        <button class="btn" id="reloadBtn" title="Перезагрузить список и палитру">Обновить</button>
+        <button class="btn" id="reloadBtn" title="Перезагрузить список и палитру">Обновить сводку</button>
         <button class="btn btn--ghost" id="btnOpenTelemetry" title="Открыть панель аналитики">Открыть аналитику</button>
         <button class="btn btn--ghost" id="btnLogout" title="Выйти">Выйти</button>
       </div>
@@ -81,7 +81,7 @@
           <div class="modal__head telemetryModal__head">
             <div>
               <div class="modal__title">Аналитика и ошибки</div>
-              <div class="modal__subtitle">Отдельная панель с локальными и серверными данными, KPI, воронкой AR и журналом событий.</div>
+              <div class="modal__subtitle">Основная сводка показывает посещаемость, AR-воронку и обращения. Техническая диагностика вынесена в отдельный сворачиваемый раздел.</div>
             </div>
             <button class="btn btn--ghost telemetryModal__close" id="telemetryModalCloseBtn" type="button">Закрыть</button>
           </div>
@@ -90,10 +90,10 @@
         <div class="paneHead">
           <h3>Обзор аналитики</h3>
           <div class="row telemetryActionRow" style="gap:8px; margin:0;">
-            <button class="btn btn--ghost btn--sm telemetryActionBtn" id="telemetryRefreshBtn" type="button">Обновить</button>
-            <button class="btn btn--ghost btn--sm telemetryActionBtn telemetryActionBtn--primary" id="telemetryFlushBtn" type="button">Отправить</button>
-            <button class="btn btn--ghost btn--sm telemetryActionBtn" id="telemetryExportBtn" type="button">Экспорт JSON</button>
-            <button class="btn btn--ghost btn--sm telemetryActionBtn telemetryActionBtn--danger" id="telemetryClearBtn" type="button">Очистить</button>
+            <button class="btn btn--ghost btn--sm telemetryActionBtn" id="telemetryRefreshBtn" type="button">Обновить сводку</button>
+            <button class="btn btn--ghost btn--sm telemetryActionBtn telemetryActionBtn--primary" id="telemetryFlushBtn" type="button">Синхронизировать это устройство</button>
+            <button class="btn btn--ghost btn--sm telemetryActionBtn" id="telemetryExportBtn" type="button">Экспорт данных</button>
+            <button class="btn btn--ghost btn--sm telemetryActionBtn telemetryActionBtn--danger" id="telemetryClearBtn" type="button">Очистить журнал этого устройства</button>
           </div>
         </div>
         <div class="status" id="telemetryStatus"></div>
@@ -121,7 +121,10 @@
             </label>
           </div>
         </div>
-        <div class="telemetryBreakdown telemetrySources" id="telemetrySources"></div>
+        <div class="telemetryGuide telemetryGuide--hero">
+          <div class="telemetryGuide__title">Сводная аналитика</div>
+          <div class="telemetryGuide__text">Верхние блоки показывают общую картину по посещаемости, AR-сценарию и обращениям. Эти данные нужны для оценки спроса и поведения пользователей.</div>
+        </div>
         <div class="telemetryStats" id="telemetryStats"></div>
         <div class="telemetryAudience" id="telemetryAudience"></div>
         <div class="telemetryKpis" id="telemetryKpis"></div>
@@ -129,8 +132,17 @@
         <div class="telemetryBreakdown" id="telemetryBreakdown"></div>
         <div class="telemetryBreakdown" id="telemetryFunnel"></div>
         <div class="telemetryBreakdown" id="telemetryDevices"></div>
-        <div class="hint mtSm">Панель разделяет <b>локальные данные текущего браузера</b> и <b>серверные данные backend-коллектора</b>. Метрики считаются по уникальным браузерным устройствам, сессиям и повторным заходам. Кнопка «Отправить» отправляет только локальную очередь <b>этого браузера</b> в backend; события с других устройств должны доезжать автоматически.</div>
-        <div class="telemetryList" id="telemetryList"></div>
+        <details class="telemetryDiag" id="telemetryDiag">
+          <summary class="telemetryDiag__summary">Служебная диагностика аналитики</summary>
+          <div class="telemetryDiag__body">
+            <div class="telemetryGuide telemetryGuide--subtle">
+              <div class="telemetryGuide__title">Когда нужен этот раздел</div>
+              <div class="telemetryGuide__text">Этот раздел нужен только для проверки синхронизации и диагностики. Здесь показаны данные текущего браузера, состояние их передачи на сервер и журнал технических событий.</div>
+            </div>
+            <div class="telemetryBreakdown telemetrySources" id="telemetrySources"></div>
+            <div class="telemetryList" id="telemetryList"></div>
+          </div>
+        </details>
       </section>
           </div>
         </div>
@@ -281,7 +293,7 @@
               </label>
               <div class="row">
                 <button class="btn" id="uploadStartBtn">Загрузить</button>
-                <button class="btn btn--ghost" id="uploadClearBtn" title="Очистить выбранные файлы">Очистить</button>
+                <button class="btn btn--ghost" id="uploadClearBtn" title="Очистить выбранные файлы">Очистить журнал этого устройства</button>
               </div>
               <div class="status" id="uploadStatus"></div>
               <div class="hint mtSm">
@@ -320,7 +332,7 @@
           </p>
 
           <div class="row">
-            <button class="btn btn--ghost" id="btnSettingsReload" title="Перезагрузить настройки из бакета">Обновить</button>
+            <button class="btn btn--ghost" id="btnSettingsReload" title="Перезагрузить настройки из бакета">Обновить сводку</button>
             <button class="btn btn--ghost" id="btnSettingsReset" title="Сбросить поля к рекомендуемым значениям (не сохраняет автоматически)">Сбросить</button>
             <button class="btn" id="btnSettingsSave">Сохранить</button>
           </div>
@@ -570,11 +582,11 @@
     We intentionally do NOT register SW here.
     Cache-busting query params force browsers/CDN to fetch the latest scripts after deploy.
   -->
-  <script src="../js/runtime-config.js?v=20260418-f24ap"></script>
-  <script src="../js/site-env.js?v=20260418-f24ap"></script>
-  <script src="../js/content-identity.js?v=20260418-f24ap"></script>
-  <script src="./config.js?v=20260418-f24ap"></script>
-  <script src="../js/telemetry.js?v=20260418-f24ap"></script>
-  <script src="./admin.js?v=20260418-f24ap"></script>
+  <script src="../js/runtime-config.js?v=20260418-f24ar"></script>
+  <script src="../js/site-env.js?v=20260418-f24ar"></script>
+  <script src="../js/content-identity.js?v=20260418-f24ar"></script>
+  <script src="./config.js?v=20260418-f24ar"></script>
+  <script src="../js/telemetry.js?v=20260418-f24ar"></script>
+  <script src="./admin.js?v=20260418-f24ar"></script>
 </body>
 </html>

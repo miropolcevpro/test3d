@@ -543,6 +543,20 @@ input:focus,select:focus{border-color:rgba(78,118,137,.65)}
 .telemetryModal__head .modal__title{ font-size:18px; color:#08101d; }
 .telemetryModal__head .modal__subtitle{ font-size:12px; color:#415066; max-width:760px; line-height:1.5; }
 .telemetryModal__close{ min-height:42px; min-width:132px; }
+.telemetryModal__close.btn--ghost{
+  color:#ffffff;
+  border:1px solid rgba(7,14,24,.88);
+  background:linear-gradient(180deg, rgba(15,23,42,.96), rgba(7,14,24,.96));
+  box-shadow:0 14px 28px rgba(2,6,23,.24), inset 0 1px 0 rgba(255,255,255,.14);
+}
+.telemetryModal__close.btn--ghost:hover{
+  border-color:rgba(15,23,42,.96);
+  background:linear-gradient(180deg, rgba(30,41,59,.98), rgba(15,23,42,.98));
+}
+.telemetryModal__close.btn--ghost:focus-visible{
+  outline:none;
+  box-shadow:0 0 0 4px rgba(37,99,235,.20), 0 14px 28px rgba(2,6,23,.24), inset 0 1px 0 rgba(255,255,255,.14);
+}
 .telemetryModal__body{
   padding:0 18px 18px;
   max-height:calc(100dvh - 118px);

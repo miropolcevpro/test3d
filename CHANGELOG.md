@@ -1,3 +1,15 @@
+## 20260418-f24ar — admin analytics wording and diagnostics ux polish
+- Release token: `20260418-f24ar`
+- Переименованы технические блоки аналитики в более понятный для администратора язык.
+- Технические данные и журнал событий перенесены в сворачиваемый раздел «Служебная диагностика аналитики».
+- Уточнены подписи кнопок и пояснения по синхронизации данных текущего устройства и общей сводки.
+- Улучшена визуальная иерархия аналитики: добавлены информационные блоки и более чистая структура панели.
+
+## 20260418-f24aq — admin analytics close button contrast hotfix
+- Release token: `20260418-f24aq`
+- Made the analytics modal close button visibly contrast on the light dashboard background.
+- Added dark filled styling, clearer border, hover state and focus ring for the `Закрыть` action.
+
 ## 20260418-f24ap — admin analytics modal + mobile adaptive polish
 - Release token: `20260418-f24ap`
 - Вынес аналитический дашборд в отдельную открывающуюся панель по кнопке «Открыть аналитику».
