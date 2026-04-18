@@ -10,10 +10,16 @@
   var MAX_PENDING = 250;
   var MAX_BATCH = 40;
   var FLUSH_DEBOUNCE_MS = 1800;
+  var AUTO_FLUSH_INTERVAL_MS = 12000;
   var endpointDisabledForSession = false;
   var flushTimer = 0;
   var pageViewSent = false;
   var errorDedupe = Object.create(null);
+  var flushIntervalStarted = false;
+  var lastFlushAttemptAt = 0;
+  var lastFlushSuccessAt = 0;
+  var lastFlushFailedAt = 0;
+  var lastFlushResult = '';
 
   function nowIso() {
     try { return new Date().toISOString(); } catch (_) { return ''; }
@@ -280,6 +286,30 @@
     }, Math.max(0, Number(delayMs || FLUSH_DEBOUNCE_MS) || FLUSH_DEBOUNCE_MS));
   }
 
+  function isPriorityEventName(name) {
+    var key = safeString(name || '');
+    return key === 'ar_launch_click' ||
+      key === 'quick_ar_launch' ||
+      key === 'ar_session_start_requested' ||
+      key === 'ar_session_started' ||
+      key === 'ar_first_point' ||
+      key === 'ar_visualization_ready' ||
+      key === 'texture_select' ||
+      key === 'cta_manager_call' ||
+      key === 'cta_site_click';
+  }
+
+  function startAutoFlushTimer() {
+    if (flushIntervalStarted || !global.setInterval) return;
+    flushIntervalStarted = true;
+    global.setInterval(function () {
+      try {
+        var pending = readStorage(STORAGE_PENDING_KEY, []);
+        if (Array.isArray(pending) && pending.length) flush();
+      } catch (_) {}
+    }, AUTO_FLUSH_INTERVAL_MS);
+  }
+
 
   function isSameOriginEndpoint(endpoint) {
     if (!endpoint) return false;
@@ -293,6 +323,7 @@
   }
 
   function flush() {
+    lastFlushAttemptAt = Date.now();
     var endpoint = pickEndpoint();
     if (!endpoint || endpointDisabledForSession) return Promise.resolve(false);
     if (global.navigator && global.navigator.onLine === false) return Promise.resolve(false);
@@ -315,6 +346,8 @@
         var sent = global.navigator.sendBeacon(endpoint, blob);
         if (sent) {
           removePendingByIds(ids);
+          lastFlushSuccessAt = Date.now();
+          lastFlushResult = 'beacon';
           return Promise.resolve(true);
         }
       } catch (_) {}
@@ -329,13 +362,19 @@
     }).then(function (res) {
       if (res && res.ok) {
         removePendingByIds(ids);
+        lastFlushSuccessAt = Date.now();
+        lastFlushResult = 'ok';
         return true;
       }
       if (res && (res.status === 404 || res.status === 405 || res.status === 501)) {
         endpointDisabledForSession = true;
       }
+      lastFlushFailedAt = Date.now();
+      lastFlushResult = res ? ('http_' + res.status) : 'http_error';
       return false;
     }).catch(function () {
+      lastFlushFailedAt = Date.now();
+      lastFlushResult = 'network_error';
       return false;
     });
   }
@@ -343,7 +382,8 @@
   function track(name, props) {
     var record = buildRecord('event', name, props);
     appendRecord(record);
-    scheduleFlush();
+    if (isPriorityEventName(name)) scheduleFlush(120);
+    else scheduleFlush();
     return record;
   }
 
@@ -366,7 +406,7 @@
     });
     var record = buildRecord('error', name, mergedProps);
     appendRecord(record);
-    scheduleFlush(400);
+    scheduleFlush(120);
     return record;
   }
 
@@ -387,16 +427,19 @@
 
   function getSummary(params) {
     var history = filterHistoryRecords(readStorage(STORAGE_HISTORY_KEY, []), params || {});
+    var pendingItems = readStorage(STORAGE_PENDING_KEY, []);
     var summary = {
       total: history.length,
       events: 0,
       errors: 0,
       byName: {},
       endpoint: pickEndpoint(),
-      pending: readStorage(STORAGE_PENDING_KEY, []).length,
+      pending: pendingItems.length,
       sessionId: getSessionId(),
       visitorId: getVisitorId(),
-      version: getBuildVersion()
+      version: getBuildVersion(),
+      latestLocalEventAt: history.length ? safeString(history[history.length - 1].iso || '') : '',
+      latestPendingEventAt: pendingItems.length ? safeString(pendingItems[pendingItems.length - 1].iso || '') : ''
     };
     history.forEach(function (item) {
       if (!item || !item.name) return;
@@ -786,6 +829,26 @@
     return fetchRemoteJson(buildRemoteUrl('health', {}));
   }
 
+  function getSyncStatus() {
+    var history = readStorage(STORAGE_HISTORY_KEY, []);
+    var pending = readStorage(STORAGE_PENDING_KEY, []);
+    var latestLocalEventAt = history.length ? safeString(history[history.length - 1].iso || '') : '';
+    var latestPendingEventAt = pending.length ? safeString(pending[pending.length - 1].iso || '') : '';
+    return {
+      endpoint: pickEndpoint(),
+      pending: pending.length,
+      totalLocal: history.length,
+      latestLocalEventAt: latestLocalEventAt,
+      latestPendingEventAt: latestPendingEventAt,
+      hasUnsyncedQueue: pending.length > 0,
+      lastFlushAttemptAt: lastFlushAttemptAt ? new Date(lastFlushAttemptAt).toISOString() : '',
+      lastFlushSuccessAt: lastFlushSuccessAt ? new Date(lastFlushSuccessAt).toISOString() : '',
+      lastFlushFailedAt: lastFlushFailedAt ? new Date(lastFlushFailedAt).toISOString() : '',
+      lastFlushResult: lastFlushResult || '',
+      endpointDisabledForSession: !!endpointDisabledForSession
+    };
+  }
+
   function clearAll() {
     try { global.localStorage.removeItem(STORAGE_HISTORY_KEY); } catch (_) {}
     try { global.localStorage.removeItem(STORAGE_PENDING_KEY); } catch (_) {}
@@ -803,6 +866,7 @@
   function bindGlobalErrorHooks() {
     if (bindGlobalErrorHooks.__bound) return;
     bindGlobalErrorHooks.__bound = true;
+    startAutoFlushTimer();
     global.addEventListener('error', function (event) {
       try {
         var err = event && event.error ? event.error : null;
@@ -824,6 +888,8 @@
       if (document && document.visibilityState === 'hidden') flush();
     });
     global.addEventListener('pagehide', function () { flush(); });
+    global.addEventListener('beforeunload', function () { flush(); });
+    global.addEventListener('blur', function () { scheduleFlush(120); });
   }
 
   bindGlobalErrorHooks();
@@ -838,6 +904,7 @@
     getDashboardSummary: function (params) { return computeDashboardSummaryFromHistory(filterHistoryRecords(readStorage(STORAGE_HISTORY_KEY, []), params || {})); },
     getRemoteSummary: getRemoteSummary,
     getRemoteHealth: getRemoteHealth,
+    getSyncStatus: getSyncStatus,
     clearAll: clearAll,
     exportJson: exportJson,
     getSessionId: getSessionId,

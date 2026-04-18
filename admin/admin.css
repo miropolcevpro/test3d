@@ -501,9 +501,9 @@ input:focus,select:focus{border-color:rgba(78,118,137,.65)}
   --tele-bg: linear-gradient(180deg, rgba(250,252,255,.98), rgba(244,247,252,.98));
   --tele-panel: rgba(255,255,255,.92);
   --tele-panel-strong: #ffffff;
-  --tele-text: #09111f;
-  --tele-muted: #344054;
-  --tele-soft: #667085;
+  --tele-text: #050b17;
+  --tele-muted: #182230;
+  --tele-soft: #344054;
   --tele-line: rgba(100,116,139,.24);
   --tele-line-strong: rgba(71,85,105,.34);
   --tele-accent: #2563eb;
@@ -615,6 +615,50 @@ input:focus,select:focus{border-color:rgba(78,118,137,.65)}
 .telemetryToolbar .btn--ghost:hover {
   border-color: rgba(37,99,235,.28);
   background: rgba(255,255,255,.96);
+}
+.telemetryCard .paneHead .row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.telemetryActionBtn {
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 14px;
+  font-size: 13px;
+  font-weight: 800;
+  color: #0b1220 !important;
+  border: 1px solid rgba(71,85,105,.22) !important;
+  background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(241,245,249,.98)) !important;
+  box-shadow: 0 10px 22px rgba(15,23,42,.10);
+}
+.telemetryActionBtn:hover {
+  border-color: rgba(37,99,235,.30) !important;
+  background: linear-gradient(180deg, rgba(255,255,255,1), rgba(239,246,255,1)) !important;
+}
+.telemetryActionBtn--primary {
+  color: #ffffff !important;
+  border-color: rgba(37,99,235,.85) !important;
+  background: linear-gradient(180deg, #2563eb, #1d4ed8) !important;
+  box-shadow: 0 14px 28px rgba(37,99,235,.28);
+}
+.telemetryActionBtn--primary:hover {
+  background: linear-gradient(180deg, #2563eb, #1e40af) !important;
+}
+.telemetryActionBtn--danger {
+  color: #7a271a !important;
+  border-color: rgba(217,45,32,.22) !important;
+  background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(254,242,242,.98)) !important;
+}
+.telemetrySources {
+  margin-top: 16px;
+}
+.telemetrySources .telemetryPanel__item span {
+  color: var(--tele-muted);
+}
+.telemetrySources .telemetryPanel__item b {
+  color: var(--tele-text);
 }
 .telemetryStats {
   display: grid;
@@ -1003,3 +1047,19 @@ input:focus,select:focus{border-color:rgba(78,118,137,.65)}
   }
 }
 
+
+.telemetryCard .hint,
+.telemetryCard .status,
+.telemetryCard .telemetryItem__meta,
+.telemetryCard .telemetryPanel__sub,
+.telemetryCard .telemetryKpi__sub,
+.telemetryCard .telemetryKpi__target,
+.telemetryCard .telemetryHeroStat__hint,
+.telemetryCard .telemetryTrendRow__meta,
+.telemetryCard .telemetryDeviceCard__meta,
+.telemetryCard .telemetryFunnelStep__meta { color: var(--tele-muted); }
+.telemetryCard .telemetryItem__body,
+.telemetryCard .telemetryItem__name,
+.telemetryCard .telemetryDeviceCard__name,
+.telemetryCard .telemetryTrendRow__label,
+.telemetryCard .telemetryFunnelStep__label { color: var(--tele-text); }

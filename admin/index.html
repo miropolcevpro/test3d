@@ -5,7 +5,7 @@
   <link rel="icon" href="../favicon.ico" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Админка контента — WebAR плитка</title>
-  <link rel="stylesheet" href="./admin.css?v=20260418-f24ak" />
+  <link rel="stylesheet" href="./admin.css?v=20260418-f24al" />
 </head>
 <body>
   <header class="topbar">
@@ -70,10 +70,10 @@
         <div class="paneHead">
           <h3>Аналитика и ошибки</h3>
           <div class="row" style="gap:8px; margin:0;">
-            <button class="btn btn--ghost btn--sm" id="telemetryRefreshBtn" type="button">Обновить</button>
-            <button class="btn btn--ghost btn--sm" id="telemetryFlushBtn" type="button">Отправить</button>
-            <button class="btn btn--ghost btn--sm" id="telemetryExportBtn" type="button">Экспорт JSON</button>
-            <button class="btn btn--ghost btn--sm" id="telemetryClearBtn" type="button">Очистить</button>
+            <button class="btn btn--ghost btn--sm telemetryActionBtn" id="telemetryRefreshBtn" type="button">Обновить</button>
+            <button class="btn btn--ghost btn--sm telemetryActionBtn telemetryActionBtn--primary" id="telemetryFlushBtn" type="button">Отправить</button>
+            <button class="btn btn--ghost btn--sm telemetryActionBtn" id="telemetryExportBtn" type="button">Экспорт JSON</button>
+            <button class="btn btn--ghost btn--sm telemetryActionBtn telemetryActionBtn--danger" id="telemetryClearBtn" type="button">Очистить</button>
           </div>
         </div>
         <div class="status" id="telemetryStatus"></div>
@@ -101,6 +101,7 @@
             </label>
           </div>
         </div>
+        <div class="telemetryBreakdown telemetrySources" id="telemetrySources"></div>
         <div class="telemetryStats" id="telemetryStats"></div>
         <div class="telemetryAudience" id="telemetryAudience"></div>
         <div class="telemetryKpis" id="telemetryKpis"></div>
@@ -108,7 +109,7 @@
         <div class="telemetryBreakdown" id="telemetryBreakdown"></div>
         <div class="telemetryBreakdown" id="telemetryFunnel"></div>
         <div class="telemetryBreakdown" id="telemetryDevices"></div>
-        <div class="hint mtSm">Панель показывает локальные события браузера и, если развёрнут backend-коллектор <code>/api/telemetry</code>, ещё и сводную remote-статистику по всем устройствам. Метрики считаются по уникальным браузерным устройствам, сессиям и повторным заходам. Кнопка «Отправить» отправляет локальную очередь в backend.</div>
+        <div class="hint mtSm">Панель разделяет <b>локальные данные текущего браузера</b> и <b>серверные данные backend-коллектора</b>. Метрики считаются по уникальным браузерным устройствам, сессиям и повторным заходам. Кнопка «Отправить» отправляет только локальную очередь <b>этого браузера</b> в backend; события с других устройств должны доезжать автоматически.</div>
         <div class="telemetryList" id="telemetryList"></div>
       </section>
 
@@ -546,11 +547,11 @@
     We intentionally do NOT register SW here.
     Cache-busting query params force browsers/CDN to fetch the latest scripts after deploy.
   -->
-  <script src="../js/runtime-config.js?v=20260418-f24ak"></script>
-  <script src="../js/site-env.js?v=20260418-f24ak"></script>
-  <script src="../js/content-identity.js?v=20260418-f24ak"></script>
-  <script src="./config.js?v=20260418-f24ak"></script>
-  <script src="../js/telemetry.js?v=20260418-f24ak"></script>
-  <script src="./admin.js?v=20260418-f24ak"></script>
+  <script src="../js/runtime-config.js?v=20260418-f24al"></script>
+  <script src="../js/site-env.js?v=20260418-f24al"></script>
+  <script src="../js/content-identity.js?v=20260418-f24al"></script>
+  <script src="./config.js?v=20260418-f24al"></script>
+  <script src="../js/telemetry.js?v=20260418-f24al"></script>
+  <script src="./admin.js?v=20260418-f24al"></script>
 </body>
 </html>

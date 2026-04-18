@@ -1,5 +1,5 @@
 // BUILD: v28 2026-01-16f (runtime-config)
-const __BUILD_ID__ = "20260418-f24ak";
+const __BUILD_ID__ = "20260418-f24al";
 console.log("[Admin] build", __BUILD_ID__);
 /* Admin (Step 3 start) — shapes list + shape details (read-only palette), router scaffold */
 (async () => {
@@ -270,6 +270,7 @@ function pickMediaUrl(candidates, opts) {
   const elReload = $('reloadBtn');
   const elTelemetryCard = $('telemetryCard');
   const elTelemetryStatus = $('telemetryStatus');
+  const elTelemetrySources = $('telemetrySources');
   const elTelemetryStats = $('telemetryStats');
   const elTelemetryAudience = $('telemetryAudience');
   const elTelemetryKpis = $('telemetryKpis');
@@ -972,6 +973,69 @@ function setTelemetryStatus(message, kind) {
     return n.toFixed(2);
   }
 
+  function formatTelemetryDateTime(value) {
+    if (!value) return '—';
+    try {
+      const d = new Date(value);
+      if (!Number.isFinite(d.getTime())) return String(value);
+      return d.toLocaleString('ru-RU');
+    } catch (_) {
+      return String(value);
+    }
+  }
+
+  function renderTelemetrySources(localSync, remote, sourceLabel) {
+    const local = localSync || {};
+    const remoteReady = !!(remote && remote.ok);
+    const remoteGeneratedAt = remote && remote.generatedAt ? formatTelemetryDateTime(remote.generatedAt) : '—';
+    const remoteLatestEventAt = remote && remote.latestEventAt ? formatTelemetryDateTime(remote.latestEventAt) : '—';
+    const localLast = formatTelemetryDateTime(local.latestLocalEventAt || '');
+    const localPendingLast = formatTelemetryDateTime(local.latestPendingEventAt || '');
+    const localFlushOk = formatTelemetryDateTime(local.lastFlushSuccessAt || '');
+    const localFlushFail = formatTelemetryDateTime(local.lastFlushFailedAt || '');
+    const localResult = local.lastFlushResult ? String(local.lastFlushResult) : '—';
+    const pending = Number(local.pending || 0) || 0;
+    const syncBadge = pending > 0
+      ? '<span class="telemetryKpi__badge telemetryKpi__badge--warn">Есть несинхронизированная очередь</span>'
+      : '<span class="telemetryKpi__badge telemetryKpi__badge--good">Локальная очередь синхронизирована</span>';
+    const remoteBadge = remoteReady
+      ? '<span class="telemetryKpi__badge telemetryKpi__badge--good">Серверная аналитика активна</span>'
+      : '<span class="telemetryKpi__badge telemetryKpi__badge--warn">Серверная сводка недоступна</span>';
+    return `
+      <div class="telemetryPanel">
+        <div class="telemetryKpi__head">
+          <div class="telemetryPanel__label">Локальные данные текущего браузера</div>
+          ${syncBadge}
+        </div>
+        <div class="telemetryPanel__sub">Источник: текущий браузер и устройство. Кнопка «Отправить» отправляет только эту локальную очередь.</div>
+        <div class="telemetryPanel__list">
+          <div class="telemetryPanel__item"><span>Локальных событий</span><b>${escapeHtml(String(local.totalLocal || 0))}</b></div>
+          <div class="telemetryPanel__item"><span>В очереди на отправку</span><b>${escapeHtml(String(pending))}</b></div>
+          <div class="telemetryPanel__item"><span>Последнее локальное событие</span><b>${escapeHtml(localLast)}</b></div>
+          <div class="telemetryPanel__item"><span>Последнее событие в очереди</span><b>${escapeHtml(localPendingLast)}</b></div>
+          <div class="telemetryPanel__item"><span>Последняя успешная отправка</span><b>${escapeHtml(localFlushOk)}</b></div>
+          <div class="telemetryPanel__item"><span>Последняя ошибка отправки</span><b>${escapeHtml(localFlushFail)}</b></div>
+          <div class="telemetryPanel__item"><span>Последний результат flush</span><b>${escapeHtml(localResult)}</b></div>
+        </div>
+      </div>
+      <div class="telemetryPanel">
+        <div class="telemetryKpi__head">
+          <div class="telemetryPanel__label">Серверные данные backend-коллектора</div>
+          ${remoteBadge}
+        </div>
+        <div class="telemetryPanel__sub">${escapeHtml(sourceLabel)}. Серверные данные появляются после автоотправки с пользовательских устройств или ручной отправки локальной очереди.</div>
+        <div class="telemetryPanel__list">
+          <div class="telemetryPanel__item"><span>Удалённых событий</span><b>${escapeHtml(String(remote && remote.totals ? (remote.totals.events || 0) : 0))}</b></div>
+          <div class="telemetryPanel__item"><span>Удалённых сессий</span><b>${escapeHtml(String(remote && remote.totals ? (remote.totals.sessions || 0) : 0))}</b></div>
+          <div class="telemetryPanel__item"><span>Пакетов в хранилище</span><b>${escapeHtml(String(remote && remote.totals ? (remote.totals.batches || 0) : 0))}</b></div>
+          <div class="telemetryPanel__item"><span>Последнее серверное событие</span><b>${escapeHtml(remoteLatestEventAt)}</b></div>
+          <div class="telemetryPanel__item"><span>Последнее обновление сводки</span><b>${escapeHtml(remoteGeneratedAt)}</b></div>
+          <div class="telemetryPanel__item"><span>Backend endpoint</span><b>${escapeHtml(remoteReady ? 'Подключён' : 'Нет ответа')}</b></div>
+        </div>
+      </div>
+    `;
+  }
+
 
   function telemetryEventLabel(name) {
     const map = {
@@ -1276,6 +1340,11 @@ function setTelemetryStatus(message, kind) {
     const audience = dashboard && dashboard.audience ? dashboard.audience : {};
     const kpis = dashboard && dashboard.kpis ? dashboard.kpis : {};
     const sourceLabel = telemetrySourceLabel((remote && remote.dashboard) ? 'общая сводка' : 'локальная история браузера', filters);
+    const localSync = telemetry && telemetry.getSyncStatus ? telemetry.getSyncStatus() : { pending: summary.pending || 0, totalLocal: summary.total || 0 };
+
+    if (elTelemetrySources) {
+      elTelemetrySources.innerHTML = renderTelemetrySources(localSync, remote, sourceLabel);
+    }
 
     if (elTelemetryStats) {
       elTelemetryStats.innerHTML = [
@@ -1337,7 +1406,7 @@ function setTelemetryStatus(message, kind) {
       elTelemetryDevices.innerHTML = renderTelemetryDevices(dashboard && dashboard.deviceSegments, sourceLabel);
     }
 
-    setTelemetryStatus(`Источник: ${sourceLabel}. Уникальных устройств: ${audience.uniqueVisitors || sessions.uniqueVisitors || 0}. Сессий: ${remote && remote.dashboard ? remoteSessions : (sessions.sessions || 0)}. Повторных заходов: ${audience.repeatVisits || sessions.repeatVisits || 0}. Ошибок: ${remote ? remoteErrorCount : (summary.errors || 0)}.`, '');
+    setTelemetryStatus(`Источник метрик: ${sourceLabel}. Локальная очередь: ${summary.pending || 0}. Последнее серверное обновление: ${remote && remote.generatedAt ? formatTelemetryDateTime(remote.generatedAt) : 'нет данных'}.`, (summary.pending || 0) > 0 ? 'warn' : '');
 
     if (elTelemetryList) {
       const parts = [];
@@ -3247,11 +3316,11 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
 
     elTelemetryFlushBtn && elTelemetryFlushBtn.addEventListener('click', async () => {
       telemetryTrack('admin_telemetry_flush_click', {});
-      setTelemetryStatus('Пробуем отправить очередь…', '');
+      setTelemetryStatus('Пробуем отправить локальную очередь этого браузера…', '');
       try {
         const ok = telemetry && telemetry.flush ? await telemetry.flush() : false;
         renderTelemetryPanel();
-        setTelemetryStatus(ok ? 'Очередь отправлена.' : 'Сервер аналитики не подтвердил приём или endpoint недоступен.', ok ? 'ok' : 'warn');
+        setTelemetryStatus(ok ? 'Локальная очередь этого браузера отправлена.' : 'Локальная очередь не была подтверждена сервером или endpoint недоступен.', ok ? 'ok' : 'warn');
       } catch (e) {
         telemetryError('admin_telemetry_flush_failed', e, {});
         setTelemetryStatus('Ошибка отправки очереди.', 'err');
