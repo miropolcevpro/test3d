@@ -60,6 +60,17 @@ export function createArSessionHelpers(ctx = {}) {
     state.arTextureGroups = [];
     state._arTextureGroupsSeq = (state._arTextureGroupsSeq || 0) + 1;
     state._arTextureGroupsPromise = null;
+    state.cameraAccessEnabled = false;
+    state.snapshotInProgress = false;
+    state.snapshotFallbackActive = false;
+    if (state.snapshotRestoreTimer) {
+      clearTimeout(state.snapshotRestoreTimer);
+      state.snapshotRestoreTimer = 0;
+    }
+    if (state.snapshotToastTimer) {
+      clearTimeout(state.snapshotToastTimer);
+      state.snapshotToastTimer = 0;
+    }
 
     try {
       const btnTextureRotate = document.getElementById('btnTextureRotate');
@@ -74,6 +85,15 @@ export function createArSessionHelpers(ctx = {}) {
       if (rotationValue) rotationValue.textContent = '0°';
       const rotationSlider = document.getElementById('rotationSlider');
       if (rotationSlider) rotationSlider.value = '0';
+      const snapshotToast = document.getElementById('snapshotToast');
+      if (snapshotToast) {
+        snapshotToast.hidden = true;
+        snapshotToast.textContent = '';
+      }
+      const snapshotLogoOverlay = document.getElementById('snapshotLogoOverlay');
+      if (snapshotLogoOverlay) snapshotLogoOverlay.hidden = true;
+      const snapshotDismissLayer = document.getElementById('snapshotDismissLayer');
+      if (snapshotDismissLayer) snapshotDismissLayer.hidden = true;
     } catch (_) {}
 
     if (ctx.reticle) ctx.reticle.visible = false;

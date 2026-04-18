@@ -1,3 +1,10 @@
+## Fix24u — AR snapshot button with branded export fallback
+- Added an AR `Снимок` button in the final visualization toolbar.
+- Built-in branded capture now hides the bottom AR menu, exports a PNG with the завод logo, and uses native share when supported.
+- Added a safe fallback mode for devices where direct export cannot capture the composited AR frame: the app hides the bottom menu, overlays the logo, and prompts the user to make a system screenshot.
+- Requested `camera-access` as an optional WebXR feature and detect support without making AR startup brittle.
+- Release token: `20260418-f24u`
+
 ## Fix24t — AR shape picker auto-scrolls unified texture rail
 - When a user selects a shape through `Выбрать форму` in AR, the bottom unified texture rail now auto-scrolls to that shape's texture section.
 - Added a safe pending-scroll retry so the rail lands on the chosen form even if grouped textures finish rebuilding a moment later.

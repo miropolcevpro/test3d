@@ -523,6 +523,49 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   font-weight:900;
 }
 .patternTab.active{background:rgba(90,167,255,0.92);}
+.patternTab--snapshot{white-space:nowrap;}
+.snapshotToast{
+  position:absolute;
+  left:12px;
+  right:12px;
+  top:calc(var(--ar-top-strip) + 12px);
+  padding:12px 14px;
+  border-radius:16px;
+  background:rgba(0,0,0,0.62);
+  border:1px solid rgba(255,255,255,0.12);
+  color:rgba(255,255,255,0.96);
+  font-size:13px;
+  line-height:1.35;
+  font-weight:900;
+  text-align:center;
+  z-index:58;
+  pointer-events:none;
+  backdrop-filter: blur(10px);
+}
+.snapshotLogoOverlay{
+  position:absolute;
+  right:calc(12px + env(safe-area-inset-right));
+  bottom:calc(12px + var(--safe-bottom));
+  width:min(38vw, 176px);
+  padding:8px 10px;
+  border-radius:18px;
+  background:rgba(0,0,0,0.22);
+  backdrop-filter: blur(6px);
+  box-shadow:0 10px 28px rgba(0,0,0,0.16);
+  z-index:56;
+  pointer-events:none;
+}
+.snapshotLogoOverlay img{
+  display:block;
+  width:100%;
+  height:auto;
+}
+.snapshotDismissLayer{
+  position:absolute;
+  inset:0;
+  z-index:55;
+  background:transparent;
+}
 .rotationPanel{
   display:flex;
   flex-direction:column;

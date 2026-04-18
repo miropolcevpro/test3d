@@ -173,6 +173,10 @@ const UI = {
   shapePickerPanel: document.getElementById('shapePickerPanel'),
   shapePickerList: document.getElementById('shapePickerList'),
   finalColors: document.getElementById('finalColors'),
+  btnArSnapshot: document.getElementById('btnArSnapshot'),
+  snapshotToast: document.getElementById('snapshotToast'),
+  snapshotLogoOverlay: document.getElementById('snapshotLogoOverlay'),
+  snapshotDismissLayer: document.getElementById('snapshotDismissLayer'),
 
   // AR texture load progress
   texLoadStatus: document.getElementById('texLoadStatus'),
@@ -380,6 +384,12 @@ const state = {
   arTextureGroups: [],
   _arTextureGroupsPromise: null,
   _arTextureGroupsSeq: 0,
+  cameraAccessEnabled: false,
+  snapshotInProgress: false,
+  snapshotFallbackActive: false,
+  snapshotRestoreTimer: 0,
+  snapshotToastTimer: 0,
+  _snapshotLogoImagePromise: null,
 
   // internal guards
   _restartingAR: false,
@@ -1047,6 +1057,7 @@ async function startAR() {
     // Keep the main product XR session minimal and stable.
     // Anchors are requested ONLY in debug sessions when explicitly enabled.
     optionalFeatures: [
+      'camera-access',
       ...(WORLD_ANCHORS_ENABLED ? ['anchors'] : []),
       ...(canRequestDepth ? ['depth-sensing'] : []),
     ],
@@ -1101,7 +1112,10 @@ async function startAR() {
   try {
     const enabled = session.enabledFeatures ? Array.from(session.enabledFeatures) : [];
     state.depthSupported = enabled.includes('depth-sensing');
-  } catch (_) {}
+    state.cameraAccessEnabled = enabled.includes('camera-access');
+  } catch (_) {
+    state.cameraAccessEnabled = false;
+  }
 
   session.addEventListener('end', () => {
     cleanupXR();
@@ -1642,6 +1656,267 @@ function resetAll(keepFloor = false) {
   updateAreaUI();
 }
 
+function clearSnapshotRestoreTimer() {
+  if (state.snapshotRestoreTimer) {
+    clearTimeout(state.snapshotRestoreTimer);
+    state.snapshotRestoreTimer = 0;
+  }
+}
+
+function clearSnapshotToastTimer() {
+  if (state.snapshotToastTimer) {
+    clearTimeout(state.snapshotToastTimer);
+    state.snapshotToastTimer = 0;
+  }
+}
+
+function showSnapshotToast(message, durationMs = 1600) {
+  if (!UI.snapshotToast) return;
+  clearSnapshotToastTimer();
+  const text = String(message || '').trim();
+  if (!text) {
+    show(UI.snapshotToast, false);
+    UI.snapshotToast.textContent = '';
+    return;
+  }
+  UI.snapshotToast.textContent = text;
+  show(UI.snapshotToast, true);
+  state.snapshotToastTimer = window.setTimeout(() => {
+    show(UI.snapshotToast, false);
+    UI.snapshotToast.textContent = '';
+    state.snapshotToastTimer = 0;
+  }, Math.max(600, durationMs | 0));
+}
+
+function restoreArFinalBottomUi() {
+  if (!state.xrSession || state.phase !== 'ar_final' || state.snapshotFallbackActive) {
+    updateArBottomStripVar(UI);
+    return;
+  }
+  show(UI.finalBar, true);
+  show(UI.finalColors, true);
+  updateArBottomStripVar(UI);
+}
+
+function setSnapshotFallbackActive(active) {
+  const next = !!active;
+  state.snapshotFallbackActive = next;
+  if (UI.snapshotLogoOverlay) show(UI.snapshotLogoOverlay, next);
+  if (UI.snapshotDismissLayer) show(UI.snapshotDismissLayer, next);
+  if (!next) {
+    clearSnapshotRestoreTimer();
+    restoreArFinalBottomUi();
+  }
+}
+
+function hideArBottomMenusForSnapshot() {
+  setRotationPanelOpen(false);
+  try { setShapePickerOpen(false, { UI, updateArTopStripVar, updateArBottomStripVar }); } catch (_) {}
+  show(UI.finalBar, false);
+  show(UI.finalColors, false);
+  updateArBottomStripVar(UI);
+}
+
+function restoreSnapshotUi() {
+  setSnapshotFallbackActive(false);
+  showSnapshotToast('');
+  restoreArFinalBottomUi();
+}
+
+function scheduleSnapshotFallbackRestore() {
+  clearSnapshotRestoreTimer();
+  state.snapshotRestoreTimer = window.setTimeout(() => {
+    restoreSnapshotUi();
+  }, 10000);
+}
+
+function waitForAnimationFrames(count = 2) {
+  const steps = Math.max(1, Number(count) || 1);
+  return new Promise((resolve) => {
+    const tick = (left) => {
+      if (left <= 0) {
+        resolve();
+        return;
+      }
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(() => tick(left - 1));
+      } else {
+        setTimeout(() => tick(left - 1), 16);
+      }
+    };
+    tick(steps);
+  });
+}
+
+function loadSnapshotLogoImage() {
+  if (state._snapshotLogoImagePromise) return state._snapshotLogoImagePromise;
+  state._snapshotLogoImagePromise = new Promise((resolve, reject) => {
+    const img = new Image();
+    img.decoding = 'async';
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('snapshot-logo-load-failed'));
+    img.src = 'assets/ui/active_group_logo.png';
+  }).catch((err) => {
+    state._snapshotLogoImagePromise = null;
+    throw err;
+  });
+  return state._snapshotLogoImagePromise;
+}
+
+function drawRoundedRect(ctx, x, y, width, height, radius) {
+  const r = Math.max(0, Math.min(radius, width / 2, height / 2));
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + width, y, x + width, y + height, r);
+  ctx.arcTo(x + width, y + height, x, y + height, r);
+  ctx.arcTo(x, y + height, x, y, r);
+  ctx.arcTo(x, y, x + width, y, r);
+  ctx.closePath();
+}
+
+function canvasLikelyContainsCompositeCamera(sourceCanvas) {
+  try {
+    const sampleCanvas = document.createElement('canvas');
+    sampleCanvas.width = 64;
+    sampleCanvas.height = 64;
+    const ctx = sampleCanvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return false;
+    ctx.drawImage(sourceCanvas, 0, 0, sampleCanvas.width, sampleCanvas.height);
+    const data = ctx.getImageData(0, 0, sampleCanvas.width, sampleCanvas.height).data;
+    let opaque = 0;
+    for (let i = 3; i < data.length; i += 4) {
+      if (data[i] > 180) opaque += 1;
+    }
+    const total = data.length / 4;
+    return total > 0 ? (opaque / total) > 0.55 : false;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function buildBrandedSnapshotBlob() {
+  const sourceCanvas = renderer && renderer.domElement ? renderer.domElement : UI.canvas;
+  if (!sourceCanvas) throw new Error('snapshot-source-missing');
+  if (!canvasLikelyContainsCompositeCamera(sourceCanvas)) throw new Error('snapshot-no-composited-camera');
+
+  const outCanvas = document.createElement('canvas');
+  outCanvas.width = sourceCanvas.width;
+  outCanvas.height = sourceCanvas.height;
+  const ctx = outCanvas.getContext('2d');
+  if (!ctx) throw new Error('snapshot-context-missing');
+
+  ctx.drawImage(sourceCanvas, 0, 0, outCanvas.width, outCanvas.height);
+
+  const logo = await loadSnapshotLogoImage();
+  const shortSide = Math.max(1, Math.min(outCanvas.width, outCanvas.height));
+  const maxLogoWidth = Math.round(shortSide * 0.28);
+  const margin = Math.max(18, Math.round(shortSide * 0.028));
+  const logoScale = Math.min(1, maxLogoWidth / Math.max(1, logo.naturalWidth || logo.width || maxLogoWidth));
+  const drawWidth = Math.max(96, Math.round((logo.naturalWidth || logo.width || maxLogoWidth) * logoScale));
+  const drawHeight = Math.max(32, Math.round((logo.naturalHeight || logo.height || Math.max(40, drawWidth * 0.24)) * (drawWidth / Math.max(1, (logo.naturalWidth || logo.width || drawWidth)))));
+  const padX = Math.max(10, Math.round(drawWidth * 0.10));
+  const padY = Math.max(8, Math.round(drawHeight * 0.16));
+  const boxX = outCanvas.width - drawWidth - padX * 2 - margin;
+  const boxY = outCanvas.height - drawHeight - padY * 2 - margin;
+
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  ctx.shadowColor = 'rgba(0,0,0,0.22)';
+  ctx.shadowBlur = Math.max(16, Math.round(shortSide * 0.018));
+  drawRoundedRect(ctx, boxX, boxY, drawWidth + padX * 2, drawHeight + padY * 2, Math.max(18, Math.round(shortSide * 0.018)));
+  ctx.fill();
+  ctx.restore();
+
+  ctx.drawImage(logo, boxX + padX, boxY + padY, drawWidth, drawHeight);
+
+  const blob = await new Promise((resolve, reject) => {
+    outCanvas.toBlob((result) => {
+      if (result) resolve(result);
+      else reject(new Error('snapshot-blob-failed'));
+    }, 'image/png');
+  });
+  if (!blob || !blob.size) throw new Error('snapshot-empty-blob');
+  return blob;
+}
+
+function triggerBlobDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+function getSnapshotFilename() {
+  const now = new Date();
+  const part = (v) => String(v).padStart(2, '0');
+  return `aktiv-grupp-ar-${now.getFullYear()}${part(now.getMonth() + 1)}${part(now.getDate())}-${part(now.getHours())}${part(now.getMinutes())}${part(now.getSeconds())}.png`;
+}
+
+async function exportSnapshotBlob(blob) {
+  const filename = getSnapshotFilename();
+  try {
+    if (navigator.share && typeof navigator.canShare === 'function') {
+      const file = new File([blob], filename, { type: 'image/png' });
+      if (navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: 'AR-снимок Актив Групп' });
+        showSnapshotToast('Снимок подготовлен для отправки.', 1800);
+        return;
+      }
+    }
+  } catch (err) {
+    if (err && err.name === 'AbortError') {
+      showSnapshotToast('Снимок не отправлен.', 1400);
+      return;
+    }
+    console.warn('snapshot share failed, fallback to download', err);
+  }
+  triggerBlobDownload(blob, filename);
+  showSnapshotToast('Снимок сохранён.', 1800);
+}
+
+async function captureBrandedSnapshot() {
+  if (state.snapshotInProgress || !state.xrSession || state.phase !== 'ar_final') return false;
+  state.snapshotInProgress = true;
+  try {
+    hideArBottomMenusForSnapshot();
+    await waitForAnimationFrames(3);
+    const blob = await buildBrandedSnapshotBlob();
+    await exportSnapshotBlob(blob);
+    return true;
+  } finally {
+    state.snapshotInProgress = false;
+    restoreArFinalBottomUi();
+  }
+}
+
+function openSystemScreenshotFallback() {
+  hideArBottomMenusForSnapshot();
+  setSnapshotFallbackActive(true);
+  showSnapshotToast('Сделайте системный скриншот. Нижнее меню скрыто, логотип уже добавлен. После снимка коснитесь экрана для возврата меню.', 2600);
+  scheduleSnapshotFallbackRestore();
+}
+
+async function handleArSnapshotRequest() {
+  if (state.snapshotInProgress || !state.xrSession || state.phase !== 'ar_final') return;
+  setRotationPanelOpen(false);
+  try { setShapePickerOpen(false, { UI, updateArTopStripVar, updateArBottomStripVar }); } catch (_) {}
+
+  if (state.cameraAccessEnabled) {
+    try {
+      const ok = await captureBrandedSnapshot();
+      if (ok) return;
+    } catch (err) {
+      console.warn('built-in AR snapshot failed, switching to fallback', err);
+    }
+  }
+
+  openSystemScreenshotFallback();
+}
 
 
 // ------------------------
@@ -2495,6 +2770,23 @@ function ensureArFinalControlsBound() {
   if (UI.shapePickerBackdrop && !UI.shapePickerBackdrop.__arBound) {
     UI.shapePickerBackdrop.addEventListener('click', () => setShapePickerOpen(false, { UI, updateArTopStripVar, updateArBottomStripVar }));
     UI.shapePickerBackdrop.__arBound = true;
+  }
+
+  if (UI.btnArSnapshot && !UI.btnArSnapshot.__arBound) {
+    UI.btnArSnapshot.addEventListener('click', () => {
+      handleArSnapshotRequest().catch((err) => {
+        console.warn('AR snapshot request failed', err);
+        openSystemScreenshotFallback();
+      });
+    });
+    UI.btnArSnapshot.__arBound = true;
+  }
+
+  if (UI.snapshotDismissLayer && !UI.snapshotDismissLayer.__arBound) {
+    UI.snapshotDismissLayer.addEventListener('click', () => {
+      restoreSnapshotUi();
+    });
+    UI.snapshotDismissLayer.__arBound = true;
   }
 }
 
