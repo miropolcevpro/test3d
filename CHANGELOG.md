@@ -1,3 +1,8 @@
+## 2026-04-18 — Patch f24ai: admin login + telemetry hotfix
+- Release token: `20260418-f24ai`
+- Restored missing admin helper functions `getToken`, `setToken`, and `apiFetch` in `admin/admin.js`, fixing broken admin initialization and login after telemetry rollout.
+- Verified telemetry client requests continue to use `credentials: 'omit'` for remote summary reads and event flushes, matching the public `/api/telemetry` endpoint setup.
+
 ## 2026-04-18 — Patch f24ah: audience metrics, repeat visits, quarter/year analytics
 - Release token: `20260418-f24ah`
 - Analytics dashboard now shows unique visitors, sessions, repeat visits from the same device/browser, returning devices and average sessions per device.

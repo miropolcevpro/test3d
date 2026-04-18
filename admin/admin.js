@@ -1,5 +1,5 @@
 // BUILD: v28 2026-01-16f (runtime-config)
-const __BUILD_ID__ = "20260418-f24ah";
+const __BUILD_ID__ = "20260418-f24ai";
 console.log("[Admin] build", __BUILD_ID__);
 /* Admin (Step 3 start) — shapes list + shape details (read-only palette), router scaffold */
 (async () => {
@@ -68,6 +68,43 @@ console.log("[Admin] build", __BUILD_ID__);
   // If API Gateway does not expose /api/config yet, this will silently noop.
   const remoteCfg = await tryLoadRemoteConfig();
   if (remoteCfg) applyRemoteConfig(remoteCfg);
+
+function getToken() {
+    return sessionStorage.getItem(TOKEN_KEY) || '';
+  }
+
+  async function setToken(t) {
+    if (t) sessionStorage.setItem(TOKEN_KEY, t);
+    else sessionStorage.removeItem(TOKEN_KEY);
+  }
+
+  async function apiFetch(path, opts = {}) {
+    const url = API_BASE_URL + path;
+    const headers = new Headers(opts.headers || {});
+    headers.set('Accept', 'application/json');
+    const token = getToken();
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+    if (opts.body && !(opts.body instanceof FormData)) headers.set('Content-Type', 'application/json');
+
+    const res = await fetch(url, { cache: 'no-store', ...opts, headers, cache: 'no-store' });
+
+    let json = null;
+    const ct = res.headers.get('content-type') || '';
+    if (ct.includes('application/json')) json = await res.json().catch(() => null);
+    else {
+      const bodyText = await res.text().catch(() => '');
+      json = bodyText ? { message: bodyText } : null;
+    }
+
+    if (!res.ok) {
+      const msg = json?.message || json?.error || `${res.status} ${res.statusText}`;
+      const err = new Error(msg);
+      err.status = res.status;
+      err.data = json;
+      throw err;
+    }
+    return json;
+  }
 
   // In GitHub Pages the admin lives under /<repo>/admin/, while site assets are under /<repo>/assets/.
   // Resolve any relative asset paths (e.g. "assets/forms/klassika.png") against the site root ("/<repo>/").
