@@ -551,11 +551,73 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
 .patternTab--snapshot{white-space:nowrap;}
 
 .patternTab--zone{white-space:nowrap;}
+.arZoneCompact{
+  display:flex;
+  align-items:center;
+  width:100%;
+  min-width:0;
+  padding:8px 12px;
+  border-radius:16px;
+  background:rgba(255,255,255,0.08);
+  border:1px solid rgba(255,255,255,0.12);
+  box-shadow:0 10px 24px rgba(0,0,0,0.10);
+}
+.arZoneCompactMain{
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+}
+.arZoneCompactTitle{
+  color:#fff;
+  font-size:13px;
+  line-height:1.2;
+  font-weight:1000;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.arZoneCompactMeta{
+  color:rgba(255,255,255,0.78);
+  font-size:11px;
+  line-height:1.2;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
 .arZoneBar{
   display:flex;
   flex-direction:column;
-  gap:8px;
+  gap:10px;
   width:100%;
+  padding:12px;
+  border-radius:20px;
+  background:rgba(10,14,22,0.68);
+  border:1px solid rgba(255,255,255,0.12);
+  box-shadow:0 14px 32px rgba(0,0,0,0.18);
+}
+.arZoneBarHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+}
+.arZoneBarClose{
+  border:1px solid rgba(255,255,255,0.14);
+  background:rgba(255,255,255,0.10);
+  color:#fff;
+  border-radius:12px;
+  padding:8px 10px;
+  font-weight:900;
+  line-height:1;
+  white-space:nowrap;
+}
+.arZoneBarTopActions{display:flex;width:100%;}
+.arZoneBarTopActions .btnGhost{width:100%;}
+.arZoneBarHint{
+  color:rgba(255,255,255,0.78);
+  font-size:12px;
+  line-height:1.35;
 }
 .arZoneSummary{
   display:flex;
@@ -657,6 +719,55 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
 .btnGhost:disabled,
 .btnGhost--danger:disabled{
   opacity:0.55;
+}
+
+.arDialogBackdrop{
+  position:absolute;
+  inset:0;
+  z-index:72;
+  display:flex;
+  align-items:flex-end;
+  justify-content:center;
+  padding:12px 12px calc(12px + var(--safe-bottom));
+  background:rgba(0,0,0,0.16);
+  backdrop-filter: blur(6px);
+}
+.arDialogCard{
+  width:min(100%, 420px);
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  padding:14px;
+  border-radius:20px;
+  background:rgba(22,26,34,0.94);
+  border:1px solid rgba(255,255,255,0.12);
+  box-shadow:0 18px 44px rgba(0,0,0,0.34);
+}
+.arDialogTitle{
+  color:#fff;
+  font-size:18px;
+  line-height:1.2;
+  font-weight:1000;
+}
+.arDialogText{
+  color:rgba(255,255,255,0.88);
+  font-size:14px;
+  line-height:1.45;
+}
+.arDialogMeta{
+  color:rgba(255,255,255,0.66);
+  font-size:12px;
+  line-height:1.35;
+}
+.arDialogActions{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+  gap:10px;
+  width:100%;
+}
+.arDialogActions .btnGhost{
+  margin:0;
+  min-height:46px;
 }
 
 .snapshotToast{
@@ -770,6 +881,9 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
 .calibrationPanel{gap:10px;}
 .calibrationStepRow .rotationValue{min-width:72px;}
 @media (max-width: 640px){
+  .arZoneCompact{padding:8px 10px;}
+  .arZoneCompactTitle{font-size:12px;}
+  .arZoneCompactMeta{font-size:10px;}
   .arZoneChip{min-width:104px;}
   .arZoneSummaryTitle{font-size:14px;}
   .arZoneActions{flex-wrap:wrap;}

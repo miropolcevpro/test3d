@@ -1,17 +1,23 @@
-## 20260418-f24be — ar multizone patch7 hardening limits cleanup telemetry
-- Release token: `20260418-f24be`
+## 20260418-f24bg — ar multizone compact zone ui panel
+- Release token: `20260418-f24bg`
+- Reworked AR multi-zone controls into a compact default layout: the main final bar now shows the action row, a slim active-zone status line and the texture rail, while the full zone manager stays hidden until the user opens `Зоны`.
+- Added a dedicated zone management sheet with active-zone summary, add-zone action, zone chips, edit/cutout/delete actions and an explicit close button to reduce screen occlusion in AR.
+- Added user guidance for multi-zone work: intro hints explain that new zones can be added from `Зоны` and textures are changed for the active zone in the lower texture rail.
+
+## 20260418-f24bf — ar multizone patch7 hardening limits cleanup telemetry
+- Release token: `20260418-f24bf`
 - Added hardening limits for AR multizone scenes: max zones, contour points, cutouts and hole points.
 - Added safe runtime cleanup/dispose for zone mesh/material lifecycle and texture cache trimming after resets/deletes.
 - Added multizone telemetry for add_done, delete_done, runtime cleanup and limit reached events.
 
-## 20260418-f24be — ar multizone patch6 zone edit cutouts delete
-- Release token: `20260418-f24be`
+## 20260418-f24bf — ar multizone patch6 zone edit cutouts delete
+- Release token: `20260418-f24bf`
 - Added per-zone AR actions in final mode: edit the active zone contour, add cutouts inside the active zone, and delete the active zone directly from the zone panel.
 - Zone actions now stay explicitly tied to the selected active zone, while the rest of the multi-zone geometry, snapping and anti-overlap flow remains unchanged.
 - Deleting the last zone safely returns AR to drawing mode on the locked floor so the user can build a new area without restarting the AR session.
 
-## 20260418-f24be — ar multizone patch5 zone controls polish
-- Release token: `20260418-f24be`
+## 20260418-f24bf — ar multizone patch5 zone controls polish
+- Release token: `20260418-f24bf`
 - Improved AR zone controls with a dedicated active-zone summary, clearer per-zone texture and rotation context, and richer zone chips in final AR mode.
 - Rotation panel now explicitly shows which zone is being adjusted and keeps per-zone rotation intent obvious without changing the current geometry flow.
 

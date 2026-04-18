@@ -219,14 +219,23 @@ const UI = {
   btnDone: document.getElementById('btnDone'),
   finalBar: document.getElementById('finalBar'),
   finalPatterns: document.getElementById('finalPatterns'),
+  arZoneCompact: document.getElementById('arZoneCompact'),
+  arZoneCompactTitle: document.getElementById('arZoneCompactTitle'),
+  arZoneCompactMeta: document.getElementById('arZoneCompactMeta'),
   arZoneBar: document.getElementById('arZoneBar'),
   arZoneSummaryTitle: document.getElementById('arZoneSummaryTitle'),
   arZoneSummaryMeta: document.getElementById('arZoneSummaryMeta'),
   arZoneChips: document.getElementById('arZoneChips'),
   arZoneActions: document.getElementById('arZoneActions'),
+  btnArZoneBarClose: document.getElementById('btnArZoneBarClose'),
+  btnArZoneAddAction: document.getElementById('btnArZoneAddAction'),
   btnArZoneEdit: document.getElementById('btnArZoneEdit'),
   btnArZoneCutout: document.getElementById('btnArZoneCutout'),
   btnArZoneDelete: document.getElementById('btnArZoneDelete'),
+  arZoneDeleteConfirm: document.getElementById('arZoneDeleteConfirm'),
+  arZoneDeleteConfirmMeta: document.getElementById('arZoneDeleteConfirmMeta'),
+  btnArZoneDeleteCancel: document.getElementById('btnArZoneDeleteCancel'),
+  btnArZoneDeleteConfirm: document.getElementById('btnArZoneDeleteConfirm'),
   btnArAddZone: document.getElementById('btnArAddZone'),
   btnTextureRotate: document.getElementById('btnTextureRotate'),
   rotationPanel: document.getElementById('rotationPanel'),
@@ -473,6 +482,9 @@ const state = {
   _arZoneSeq: 0,
   _arZoneCompat: null,
   arZoneUiBusy: false,
+  arZoneDeleteConfirmOpen: false,
+  arZonePanelOpen: false,
+  arZoneIntroHintSeen: false,
   rotationPanelOpen: false,
   _paletteCache: new Map(),
   _paletteDefaultsCache: new Map(),
@@ -848,6 +860,47 @@ function getArZoneTileLabel(zone) {
   return 'Текстура не выбрана';
 }
 
+function getArZonePluralLabel(totalZones) {
+  const n = Math.max(0, Number(totalZones) || 0);
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return `${n} зона`;
+  if (mod10 >= 2 && mod10 <= 4 && !(mod100 >= 12 && mod100 <= 14)) return `${n} зоны`;
+  return `${n} зон`;
+}
+
+function getArZoneCompactMeta(zone) {
+  const tileLabel = getArZoneTileLabel(zone);
+  const rotationLabel = formatArZoneRotationLabel(zone ? zone.textureRotationDeg : state.textureRotationDeg);
+  const totalZones = getZones().length;
+  const zoneLabel = getArZonePluralLabel(totalZones);
+  return `${tileLabel} · ${rotationLabel} · ${zoneLabel}`;
+}
+
+function maybeShowArZoneIntroHint() {
+  if (state.arZoneIntroHintSeen) return;
+  if (!state.xrSession || state.phase !== 'ar_final') return;
+  if (!getZones().length) return;
+  state.arZoneIntroHintSeen = true;
+  showArRuntimeToast('Нажмите «Зоны», чтобы добавить новую зону, переключаться между зонами и менять текстуру активной зоны в нижней ленте.', 3600);
+}
+
+function setArZonePanelOpen(open) {
+  const canOpen = !!state.xrSession && state.phase === 'ar_final' && getZones().length > 0;
+  const next = !!open && canOpen;
+  state.arZonePanelOpen = next;
+  if (next) {
+    setRotationPanelOpen(false);
+    setCalibrationPanelOpen(false);
+    setArZoneDeleteConfirmOpen(false);
+    try { setShapePickerOpen(false, { UI, updateArTopStripVar, updateArBottomStripVar }); } catch (_) {}
+    state.arZoneIntroHintSeen = true;
+  }
+  updateArZoneBarVisibility();
+  syncArZoneControlsUi();
+  updateArBottomStripVar(UI);
+}
+
 function syncArZoneControlsUi() {
   const zone = getActiveZone({ createIfMissing: false });
   const zoneTitle = zone && zone.title ? String(zone.title) : 'Зона';
@@ -855,6 +908,12 @@ function syncArZoneControlsUi() {
   const tileLabel = getArZoneTileLabel(zone);
   const rotationLabel = formatArZoneRotationLabel(zone ? zone.textureRotationDeg : state.textureRotationDeg);
   const statusLabel = zoneStatus === 'draft' ? 'В работе' : (zoneStatus === 'final' ? 'Готова' : (zoneStatus === 'mask' ? 'Вырез' : ''));
+  if (UI.arZoneCompactTitle) {
+    UI.arZoneCompactTitle.textContent = statusLabel ? `${zoneTitle} · ${statusLabel}` : zoneTitle;
+  }
+  if (UI.arZoneCompactMeta) {
+    UI.arZoneCompactMeta.textContent = getArZoneCompactMeta(zone);
+  }
   if (UI.arZoneSummaryTitle) {
     UI.arZoneSummaryTitle.textContent = statusLabel ? `${zoneTitle} · ${statusLabel}` : zoneTitle;
   }
@@ -882,14 +941,25 @@ function syncArZoneControlsUi() {
     UI.btnTextureRotate.setAttribute('aria-label', `Вращение текстуры для ${zoneTitle}, текущий угол ${rotationLabel}`);
     UI.btnTextureRotate.title = `${zoneTitle} · ${rotationLabel}`;
   }
-  if (UI.btnArAddZone) {
+  if (UI.btnArAddZone || UI.btnArZoneAddAction) {
     const allowance = getZoneCreationAllowance();
-    const canAddZone = !!(state.xrSession && state.phase === 'ar_final' && allowance.ok && !state.arZoneUiBusy);
-    UI.btnArAddZone.disabled = !canAddZone;
-    if (allowance.ok) {
-      UI.btnArAddZone.title = `Добавить новую независимую зону мощения (${allowance.total}/${allowance.maxZones})`;
-    } else {
-      UI.btnArAddZone.title = `Достигнут лимит зон: ${allowance.maxZones}. Для стабильной работы оставляем ${getArZoneHardLimitSummary()}.`;
+    const canManageZones = !!(state.xrSession && state.phase === 'ar_final' && getZones().length > 0);
+    if (UI.btnArAddZone) {
+      UI.btnArAddZone.disabled = !canManageZones || !!state.arZoneUiBusy;
+      UI.btnArAddZone.classList.toggle('active', !!state.arZonePanelOpen && canManageZones);
+      UI.btnArAddZone.setAttribute('aria-expanded', state.arZonePanelOpen ? 'true' : 'false');
+      const zoneCount = getZones().length;
+      UI.btnArAddZone.title = canManageZones ? (state.arZonePanelOpen ? `Скрыть управление зонами (${getArZonePluralLabel(zoneCount)})` : `Открыть управление зонами (${getArZonePluralLabel(zoneCount)})`) : 'Управление зонами недоступно';
+    }
+    if (UI.btnArZoneAddAction) {
+      const canAddZone = !!(state.xrSession && state.phase === 'ar_final' && allowance.ok && !state.arZoneUiBusy);
+      UI.btnArZoneAddAction.disabled = !canAddZone;
+      UI.btnArZoneAddAction.textContent = allowance.ok ? 'Добавить зону' : `Лимит зон: ${allowance.maxZones}`;
+      if (allowance.ok) {
+        UI.btnArZoneAddAction.title = `Добавить новую независимую зону мощения (${allowance.total}/${allowance.maxZones})`;
+      } else {
+        UI.btnArZoneAddAction.title = `Достигнут лимит зон: ${allowance.maxZones}. Для стабильной работы оставляем ${getArZoneHardLimitSummary()}.`;
+      }
     }
   }
   const zoneActionsEnabled = !!(zone && state.xrSession && state.phase === 'ar_final');
@@ -905,16 +975,17 @@ function syncArZoneControlsUi() {
     UI.btnArZoneCutout.title = zone ? `Добавить вырез в зоне «${zoneTitle}»` : 'Добавить вырез в активной зоне';
   }
   if (UI.btnArZoneDelete) {
-    UI.btnArZoneDelete.disabled = !zoneActionsEnabled;
+    UI.btnArZoneDelete.disabled = !zoneActionsEnabled || !!state.arZoneDeleteConfirmOpen;
     UI.btnArZoneDelete.title = zone ? `Удалить зону «${zoneTitle}»` : 'Удалить активную зону';
   }
 }
 
 function updateArZoneBarVisibility() {
-  if (!UI.arZoneBar) return;
-  const shouldShow = !!state.xrSession && state.phase === 'ar_final' && getZones().length > 0;
-  show(UI.arZoneBar, shouldShow);
-  if (shouldShow) syncArZoneControlsUi();
+  const hasZones = !!state.xrSession && state.phase === 'ar_final' && getZones().length > 0;
+  if (!hasZones) state.arZonePanelOpen = false;
+  if (UI.arZoneCompact) show(UI.arZoneCompact, hasZones);
+  if (UI.arZoneBar) show(UI.arZoneBar, hasZones && !!state.arZonePanelOpen);
+  if (hasZones) syncArZoneControlsUi();
 }
 
 function renderArZoneChips() {
@@ -1171,6 +1242,7 @@ function beginAddArZone() {
   pointsGroup.clear();
   clearMeasureLabels();
   state.phase = 'ar_draw';
+  setArZonePanelOpen(false);
   setRotationPanelOpen(false);
   setCalibrationPanelOpen(false);
   try { setShapePickerOpen(false, { UI, updateArTopStripVar, updateArBottomStripVar }); } catch (_) {}
@@ -1192,6 +1264,7 @@ function beginAddArZone() {
   renderArZoneChips();
   syncArZoneControlsUi();
   telemetryTrack('ar_zone_add_start', telemetryCtx({ zoneId: String(zone.id), totalZones: getZones().length }));
+  showArRuntimeToast('Стройте новую зону как отдельный контур. После «Готово» выберите для неё текстуру в нижней ленте.', 3200);
   return zone;
 }
 
@@ -3477,12 +3550,16 @@ UI.btnViewAR?.addEventListener('click', async (ev) => {
 UI.btnArBack?.addEventListener('click', async () => {
   telemetryTrack('ar_back_click', telemetryCtx());
   setCalibrationPanelOpen(false);
+  setArZoneDeleteConfirmOpen(false);
+  setArZonePanelOpen(false);
   await stopAR();
 });
 
 UI.btnArReset?.addEventListener('click', async () => {
   telemetryTrack('ar_reset_click', telemetryCtx());
   setCalibrationPanelOpen(false);
+  setArZoneDeleteConfirmOpen(false);
+  setArZonePanelOpen(false);
   await fullRestartAR();
 });
 
@@ -3508,7 +3585,10 @@ function normalizeTextureRotationDeg(value, preserveFullCircle = false) {
 function setRotationPanelOpen(open) {
   const next = !!open && state.phase === 'ar_final';
   state.rotationPanelOpen = next;
-  if (next) setCalibrationPanelOpen(false);
+  if (next) {
+    setCalibrationPanelOpen(false);
+    if (state.arZonePanelOpen) setArZonePanelOpen(false);
+  }
   if (UI.rotationPanel) show(UI.rotationPanel, next);
   if (UI.btnTextureRotate) {
     UI.btnTextureRotate.classList.toggle('active', next);
@@ -3533,6 +3613,7 @@ function enterActiveZoneEditMode() {
   telemetryTrack('ar_zone_edit_start', telemetryCtx({ zoneId: String(activeZone.id || ''), points: state.points.length, holes: state.holes.length }));
   show(UI.finalColors, false);
   show(UI.contourHint, false);
+  setArZonePanelOpen(false);
   setRotationPanelOpen(false);
   show(UI.finalBar, false);
   if (typeof updateArBottomStripVar === 'function') updateArBottomStripVar(UI);
@@ -3582,6 +3663,7 @@ function enterActiveZoneCutoutMode() {
   telemetryTrack('ar_zone_cutout_start', telemetryCtx({ zoneId: String(activeZone.id || ''), holes: state.holes.length }));
   show(UI.finalColors, false);
   show(UI.contourHint, false);
+  setArZonePanelOpen(false);
   setRotationPanelOpen(false);
   show(UI.finalBar, false);
   if (typeof updateArBottomStripVar === 'function') updateArBottomStripVar(UI);
@@ -3608,12 +3690,52 @@ function enterActiveZoneCutoutMode() {
   return true;
 }
 
+function setArZoneDeleteConfirmOpen(open) {
+  const shouldOpen = !!open;
+  state.arZoneDeleteConfirmOpen = shouldOpen;
+  const activeZone = getActiveZone({ createIfMissing: false });
+  if (UI.arZoneDeleteConfirmMeta) {
+    if (activeZone && shouldOpen) {
+      const zoneTitle = activeZone.title || 'Активная зона';
+      const tileLabel = getArZoneTileLabel(activeZone);
+      UI.arZoneDeleteConfirmMeta.textContent = `${zoneTitle} · ${tileLabel}`;
+    } else {
+      UI.arZoneDeleteConfirmMeta.textContent = '';
+    }
+  }
+  if (shouldOpen) {
+    setRotationPanelOpen(false);
+  }
+  if (UI.arZoneDeleteConfirm) {
+    show(UI.arZoneDeleteConfirm, shouldOpen);
+  }
+  syncArZoneControlsUi();
+  if (shouldOpen) {
+    try {
+      UI.btnArZoneDeleteConfirm?.focus({ preventScroll: true });
+    } catch (_) {
+      try { UI.btnArZoneDeleteConfirm?.focus(); } catch (_) {}
+    }
+  } else {
+    try {
+      UI.btnArZoneDelete?.focus({ preventScroll: true });
+    } catch (_) {
+      try { UI.btnArZoneDelete?.focus(); } catch (_) {}
+    }
+  }
+}
+
+function requestDeleteActiveArZone() {
+  const activeZone = getActiveZone({ createIfMissing: false });
+  if (!activeZone || !state.xrSession || state.phase !== 'ar_final') return false;
+  setArZoneDeleteConfirmOpen(true);
+  return true;
+}
+
 async function deleteActiveArZone() {
   const activeZone = getActiveZone({ createIfMissing: false });
   if (!activeZone) return false;
-  const zoneTitle = activeZone.title || 'активную зону';
-  const ok = window.confirm(`Удалить ${zoneTitle}? Это действие уберёт её контур, вырезы и текстуру из текущей AR-сцены.`);
-  if (!ok) return false;
+  setArZoneDeleteConfirmOpen(false);
   telemetryTrack('ar_zone_delete', telemetryCtx({ zoneId: String(activeZone.id || ''), totalZonesBefore: getZones().length }));
   const removed = removeZone(activeZone.id, { anchorGroup, disposeObject3D, preserveMaterial: tileMaterial });
   if (!removed) return false;
@@ -3625,6 +3747,7 @@ async function deleteActiveArZone() {
   pointsGroup.clear();
   clearMeasureLabels();
   if (!getZones().length) {
+    setArZonePanelOpen(false);
     resetToSingleZone({ preserveSelection: true, preserveRotation: true });
     setCompatFillMesh(null);
     setCompatTileMaterial(tileMaterial);
@@ -3707,9 +3830,25 @@ function ensureArFinalControlsBound() {
 
   if (UI.btnArAddZone && !UI.btnArAddZone.__arBound) {
     UI.btnArAddZone.addEventListener('click', () => {
-      beginAddArZone();
+      const canManageZones = !!(state.xrSession && state.phase === 'ar_final' && getZones().length > 0);
+      if (!canManageZones) return;
+      setArZonePanelOpen(!state.arZonePanelOpen);
     });
     UI.btnArAddZone.__arBound = true;
+  }
+
+  if (UI.btnArZoneBarClose && !UI.btnArZoneBarClose.__arBound) {
+    UI.btnArZoneBarClose.addEventListener('click', () => {
+      setArZonePanelOpen(false);
+    });
+    UI.btnArZoneBarClose.__arBound = true;
+  }
+
+  if (UI.btnArZoneAddAction && !UI.btnArZoneAddAction.__arBound) {
+    UI.btnArZoneAddAction.addEventListener('click', () => {
+      beginAddArZone();
+    });
+    UI.btnArZoneAddAction.__arBound = true;
   }
 
   if (UI.rotationSlider && !UI.rotationSlider.__arBound) {
@@ -3724,7 +3863,7 @@ function ensureArFinalControlsBound() {
     UI.btnArCalibrate.addEventListener('click', () => {
       const shouldOpen = UI.calibrationPanel ? UI.calibrationPanel.hidden : !state.adminCalibrationOpen;
       telemetryTrack('admin_ar_calibration_toggle', telemetryCtx({ open: !!shouldOpen }));
-      if (shouldOpen) setRotationPanelOpen(false);
+      if (shouldOpen) { setArZonePanelOpen(false); setRotationPanelOpen(false); }
       syncAdminCalibrationUi();
       setCalibrationPanelOpen(shouldOpen);
     });
@@ -3764,6 +3903,7 @@ function ensureArFinalControlsBound() {
     UI.btnShapePicker.addEventListener('click', () => {
       if (!UI.shapePickerPanel || !UI.shapePickerList) return;
       telemetryTrack('ar_shape_picker_toggle', telemetryCtx());
+      setArZonePanelOpen(false);
       setRotationPanelOpen(false);
       setCalibrationPanelOpen(false);
       try {
@@ -3791,6 +3931,7 @@ function ensureArFinalControlsBound() {
 
   if (UI.btnArSnapshot && !UI.btnArSnapshot.__arBound) {
     UI.btnArSnapshot.addEventListener('click', () => {
+      setArZonePanelOpen(false);
       setCalibrationPanelOpen(false);
       telemetryTrack('ar_snapshot_click', telemetryCtx({ cameraAccess: !!state.cameraAccessEnabled }));
       handleArSnapshotRequest().catch((err) => {
@@ -3811,19 +3952,35 @@ function ensureArFinalControlsBound() {
 }
 
 UI.btnArZoneEdit?.addEventListener('click', () => {
+  setArZonePanelOpen(false);
   enterActiveZoneEditMode();
 });
 
 UI.btnArZoneCutout?.addEventListener('click', () => {
+  setArZonePanelOpen(false);
   enterActiveZoneCutoutMode();
 });
 
 UI.btnArZoneDelete?.addEventListener('click', () => {
+  requestDeleteActiveArZone();
+});
+
+UI.btnArZoneDeleteCancel?.addEventListener('click', () => {
+  setArZoneDeleteConfirmOpen(false);
+});
+
+UI.btnArZoneDeleteConfirm?.addEventListener('click', () => {
   deleteActiveArZone().catch((err) => {
     console.warn('AR zone delete failed', err);
     telemetryError('ar_zone_delete_failed', err, telemetryCtx({ zoneId: String((getActiveZone({ createIfMissing: false }) || {}).id || '') }));
     showArRuntimeToast('Не удалось удалить активную зону. Попробуйте ещё раз.', 2400);
   });
+});
+
+UI.arZoneDeleteConfirm?.addEventListener('click', (event) => {
+  if (event && event.target === UI.arZoneDeleteConfirm) {
+    setArZoneDeleteConfirmOpen(false);
+  }
 });
 
 UI.btnDone?.addEventListener('click', async () => {
@@ -3885,6 +4042,7 @@ UI.btnDone?.addEventListener('click', async () => {
   renderArTextureRail();
   renderArZoneChips();
   syncArZoneControlsUi();
+  maybeShowArZoneIntroHint();
   ensureArTextureGroupsBuilt().catch((e) => {
     console.warn('AR texture rail build failed', e);
     telemetryError('ar_texture_rail_build_failed', e, telemetryCtx());
