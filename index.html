@@ -254,8 +254,23 @@
         <div class="finalPatterns" id="finalPatterns">
           <button id="btnTextureRotate" class="patternTab" type="button" aria-expanded="false" aria-controls="rotationPanel">Вращение 0°</button>
           <button id="btnShapePicker" class="patternTab" type="button">Выбрать форму</button>
+          <button id="btnArAddZone" class="patternTab patternTab--zone" type="button">Добавить зону</button>
           <button id="btnArSnapshot" class="patternTab patternTab--snapshot" type="button">Снимок</button>
           <button id="btnArCalibrate" class="patternTab patternTab--admin" type="button" hidden>Калибровка</button>
+        </div>
+        <div id="arZoneBar" class="arZoneBar" hidden>
+          <div class="arZoneBarLabel">Зоны</div>
+          <div id="arZoneSummary" class="arZoneSummary">
+            <div class="arZoneSummaryEyebrow">Активная зона</div>
+            <div id="arZoneSummaryTitle" class="arZoneSummaryTitle">Зона 1</div>
+            <div id="arZoneSummaryMeta" class="arZoneSummaryMeta">Текстура не выбрана · Вращение 0°</div>
+          </div>
+          <div id="arZoneChips" class="arZoneChips"></div>
+          <div id="arZoneActions" class="arZoneActions">
+            <button id="btnArZoneEdit" class="btnGhost" type="button">Изменить зону</button>
+            <button id="btnArZoneCutout" class="btnGhost" type="button">Вырез в зоне</button>
+            <button id="btnArZoneDelete" class="btnGhost btnGhost--danger" type="button">Удалить зону</button>
+          </div>
         </div>
         <div id="calibrationPanel" class="rotationPanel calibrationPanel" hidden>
           <div class="rotationPanelHeader">
@@ -276,7 +291,8 @@
             <div class="rotationPanelTitle">Вращение текстуры</div>
             <button id="btnRotationReset" class="rotationResetBtn" type="button">Сброс 0°</button>
           </div>
-          <div id="rotationHint" class="rotationHint">Подсказка: используйте −15° / +15° для быстрого шага или ползунок для точного поворота рисунка плитки.</div>
+          <div id="rotationPanelMeta" class="rotationPanelMeta">Активная зона · Зона 1</div>
+          <div id="rotationHint" class="rotationHint">Поворот применяется только к активной зоне. Используйте −15° / +15° для быстрого шага или ползунок для точного поворота рисунка плитки.</div>
           <div class="rotationStepRow">
             <button id="btnRotateMinus" class="rotationStepBtn" type="button" aria-label="Повернуть текстуру на 15 градусов назад">−15°</button>
             <div id="rotationValue" class="rotationValue" aria-live="polite">0°</div>
@@ -333,13 +349,13 @@
     window.setTimeout(hide, 3000);
   })();
 </script>
-<script src="js/runtime-config.js?v=20260418-f24ax"></script>
-<script src="js/site-env.js?v=20260418-f24ax"></script>
-  <script src="js/content-identity.js?v=20260418-f24ax"></script>
-<script src="js/sw-meta.js?v=20260418-f24ax"></script>
-<script src="js/sw-register.js?v=20260418-f24ax"></script>
-  <script src="js/telemetry.js?v=20260418-f24ax"></script>
-  <script type="module" src="js/app.js?v=20260418-f24ax"></script>
+<script src="js/runtime-config.js?v=20260418-f24be"></script>
+<script src="js/site-env.js?v=20260418-f24be"></script>
+  <script src="js/content-identity.js?v=20260418-f24be"></script>
+<script src="js/sw-meta.js?v=20260418-f24be"></script>
+<script src="js/sw-register.js?v=20260418-f24be"></script>
+  <script src="js/telemetry.js?v=20260418-f24be"></script>
+  <script type="module" src="js/app.js?v=20260418-f24be"></script>
 
 
 </body>

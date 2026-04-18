@@ -26,6 +26,10 @@ This project now keeps `js/app.js` as the orchestration layer and pushes reusabl
 ## Geometry and AR session helpers
 - `app-geometry-helpers.js` — contour geometry, markers, fill mesh, measurements, area calculations
 - `app-ar-session-helpers.js` — XR support checks, stop/cleanup/restart session adapters
+- `app-ar-zone-helpers.js` — внутренняя zone-model AR, активная зона, per-zone runtime state
+- `app-ar-zone-validation-helpers.js` — геометрическая валидация зон, self-intersection и anti-overlap guards
+- `app-ar-zone-snap-helpers.js` — snap к вершинам и рёбрам существующих зон для удобной стыковки
+- `app-ar-zone-hardening-helpers.js` — лимиты многозонной сцены, guard-функции для зон/точек/вырезов и безопасные hardening-конфиги
 
 ## Rule for future work
 - Keep `updateXR()` and core AR runtime orchestration in `app.js` until a dedicated AR runtime split is planned and validated separately.

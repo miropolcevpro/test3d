@@ -26,6 +26,7 @@ export function createSelectionHelpers(ctx) {
     if (ctx.UI.btnTextureRotate) ctx.UI.btnTextureRotate.textContent = `Вращение ${formatRotationDegLabel(deg)}`;
     if (ctx.UI.rotationValue) ctx.UI.rotationValue.textContent = formatRotationDegLabel(deg);
     if (ctx.UI.rotationSlider) ctx.UI.rotationSlider.value = String(Math.round(normalizeRotationDeg(deg, true)));
+    try { ctx.onRotationUiSync?.(deg); } catch (_) {}
   }
 
   function setTextureRotationDeg(deg, opts = {}) {

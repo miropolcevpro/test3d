@@ -17,6 +17,7 @@ export function createArSessionHelpers(ctx = {}) {
     getTileMaterial,
     getPreviewPlane,
     getFillMesh,
+    resetToSingleZone,
   } = ctx;
 
   async function checkXrSupport() {
@@ -55,6 +56,7 @@ export function createArSessionHelpers(ctx = {}) {
     state.floorSamples = [];
     state.floorYEstimate = null;
     state.textureRotationDeg = 0;
+    try { resetToSingleZone?.({ preserveSelection: true, preserveRotation: false }); } catch (_) {}
     state.rotationPanelOpen = false;
     state.arTextureRailStartShapeId = '';
     state.arTextureGroups = [];
@@ -85,6 +87,14 @@ export function createArSessionHelpers(ctx = {}) {
       if (rotationValue) rotationValue.textContent = '0°';
       const rotationSlider = document.getElementById('rotationSlider');
       if (rotationSlider) rotationSlider.value = '0';
+      const arZoneSummaryTitle = document.getElementById('arZoneSummaryTitle');
+      if (arZoneSummaryTitle) arZoneSummaryTitle.textContent = 'Зона 1';
+      const arZoneSummaryMeta = document.getElementById('arZoneSummaryMeta');
+      if (arZoneSummaryMeta) arZoneSummaryMeta.textContent = 'Текстура не выбрана · Вращение 0°';
+      const rotationPanelMeta = document.getElementById('rotationPanelMeta');
+      if (rotationPanelMeta) rotationPanelMeta.textContent = 'Активная зона · Зона 1';
+      const rotationHint = document.getElementById('rotationHint');
+      if (rotationHint) rotationHint.textContent = 'Поворот применяется только к активной зоне. Используйте −15° / +15° для быстрого шага или ползунок для точного поворота рисунка плитки.';
       const snapshotToast = document.getElementById('snapshotToast');
       if (snapshotToast) {
         snapshotToast.hidden = true;

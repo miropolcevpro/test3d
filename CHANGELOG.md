@@ -1,3 +1,37 @@
+## 20260418-f24be — ar multizone patch7 hardening limits cleanup telemetry
+- Release token: `20260418-f24be`
+- Added hardening limits for AR multizone scenes: max zones, contour points, cutouts and hole points.
+- Added safe runtime cleanup/dispose for zone mesh/material lifecycle and texture cache trimming after resets/deletes.
+- Added multizone telemetry for add_done, delete_done, runtime cleanup and limit reached events.
+
+## 20260418-f24be — ar multizone patch6 zone edit cutouts delete
+- Release token: `20260418-f24be`
+- Added per-zone AR actions in final mode: edit the active zone contour, add cutouts inside the active zone, and delete the active zone directly from the zone panel.
+- Zone actions now stay explicitly tied to the selected active zone, while the rest of the multi-zone geometry, snapping and anti-overlap flow remains unchanged.
+- Deleting the last zone safely returns AR to drawing mode on the locked floor so the user can build a new area without restarting the AR session.
+
+## 20260418-f24be — ar multizone patch5 zone controls polish
+- Release token: `20260418-f24be`
+- Improved AR zone controls with a dedicated active-zone summary, clearer per-zone texture and rotation context, and richer zone chips in final AR mode.
+- Rotation panel now explicitly shows which zone is being adjusted and keeps per-zone rotation intent obvious without changing the current geometry flow.
+
+## 20260418-f24bb — ar multizone patch4 snap vertices and edges
+- Release token: `20260418-f24bb`
+- Adds AR zone snapping to existing vertices and edges for easier multi-zone joining.
+- Keeps current anti-overlap validation and single-zone compatibility unchanged.
+
+## 20260418-f24ba — ar multizone patch3 anti overlap validation
+- Release token: `20260418-f24ba`
+- Added AR zone contour validation before closing a zone: self-intersections are blocked and overlapping multi-zone contours are rejected.
+- Allowed edge-to-edge adjacency while preventing real filled-area overlap between zones; the current UX stays lightweight and zones can still be added independently.
+- Added user-facing AR validation feedback and telemetry guards for blocked self-intersection and overlap cases without changing admin/backend behavior.
+
+## 20260418-f24az — ar multizone patch2 add zone active zone
+- Release token: `20260418-f24az`
+- Added AR multi-zone UX: create a new zone after finalizing the current one and switch the active zone from zone chips in final AR mode.
+- Each zone now keeps its own contour data, fill mesh, tile material, selected tile id and texture rotation, while current AR flow remains compatible for single-zone use.
+- Added safe active-zone switching without overlap validation yet; existing zones stay visible while a new zone is drawn and finalized independently.
+
 ## 20260418-f24ax — admin error report clear current errors
 - Release token: `20260418-f24ax`
 - Added a dedicated `Очистить ошибки` action next to export in the admin error report modal.
