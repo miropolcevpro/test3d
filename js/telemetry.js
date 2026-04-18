@@ -280,6 +280,18 @@
     }, Math.max(0, Number(delayMs || FLUSH_DEBOUNCE_MS) || FLUSH_DEBOUNCE_MS));
   }
 
+
+  function isSameOriginEndpoint(endpoint) {
+    if (!endpoint) return false;
+    try {
+      var url = new URL(endpoint, global.location && global.location.href ? global.location.href : undefined);
+      if (!global.location || !global.location.origin) return false;
+      return url.origin === global.location.origin;
+    } catch (_) {
+      return false;
+    }
+  }
+
   function flush() {
     var endpoint = pickEndpoint();
     if (!endpoint || endpointDisabledForSession) return Promise.resolve(false);
@@ -297,7 +309,7 @@
       events: batch
     };
     var body = JSON.stringify(payload);
-    if (global.navigator && typeof global.navigator.sendBeacon === 'function') {
+    if (isSameOriginEndpoint(endpoint) && global.navigator && typeof global.navigator.sendBeacon === 'function') {
       try {
         var blob = new Blob([body], { type: 'application/json' });
         var sent = global.navigator.sendBeacon(endpoint, blob);

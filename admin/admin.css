@@ -501,11 +501,11 @@ input:focus,select:focus{border-color:rgba(78,118,137,.65)}
   --tele-bg: linear-gradient(180deg, rgba(250,252,255,.98), rgba(244,247,252,.98));
   --tele-panel: rgba(255,255,255,.92);
   --tele-panel-strong: #ffffff;
-  --tele-text: #0f172a;
-  --tele-muted: #667085;
-  --tele-soft: #94a3b8;
-  --tele-line: rgba(148,163,184,.28);
-  --tele-line-strong: rgba(148,163,184,.42);
+  --tele-text: #09111f;
+  --tele-muted: #344054;
+  --tele-soft: #667085;
+  --tele-line: rgba(100,116,139,.24);
+  --tele-line-strong: rgba(71,85,105,.34);
   --tele-accent: #2563eb;
   --tele-accent-soft: rgba(37,99,235,.12);
   --tele-good: #067647;
@@ -556,7 +556,7 @@ input:focus,select:focus{border-color:rgba(78,118,137,.65)}
 .telemetryCard code {
   background: rgba(15, 23, 42, 0.06);
   border: 1px solid rgba(148,163,184,.18);
-  color: #0f172a;
+  color: #0b1220;
 }
 .telemetryToolbar {
   margin-top: 16px;
@@ -610,7 +610,7 @@ input:focus,select:focus{border-color:rgba(78,118,137,.65)}
   color: var(--tele-text);
   border: 1px solid var(--tele-line);
   background: rgba(255,255,255,.76);
-  box-shadow: 0 8px 18px rgba(15,23,42,.08);
+  box-shadow: 0 8px 18px rgba(15,23,42,.10);
 }
 .telemetryToolbar .btn--ghost:hover {
   border-color: rgba(37,99,235,.28);
@@ -633,8 +633,10 @@ input:focus,select:focus{border-color:rgba(78,118,137,.65)}
 .telemetryStat__label {
   font-size: 13px;
   line-height: 1.35;
-  font-weight: 600;
+  font-weight: 700;
+  color: var(--tele-text);
 }
+
 .telemetryStat__value {
   margin-top: 10px;
   font-size: clamp(28px, 2.3vw, 34px);
@@ -704,7 +706,7 @@ input:focus,select:focus{border-color:rgba(78,118,137,.65)}
   letter-spacing: .01em;
   border: 1px solid rgba(148,163,184,.22);
   background: rgba(248,250,252,.96);
-  color: #475467;
+  color: #344054;
   white-space: nowrap;
 }
 .telemetryKpi__badge--good {
@@ -723,7 +725,7 @@ input:focus,select:focus{border-color:rgba(78,118,137,.65)}
   border-color: rgba(180,35,24,.18);
 }
 .telemetryKpi__badge--nodata {
-  color: #667085;
+  color: #475467;
   background: rgba(248,250,252,.98);
   border-color: rgba(102,112,133,.16);
 }
@@ -757,6 +759,7 @@ input:focus,select:focus{border-color:rgba(78,118,137,.65)}
   margin-top: 12px;
   font-size: 12px;
   line-height: 1.45;
+  color: var(--tele-muted);
 }
 .telemetryTrendList,
 .telemetryPanel__list,
@@ -854,6 +857,7 @@ input:focus,select:focus{border-color:rgba(78,118,137,.65)}
   border-radius: 14px;
   background: rgba(248,250,255,.84);
   border: 1px solid rgba(148,163,184,.14);
+  color: var(--tele-muted);
 }
 .telemetryPanel__item b {
   font-weight: 800;
@@ -896,6 +900,7 @@ input:focus,select:focus{border-color:rgba(78,118,137,.65)}
 .telemetryItem__meta {
   font-size: 12px;
   text-align: right;
+  color: var(--tele-muted);
 }
 .telemetryItem__body {
   margin-top: 10px;
@@ -905,7 +910,7 @@ input:focus,select:focus{border-color:rgba(78,118,137,.65)}
   border: 1px solid rgba(148,163,184,.14);
   font-size: 12px;
   line-height: 1.55;
-  color: #334155;
+  color: #1f2937;
   white-space: pre-wrap;
   word-break: break-word;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -917,7 +922,8 @@ input:focus,select:focus{border-color:rgba(78,118,137,.65)}
   border: 1px solid rgba(148,163,184,.18);
   background: rgba(15,23,42,.05);
   font-size: 13px;
-  line-height: 1.55;
+  line-height: 1.6;
+  color: #344054;
 }
 .telemetryCard .status {
   margin-top: 12px;
