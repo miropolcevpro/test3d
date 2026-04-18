@@ -1,5 +1,5 @@
 // BUILD: v28 2026-01-16f (runtime-config)
-const __BUILD_ID__ = "20260418-f24am";
+const __BUILD_ID__ = "20260418-f24ao";
 console.log("[Admin] build", __BUILD_ID__);
 /* Admin (Step 3 start) — shapes list + shape details (read-only palette), router scaffold */
 (async () => {
@@ -1321,7 +1321,7 @@ function setTelemetryStatus(message, kind) {
 
     let remote = null;
     try {
-      remote = telemetry.getRemoteSummary ? await telemetry.getRemoteSummary({ days: filters.days, deviceType: (filters.deviceType === 'all' ? '' : filters.deviceType), limit: 400 }) : null;
+      remote = telemetry.getRemoteSummary ? await telemetry.getRemoteSummary({ days: filters.days, deviceType: (filters.deviceType === 'all' ? '' : filters.deviceType), limit: 120 }) : null;
     } catch (_) {
       remote = null;
     }
