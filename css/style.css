@@ -651,8 +651,21 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   width:100%;
   margin:2px 0 0;
 }
-.calibrationPanel{gap:10px;}
+.calibrationPanel{gap:10px;max-height:min(52dvh, 420px);overflow:auto;-webkit-overflow-scrolling:touch;}
 .calibrationStepRow .rotationValue{min-width:72px;}
+.calibrationVisualParams{display:grid;gap:10px;}
+.calibrationParamRow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 10px;align-items:center;padding:10px 12px;border-radius:14px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.10);}
+.calibrationParamMeta{display:grid;gap:2px;min-width:0;}
+.calibrationParamLabel{color:#fff;font-size:13px;font-weight:900;line-height:1.2;}
+.calibrationParamHint{color:rgba(255,255,255,0.68);font-size:11px;line-height:1.25;}
+.calibrationParamValue{color:#fff;font-size:13px;font-weight:900;text-align:right;white-space:nowrap;}
+.calibrationParamSlider{grid-column:1 / -1;width:100%;margin:0;}
+@media (max-width: 640px){
+  .calibrationPanel{max-height:min(48dvh, 380px);}
+  .calibrationParamRow{padding:9px 10px;}
+  .calibrationParamLabel{font-size:12px;}
+  .calibrationParamHint{font-size:10px;}
+}
 .finalColors{display:flex;gap:12px;overflow-x:auto;overflow-y:hidden;padding:2px 0 4px;align-items:flex-start;-webkit-overflow-scrolling:touch;}
 .finalColors .swatch{flex:0 0 77px;width:77px;height:77px;border-radius:16px;border-color:rgba(255,255,255,0.20);background-color:rgba(255,255,255,0.04);}
 .finalColors--grouped{gap:10px;align-items:center;}

@@ -207,6 +207,7 @@ const UI = {
   btnCalibrationScalePlus: document.getElementById('btnCalibrationScalePlus'),
   calibrationScaleValue: document.getElementById('calibrationScaleValue'),
   calibrationScaleSlider: document.getElementById('calibrationScaleSlider'),
+  calibrationVisualParams: document.getElementById('calibrationVisualParams'),
   calibrationStatus: document.getElementById('calibrationStatus'),
   snapshotToast: document.getElementById('snapshotToast'),
   snapshotLogoOverlay: document.getElementById('snapshotLogoOverlay'),
@@ -442,6 +443,7 @@ const state = {
   adminArEnabled: ADMIN_AR_ENABLED,
   adminCalibrationOpen: false,
   adminCalibrationScale: 1.0,
+  adminCalibrationValues: null,
   adminCalibrationSaveTimer: 0,
   adminCalibrationSavePromise: null,
   adminCalibrationStatusTimer: 0,
@@ -734,6 +736,45 @@ function comparableTextureKey(shapeId, value) {
   return String(value || '').trim().toLowerCase().replace(/[^a-z0-9_\-]+/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
 }
 
+const CALIBRATION_DEFAULTS = Object.freeze({
+  uvScale: 1.0,
+  exposureMult: 1.0,
+  contrast: 1.0,
+  saturation: 1.0,
+  roughnessMult: 1.0,
+  specStrength: 1.0,
+  normalScale: 1.0,
+  bumpScale: 1.0,
+});
+
+const CALIBRATION_SCHEMA = Object.freeze([
+  { key: 'uvScale', label: 'Масштаб', hint: 'Размер рисунка на поверхности', min: 0.35, max: 3.00, step: 0.01, format: (v) => `${(Number(v) || 0).toFixed(2)}x` },
+  { key: 'exposureMult', label: 'Яркость', hint: 'Светлее / темнее', min: 0.60, max: 1.60, step: 0.01, format: (v) => `${(Number(v) || 0).toFixed(2)}` },
+  { key: 'contrast', label: 'Контраст', hint: 'Выразительность рисунка', min: 0.70, max: 1.30, step: 0.01, format: (v) => `${(Number(v) || 0).toFixed(2)}` },
+  { key: 'saturation', label: 'Насыщенность', hint: 'Интенсивность цвета', min: 0.00, max: 1.50, step: 0.01, format: (v) => `${(Number(v) || 0).toFixed(2)}` },
+  { key: 'roughnessMult', label: 'Матовость', hint: 'Меньше / больше бликов', min: 0.50, max: 1.60, step: 0.01, format: (v) => `${(Number(v) || 0).toFixed(2)}` },
+  { key: 'specStrength', label: 'Сила блика', hint: 'Выраженность отражений', min: 0.00, max: 1.20, step: 0.01, format: (v) => `${(Number(v) || 0).toFixed(2)}` },
+  { key: 'normalScale', label: 'Рельеф normal', hint: 'Микрорельеф поверхности', min: 0.00, max: 2.00, step: 0.01, format: (v) => `${(Number(v) || 0).toFixed(2)}` },
+  { key: 'bumpScale', label: 'Рельеф height', hint: 'Глубина карты высот', min: 0.00, max: 2.00, step: 0.01, format: (v) => `${(Number(v) || 0).toFixed(2)}` },
+]);
+const CALIBRATION_SCHEMA_BY_KEY = new Map(CALIBRATION_SCHEMA.map((entry) => [entry.key, entry]));
+
+function formatCalibrationParamValue(key, value) {
+  const entry = CALIBRATION_SCHEMA_BY_KEY.get(String(key || ''));
+  if (entry && typeof entry.format === 'function') return entry.format(value);
+  const n = Number(value);
+  return Number.isFinite(n) ? n.toFixed(2) : '1.00';
+}
+
+function clampCalibrationParam(key, value) {
+  const entry = CALIBRATION_SCHEMA_BY_KEY.get(String(key || ''));
+  const fallback = CALIBRATION_DEFAULTS[String(key || '')] ?? 1.0;
+  const num = Number(value);
+  const safe = Number.isFinite(num) ? num : fallback;
+  if (!entry) return safe;
+  return clamp(safe, entry.min, entry.max);
+}
+
 function formatCalibrationScale(value) {
   const n = Number(value);
   return `${Number.isFinite(n) ? n.toFixed(2) : '1.00'}x`;
@@ -774,44 +815,125 @@ function setAdminCalibrationStatus(message, kind = '', hold = false) {
   }
 }
 
-function getSelectedTileUvScaleValue() {
+function getSelectedTileCalibrationValues() {
   const params = (state.selectedTile && state.selectedTile.params && typeof state.selectedTile.params === 'object') ? state.selectedTile.params : null;
-  const raw = params && (params.uvScale ?? params.repeatScale);
-  if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) return raw;
-  if (raw && typeof raw === 'object') {
-    const x = Number(raw.x);
-    const y = Number(raw.y);
-    if (Number.isFinite(x) && x > 0 && Number.isFinite(y) && y > 0) return (x + y) / 2;
-    if (Number.isFinite(x) && x > 0) return x;
-    if (Number.isFinite(y) && y > 0) return y;
+  const values = {};
+  for (const entry of CALIBRATION_SCHEMA) {
+    const raw = params && Object.prototype.hasOwnProperty.call(params, entry.key) ? params[entry.key] : CALIBRATION_DEFAULTS[entry.key];
+    values[entry.key] = clampCalibrationParam(entry.key, raw);
   }
-  return 1.0;
+  return values;
 }
 
-function updateCalibrationUiValue(value) {
-  const safe = clamp(Number(value) || 1, 0.70, 1.50);
-  state.adminCalibrationScale = safe;
-  if (UI.calibrationScaleValue) UI.calibrationScaleValue.textContent = formatCalibrationScale(safe);
-  if (UI.calibrationScaleSlider) UI.calibrationScaleSlider.value = safe.toFixed(2);
+function getSelectedTileUvScaleValue() {
+  return getSelectedTileCalibrationValues().uvScale;
 }
 
-function applySelectedTileUvScaleLive(value) {
-  const safe = clamp(Number(value) || 1, 0.70, 1.50);
-  if (!state.selectedTile) return safe;
+function ensureCalibrationVisualControls() {
+  if (!UI.calibrationVisualParams || UI.calibrationVisualParams.__built) return;
+  const frag = document.createDocumentFragment();
+  CALIBRATION_SCHEMA.filter((entry) => entry.key !== 'uvScale').forEach((entry) => {
+    const row = document.createElement('div');
+    row.className = 'calibrationParamRow';
+    row.dataset.key = entry.key;
+
+    const meta = document.createElement('div');
+    meta.className = 'calibrationParamMeta';
+
+    const label = document.createElement('div');
+    label.className = 'calibrationParamLabel';
+    label.textContent = entry.label;
+    meta.appendChild(label);
+
+    const hint = document.createElement('div');
+    hint.className = 'calibrationParamHint';
+    hint.textContent = entry.hint || '';
+    meta.appendChild(hint);
+
+    const value = document.createElement('div');
+    value.className = 'calibrationParamValue';
+    value.dataset.role = 'value';
+    value.textContent = formatCalibrationParamValue(entry.key, CALIBRATION_DEFAULTS[entry.key]);
+
+    const slider = document.createElement('input');
+    slider.className = 'calibrationParamSlider';
+    slider.type = 'range';
+    slider.min = String(entry.min);
+    slider.max = String(entry.max);
+    slider.step = String(entry.step);
+    slider.value = String(CALIBRATION_DEFAULTS[entry.key]);
+    slider.dataset.key = entry.key;
+    slider.setAttribute('aria-label', entry.label);
+    slider.addEventListener('input', (ev) => {
+      const key = String(ev.currentTarget?.dataset?.key || entry.key);
+      const rawValue = ev && ev.target ? ev.target.value : slider.value;
+      const nextValues = applySelectedTileCalibrationLive({ [key]: rawValue });
+      updateCalibrationUiValues(nextValues);
+      scheduleAdminCalibrationSave();
+    });
+
+    row.appendChild(meta);
+    row.appendChild(value);
+    row.appendChild(slider);
+    frag.appendChild(row);
+  });
+  UI.calibrationVisualParams.appendChild(frag);
+  UI.calibrationVisualParams.__built = true;
+}
+
+function updateCalibrationUiValues(values) {
+  const nextValues = {};
+  for (const entry of CALIBRATION_SCHEMA) {
+    const raw = values && Object.prototype.hasOwnProperty.call(values, entry.key) ? values[entry.key] : CALIBRATION_DEFAULTS[entry.key];
+    nextValues[entry.key] = clampCalibrationParam(entry.key, raw);
+  }
+  state.adminCalibrationValues = nextValues;
+  state.adminCalibrationScale = nextValues.uvScale;
+  if (UI.calibrationScaleValue) UI.calibrationScaleValue.textContent = formatCalibrationParamValue('uvScale', nextValues.uvScale);
+  if (UI.calibrationScaleSlider) UI.calibrationScaleSlider.value = nextValues.uvScale.toFixed(2);
+  if (UI.calibrationVisualParams) {
+    UI.calibrationVisualParams.querySelectorAll('.calibrationParamRow[data-key]').forEach((row) => {
+      const key = String(row.dataset.key || '');
+      if (!key || !Object.prototype.hasOwnProperty.call(nextValues, key)) return;
+      const valueEl = row.querySelector('[data-role="value"]');
+      if (valueEl) valueEl.textContent = formatCalibrationParamValue(key, nextValues[key]);
+      const sliderEl = row.querySelector('input[type="range"]');
+      if (sliderEl) sliderEl.value = nextValues[key].toFixed(2);
+    });
+  }
+}
+
+function applySelectedTileCalibrationLive(nextPartial = {}) {
+  if (!state.selectedTile) return state.adminCalibrationValues || getSelectedTileCalibrationValues();
+  const current = state.adminCalibrationValues || getSelectedTileCalibrationValues();
+  const nextValues = { ...current };
+  for (const entry of CALIBRATION_SCHEMA) {
+    if (!Object.prototype.hasOwnProperty.call(nextPartial, entry.key)) continue;
+    nextValues[entry.key] = clampCalibrationParam(entry.key, nextPartial[entry.key]);
+  }
+
   const params = (state.selectedTile.params && typeof state.selectedTile.params === 'object') ? { ...state.selectedTile.params } : {};
-  params.uvScale = safe;
+  for (const entry of CALIBRATION_SCHEMA) params[entry.key] = nextValues[entry.key];
   state.selectedTile.params = params;
 
   const mat = tileMaterial;
   const fill = fillMesh;
   const preview = previewPlane;
   const size = (state.selectedTile && state.selectedTile.tileSizeM) ? state.selectedTile.tileSizeM : { w: 0.2, h: 0.2 };
-  const repeatX = (3 / Math.max(0.001, Number(size.w) || 0.2)) * safe;
-  const repeatY = (3 / Math.max(0.001, Number(size.h) || 0.2)) * safe;
+  const safeScale = nextValues.uvScale;
+  const repeatX = (3 / Math.max(0.001, Number(size.w) || 0.2)) * safeScale;
+  const repeatY = (3 / Math.max(0.001, Number(size.h) || 0.2)) * safeScale;
 
   try {
-    if (mat && mat.uniforms && mat.uniforms.uUvScale) {
-      mat.uniforms.uUvScale.value.set(safe, safe);
+    if (mat && mat.uniforms) {
+      if (mat.uniforms.uUvScale) mat.uniforms.uUvScale.value.set(safeScale, safeScale);
+      if (mat.uniforms.uExposureMult) mat.uniforms.uExposureMult.value = nextValues.exposureMult;
+      if (mat.uniforms.uContrast) mat.uniforms.uContrast.value = nextValues.contrast;
+      if (mat.uniforms.uSaturation) mat.uniforms.uSaturation.value = nextValues.saturation;
+      if (mat.uniforms.uRoughnessMult) mat.uniforms.uRoughnessMult.value = nextValues.roughnessMult;
+      if (mat.uniforms.uSpecStrength) mat.uniforms.uSpecStrength.value = nextValues.specStrength;
+      if (mat.uniforms.uNormalScale) mat.uniforms.uNormalScale.value = nextValues.normalScale;
+      if (mat.uniforms.uBumpScale) mat.uniforms.uBumpScale.value = nextValues.bumpScale;
       mat.needsUpdate = true;
     }
     if (fill && fill.material) fill.material.needsUpdate = true;
@@ -820,79 +942,89 @@ function applySelectedTileUvScaleLive(value) {
       preview.material.needsUpdate = true;
     }
   } catch (_) {}
-  return safe;
+  return nextValues;
 }
 
-async function saveAdminCalibrationNow() {
+async function saveAdminCalibrationNow(shapeId, tileId, values) {
   if (!state.adminArEnabled) return false;
   const token = getAdminSessionToken();
   if (!token) throw new Error('admin_token_missing');
-  const shapeId = state.selectedShape && state.selectedShape.id ? String(state.selectedShape.id) : '';
-  const tileId = state.selectedTile && state.selectedTile.id ? String(state.selectedTile.id) : '';
-  if (!shapeId || !tileId) return false;
+  const safeShapeId = String(shapeId || '').trim();
+  const safeTileId = String(tileId || '').trim();
+  if (!safeShapeId || !safeTileId) return false;
+  const payloadValues = {};
+  for (const entry of CALIBRATION_SCHEMA) {
+    const raw = values && Object.prototype.hasOwnProperty.call(values, entry.key) ? values[entry.key] : CALIBRATION_DEFAULTS[entry.key];
+    payloadValues[entry.key] = Number(clampCalibrationParam(entry.key, raw).toFixed(4));
+  }
 
   setAdminCalibrationStatus('Сохраняем…', 'progress', true);
-  const palette = await fetchAdminPalettePayload(shapeId, token);
+  const palette = await fetchAdminPalettePayload(safeShapeId, token);
   const items = Array.isArray(palette && palette.items) ? palette.items.slice() : [];
-  const targetKey = comparableTextureKey(shapeId, tileId);
-  const idx = items.findIndex((it) => comparableTextureKey(shapeId, it && (it.id || it.textureId || '')) === targetKey);
-  if (idx < 0) throw new Error(`texture_not_found_in_palette:${tileId}`);
+  const targetKey = comparableTextureKey(safeShapeId, safeTileId);
+  const idx = items.findIndex((it) => comparableTextureKey(safeShapeId, it && (it.id || it.textureId || '')) === targetKey);
+  if (idx < 0) throw new Error(`texture_not_found_in_palette:${safeTileId}`);
 
   const nextItem = { ...items[idx] };
   const nextParams = (nextItem.params && typeof nextItem.params === 'object') ? { ...nextItem.params } : {};
-  nextParams.uvScale = Number(state.adminCalibrationScale.toFixed(4));
+  for (const entry of CALIBRATION_SCHEMA) nextParams[entry.key] = payloadValues[entry.key];
   nextItem.params = nextParams;
   items[idx] = nextItem;
 
   const apiBase = String(ADMIN_API_BASE_URL || API_BASE_URL || '').trim().replace(/\/+$/, '');
   if (!apiBase) throw new Error('admin_api_missing');
   const headers = new Headers({ Accept: 'application/json', Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' });
-  const apiUrl = `${apiBase}/api/palettes/${encodeURIComponent(shapeId)}`;
+  const apiUrl = `${apiBase}/api/palettes/${encodeURIComponent(safeShapeId)}`;
   const res = await fetch(apiUrl, {
     method: 'POST',
     headers,
     cache: 'no-store',
-    body: JSON.stringify({ shapeId, items }),
+    body: JSON.stringify({ shapeId: safeShapeId, items }),
   });
   let json = null;
   try { json = await res.json(); } catch (_) {}
   if (!res.ok) throw new Error((json && (json.message || json.error)) || `${res.status} ${res.statusText}`);
 
-  state._allowedTilesByShape.delete(`${shapeId}|fallback:1`);
-  state._allowedTilesByShape.delete(`${shapeId}|fallback:0`);
+  state._allowedTilesByShape.delete(`${safeShapeId}|fallback:1`);
+  state._allowedTilesByShape.delete(`${safeShapeId}|fallback:0`);
   for (const key of Array.from(state._paletteCache.keys())) {
-    if (String(key).includes(shapeId)) state._paletteCache.delete(key);
+    if (String(key).includes(safeShapeId)) state._paletteCache.delete(key);
   }
+  const applyToTile = (tile) => {
+    if (!tile || comparableTextureKey(safeShapeId, tile.id) !== targetKey) return tile;
+    const p = (tile.params && typeof tile.params === 'object') ? { ...tile.params } : {};
+    for (const entry of CALIBRATION_SCHEMA) p[entry.key] = payloadValues[entry.key];
+    return { ...tile, params: p };
+  };
   if (Array.isArray(state.currentAllowedTiles)) {
-    state.currentAllowedTiles = state.currentAllowedTiles.map((tile) => {
-      if (!tile || comparableTextureKey(shapeId, tile.id) !== targetKey) return tile;
-      const p = (tile.params && typeof tile.params === 'object') ? { ...tile.params } : {};
-      p.uvScale = Number(state.adminCalibrationScale.toFixed(4));
-      return { ...tile, params: p };
-    });
+    state.currentAllowedTiles = state.currentAllowedTiles.map(applyToTile);
   }
   if (Array.isArray(state.arTextureGroups)) {
     state.arTextureGroups = state.arTextureGroups.map((group) => {
-      if (!group || String(group.shapeId || '') !== shapeId) return group;
-      const tiles = Array.isArray(group.tiles) ? group.tiles.map((tile) => {
-        if (!tile || comparableTextureKey(shapeId, tile.id) !== targetKey) return tile;
-        const p = (tile.params && typeof tile.params === 'object') ? { ...tile.params } : {};
-        p.uvScale = Number(state.adminCalibrationScale.toFixed(4));
-        return { ...tile, params: p };
-      }) : group.tiles;
+      if (!group || String(group.shapeId || '') !== safeShapeId) return group;
+      const tiles = Array.isArray(group.tiles) ? group.tiles.map(applyToTile) : group.tiles;
       return { ...group, tiles };
     });
+  }
+  if (state.selectedTile && comparableTextureKey(safeShapeId, state.selectedTile.id) === targetKey) {
+    const p = (state.selectedTile.params && typeof state.selectedTile.params === 'object') ? { ...state.selectedTile.params } : {};
+    for (const entry of CALIBRATION_SCHEMA) p[entry.key] = payloadValues[entry.key];
+    state.selectedTile.params = p;
+    updateCalibrationUiValues(p);
   }
   setAdminCalibrationStatus('Сохранено', 'ok');
   return true;
 }
 
 function scheduleAdminCalibrationSave() {
-  if (!state.adminArEnabled) return;
+  if (!state.adminArEnabled || !state.selectedShape || !state.selectedTile) return;
+  const shapeId = String(state.selectedShape.id || '').trim();
+  const tileId = String(state.selectedTile.id || '').trim();
+  const valuesSnapshot = { ...(state.adminCalibrationValues || getSelectedTileCalibrationValues()) };
   if (state.adminCalibrationSaveTimer) clearTimeout(state.adminCalibrationSaveTimer);
   state.adminCalibrationSaveTimer = setTimeout(() => {
     state.adminCalibrationSaveTimer = 0;
-    state.adminCalibrationSavePromise = saveAdminCalibrationNow().catch((err) => {
+    state.adminCalibrationSavePromise = saveAdminCalibrationNow(shapeId, tileId, valuesSnapshot).catch((err) => {
       console.warn('admin calibration save failed', err);
       setAdminCalibrationStatus('Ошибка сохранения', 'err', true);
       return false;
@@ -903,12 +1035,15 @@ function scheduleAdminCalibrationSave() {
 }
 
 function stepAdminCalibrationScale(delta) {
-  const next = clamp((Number(state.adminCalibrationScale) || 1) + Number(delta || 0), 0.70, 1.50);
-  updateCalibrationUiValue(applySelectedTileUvScaleLive(next));
+  const current = state.adminCalibrationValues || getSelectedTileCalibrationValues();
+  const next = clampCalibrationParam('uvScale', (Number(current.uvScale) || 1) + Number(delta || 0));
+  const values = applySelectedTileCalibrationLive({ uvScale: next });
+  updateCalibrationUiValues(values);
   scheduleAdminCalibrationSave();
 }
 
 function syncAdminCalibrationUi() {
+  ensureCalibrationVisualControls();
   const enabled = !!(state.adminArEnabled && state.selectedShape && state.selectedTile);
   if (UI.btnArCalibrate) {
     UI.btnArCalibrate.hidden = !enabled;
@@ -916,13 +1051,14 @@ function syncAdminCalibrationUi() {
   }
   if (!enabled) {
     state.adminCalibrationTargetKey = '';
+    state.adminCalibrationValues = null;
     if (state.adminCalibrationOpen) setCalibrationPanelOpen(false);
     return;
   }
   const nextKey = `${state.selectedShape.id}::${state.selectedTile.id}`;
   const changed = state.adminCalibrationTargetKey !== nextKey;
   state.adminCalibrationTargetKey = nextKey;
-  updateCalibrationUiValue(getSelectedTileUvScaleValue());
+  updateCalibrationUiValues(getSelectedTileCalibrationValues());
   if (changed) setAdminCalibrationStatus('Автосохранение включено', '', false);
 }
 
@@ -3057,7 +3193,8 @@ function ensureArFinalControlsBound() {
 
   if (UI.btnCalibrationReset && !UI.btnCalibrationReset.__arBound) {
     UI.btnCalibrationReset.addEventListener('click', () => {
-      updateCalibrationUiValue(applySelectedTileUvScaleLive(1.0));
+      const values = applySelectedTileCalibrationLive({ ...CALIBRATION_DEFAULTS });
+      updateCalibrationUiValues(values);
       scheduleAdminCalibrationSave();
     });
     UI.btnCalibrationReset.__arBound = true;
@@ -3066,7 +3203,8 @@ function ensureArFinalControlsBound() {
   if (UI.calibrationScaleSlider && !UI.calibrationScaleSlider.__arBound) {
     UI.calibrationScaleSlider.addEventListener('input', (ev) => {
       const rawValue = ev && ev.target ? ev.target.value : UI.calibrationScaleSlider.value;
-      updateCalibrationUiValue(applySelectedTileUvScaleLive(rawValue));
+      const values = applySelectedTileCalibrationLive({ uvScale: rawValue });
+      updateCalibrationUiValues(values);
       scheduleAdminCalibrationSave();
     });
     UI.calibrationScaleSlider.__arBound = true;

@@ -262,13 +262,14 @@
             <div class="rotationPanelTitle">Калибровка текстуры</div>
             <button id="btnCalibrationReset" class="rotationResetBtn" type="button">Сброс</button>
           </div>
-          <div class="rotationHint">Админ-режим: масштаб текущей текстуры меняется прямо в AR и сохраняется автоматически.</div>
+          <div class="rotationHint">Админ-режим: настройки текущей текстуры применяются прямо в AR и сохраняются автоматически в палитру.</div>
           <div class="rotationStepRow calibrationStepRow">
             <button id="btnCalibrationScaleMinus" class="rotationStepBtn" type="button" aria-label="Уменьшить масштаб текстуры на 5 процентов">−5%</button>
             <div id="calibrationScaleValue" class="rotationValue" aria-live="polite">1.00x</div>
             <button id="btnCalibrationScalePlus" class="rotationStepBtn" type="button" aria-label="Увеличить масштаб текстуры на 5 процентов">+5%</button>
           </div>
-          <input id="calibrationScaleSlider" class="rotationSlider" type="range" min="0.70" max="1.50" step="0.01" value="1.00" aria-label="Масштаб текстуры" />
+          <input id="calibrationScaleSlider" class="rotationSlider" type="range" min="0.35" max="3.00" step="0.01" value="1.00" aria-label="Масштаб текстуры" />
+          <div id="calibrationVisualParams" class="calibrationVisualParams"></div>
           <div id="calibrationStatus" class="rotationHint" aria-live="polite"></div>
         </div>
         <div id="rotationPanel" class="rotationPanel" hidden>
@@ -333,12 +334,12 @@
     window.setTimeout(hide, 3000);
   })();
 </script>
-<script src="js/runtime-config.js?v=20260418-f24y"></script>
-<script src="js/site-env.js?v=20260418-f24y"></script>
-  <script src="js/content-identity.js?v=20260418-f24y"></script>
-<script src="js/sw-meta.js?v=20260418-f24y"></script>
-<script src="js/sw-register.js?v=20260418-f24y"></script>
-  <script type="module" src="js/app.js?v=20260418-f24y"></script>
+<script src="js/runtime-config.js?v=20260418-f24aa"></script>
+<script src="js/site-env.js?v=20260418-f24aa"></script>
+  <script src="js/content-identity.js?v=20260418-f24aa"></script>
+<script src="js/sw-meta.js?v=20260418-f24aa"></script>
+<script src="js/sw-register.js?v=20260418-f24aa"></script>
+  <script type="module" src="js/app.js?v=20260418-f24aa"></script>
 
 
 </body>

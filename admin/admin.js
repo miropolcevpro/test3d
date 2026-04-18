@@ -1,5 +1,5 @@
 // BUILD: v28 2026-01-16f (runtime-config)
-const __BUILD_ID__ = "20260418-f24y";
+const __BUILD_ID__ = "20260418-f24aa";
 console.log("[Admin] build", __BUILD_ID__);
 /* Admin (Step 3 start) — shapes list + shape details (read-only palette), router scaffold */
 (async () => {
@@ -371,8 +371,8 @@ function pickMediaUrl(candidates, opts) {
     {
       key: 'uvScale',
       label: 'uvScale (масштаб узора)',
-      min: 0.5,
-      max: 2.0,
+      min: 0.35,
+      max: 3.0,
       step: 0.01,
       help: 'Размер узора на поверхности. < 1 делает узор крупнее, > 1 делает узор мельче. Используйте, если масштаб визуально не совпадает с реальным.',
     },

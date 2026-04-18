@@ -1,3 +1,17 @@
+## 2026-04-18 — Patch f24aa: AR admin calibration full visual params + wider scale range
+- Expanded AR calibration `uvScale` range to a much wider admin-safe amplitude and synchronized the per-texture admin modal range with the new values.
+- Added full admin AR calibration controls for per-texture `exposureMult`, `contrast`, `saturation`, `roughnessMult`, `specStrength`, `normalScale`, and `bumpScale`, all with live apply and autosave back to the palette.
+- Fixed calibration autosave robustness by snapshotting the current shape/texture and values at schedule time, so quick switching between textures cannot save to the wrong palette item.
+- Added shader-side support for live contrast and saturation so AR calibration now visually reflects the same palette parameters that are available in the admin texture settings.
+- Release token: `20260418-f24aa`
+
+## 2026-04-18 — Patch f24z: admin mobile modal footer autolayout
+- Fixed mobile admin modal actions so texture-edit buttons, including `AR-калибровка`, no longer get clipped by the modal container on narrow screens.
+- Added responsive modal footer autolayout: 2-column action grid on tablets/smaller widths and a 1-column stacked layout on phones.
+- Reduced modal viewport margins on mobile and switched the modal body/footer sizing to `dvh`-based limits for safer behavior with mobile browser chrome.
+- Allowed long button labels to wrap cleanly instead of overflowing outside the modal card.
+- Release token: `20260418-f24z`
+
 ## 2026-04-18 — Patch f24y: AR admin calibration save fix
 - Release token: `20260418-f24y`
 - Исправлено сохранение `uvScale` из AR-калибровки: запись теперь идёт через тот же admin API `/api/palettes/{shapeId}`, что и обычное редактирование палитры.
