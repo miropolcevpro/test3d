@@ -806,18 +806,50 @@
     }
   }
 
-  function fetchRemoteJson(url) {
-    if (!url) return Promise.resolve(null);
+  function fetchRemoteResult(url) {
+    if (!url) {
+      return Promise.resolve({ ok: false, status: 0, data: null, url: '', message: 'Telemetry endpoint is not configured', code: 'no_endpoint' });
+    }
     return fetch(url, {
       method: 'GET',
       cache: 'no-store',
       credentials: 'omit',
       headers: { 'Accept': 'application/json' }
     }).then(function (res) {
-      if (!res || !res.ok) return null;
-      return res.json().catch(function () { return null; });
-    }).catch(function () {
-      return null;
+      if (!res) return { ok: false, status: 0, data: null, url: url, message: 'Empty response from telemetry endpoint', code: 'empty_response' };
+      return res.text().then(function (bodyText) {
+        var data = null;
+        if (bodyText) {
+          try {
+            data = JSON.parse(bodyText);
+          } catch (_) {
+            data = null;
+          }
+        }
+        if (res.ok) {
+          return { ok: true, status: res.status, data: data, url: url, message: '', code: '' };
+        }
+        var message = data && (data.message || data.error) ? String(data.message || data.error) : ('HTTP ' + String(res.status || 0));
+        var code = data && (data.code || data.errorCode) ? String(data.code || data.errorCode) : 'http_error';
+        return { ok: false, status: res.status, data: data, url: url, message: message, code: code };
+      }).catch(function () {
+        return { ok: false, status: res.status || 0, data: null, url: url, message: 'Failed to read telemetry response body', code: 'read_failed' };
+      });
+    }).catch(function (err) {
+      return {
+        ok: false,
+        status: 0,
+        data: null,
+        url: url,
+        message: err && err.message ? String(err.message) : 'Network request failed',
+        code: err && (err.name || err.code) ? String(err.name || err.code) : 'network_error'
+      };
+    });
+  }
+
+  function fetchRemoteJson(url) {
+    return fetchRemoteResult(url).then(function (result) {
+      return result && result.ok ? result.data : null;
     });
   }
 
@@ -825,8 +857,16 @@
     return fetchRemoteJson(buildRemoteUrl('summary', params || {}));
   }
 
+  function getRemoteSummaryDetailed(params) {
+    return fetchRemoteResult(buildRemoteUrl('summary', params || {}));
+  }
+
   function getRemoteErrors(params) {
     return fetchRemoteJson(buildRemoteUrl('errors', params || {}));
+  }
+
+  function getRemoteErrorsDetailed(params) {
+    return fetchRemoteResult(buildRemoteUrl('errors', params || {}));
   }
 
   function getRemoteHealth() {
@@ -907,7 +947,9 @@
     getSummary: getSummary,
     getDashboardSummary: function (params) { return computeDashboardSummaryFromHistory(filterHistoryRecords(readStorage(STORAGE_HISTORY_KEY, []), params || {})); },
     getRemoteSummary: getRemoteSummary,
+    getRemoteSummaryDetailed: getRemoteSummaryDetailed,
     getRemoteErrors: getRemoteErrors,
+    getRemoteErrorsDetailed: getRemoteErrorsDetailed,
     getRemoteHealth: getRemoteHealth,
     getSyncStatus: getSyncStatus,
     clearAll: clearAll,

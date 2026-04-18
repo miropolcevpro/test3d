@@ -1,5 +1,5 @@
 // BUILD: v28 2026-01-16f (runtime-config)
-const __BUILD_ID__ = "20260418-f24at";
+const __BUILD_ID__ = "20260418-f24au";
 console.log("[Admin] build", __BUILD_ID__);
 /* Admin (Step 3 start) — shapes list + shape details (read-only palette), router scaffold */
 (async () => {
@@ -1190,6 +1190,9 @@ function setTelemetryStatus(message, kind) {
 
   const TELEMETRY_ERROR_CATEGORY_ORDER = ['ar_session', 'textures_materials', 'palette_content', 'snapshot_export', 'analytics_backend', 'admin_save', 'ui_flow', 'runtime_js'];
   const TELEMETRY_ERROR_SEVERITY_ORDER = ['critical', 'medium', 'low', 'diagnostic'];
+  const TELEMETRY_REMOTE_BATCH_LIMIT = 250;
+  const TELEMETRY_ERROR_MODAL_ITEM_LIMIT = 300;
+  const TELEMETRY_ERROR_EXPORT_ITEM_LIMIT = 1200;
 
   const TELEMETRY_ERROR_RULES = {
     app_init_failed: { severity: 'critical', category: 'ui_flow' },
@@ -1248,6 +1251,8 @@ function setTelemetryStatus(message, kind) {
   }
 
   function inferTelemetryErrorSource(item) {
+    const preset = String(item && item.source || '').toLowerCase();
+    if (preset === 'site' || preset === 'admin') return preset;
     const path = String(item && item.path || '');
     const name = String(item && item.name || '');
     if (name.startsWith('admin_') || /\/admin(?:\/|$)/i.test(path)) return 'admin';
@@ -1258,8 +1263,8 @@ function setTelemetryStatus(message, kind) {
     const name = String(item && item.name || '');
     const props = item && item.props && typeof item.props === 'object' ? item.props : {};
     const rule = TELEMETRY_ERROR_RULES[name] || {};
-    let severity = rule.severity || '';
-    let category = rule.category || '';
+    let severity = String(item && item.severity || '').toLowerCase() || rule.severity || '';
+    let category = String(item && item.category || '').toLowerCase() || rule.category || '';
     if (!severity) {
       if (name.includes('window') || name.includes('rejection')) severity = 'critical';
       else if (name.includes('snapshot')) severity = 'medium';
@@ -1331,19 +1336,52 @@ function setTelemetryStatus(message, kind) {
     elTelemetryErrorReportStatus.className = 'status' + (kind ? (' ' + kind) : '');
   }
 
-  function buildTelemetryErrorSummaryCards(items, sourceLabel, filters, sourceMode) {
+  function normalizeTelemetryErrorCountMap(list, allowedKeys) {
+    const out = {};
+    (Array.isArray(allowedKeys) ? allowedKeys : []).forEach((key) => { out[key] = 0; });
+    (Array.isArray(list) ? list : []).forEach((entry) => {
+      const key = String(entry && (entry.key || entry.name) || '');
+      if (!Object.prototype.hasOwnProperty.call(out, key)) return;
+      out[key] = Number(entry && entry.count || 0) || 0;
+    });
+    return out;
+  }
+
+  function computeTelemetryErrorCountsFromItems(items) {
     const arr = Array.isArray(items) ? items : [];
-    const counts = { total: arr.length, critical: 0, medium: 0, low: 0, diagnostic: 0 };
+    const counts = { total: arr.length };
+    TELEMETRY_ERROR_SEVERITY_ORDER.forEach((key) => { counts[key] = 0; });
+    TELEMETRY_ERROR_CATEGORY_ORDER.forEach((key) => { counts['category:' + key] = 0; });
     arr.forEach((item) => {
       if (counts[item.severity] != null) counts[item.severity] += 1;
+      const categoryKey = 'category:' + item.category;
+      if (counts[categoryKey] != null) counts[categoryKey] += 1;
     });
-    const scopeHint = `${escapeHtml(sourceLabel)} · ${escapeHtml(sourceMode === 'remote' ? 'сводка со всех устройств' : 'только данные этого браузера')}`;
+    return counts;
+  }
+
+  function buildTelemetryErrorSummaryCards(state) {
+    const visibleItems = state && Array.isArray(state.visibleItems) ? state.visibleItems : [];
+    const overall = state && state.remoteAggregates ? state.remoteAggregates : null;
+    const fallbackCounts = computeTelemetryErrorCountsFromItems(visibleItems);
+    const severityCounts = overall && overall.bySeverity
+      ? normalizeTelemetryErrorCountMap(overall.bySeverity, TELEMETRY_ERROR_SEVERITY_ORDER)
+      : normalizeTelemetryErrorCountMap(TELEMETRY_ERROR_SEVERITY_ORDER.map((key) => ({ key, count: fallbackCounts[key] || 0 })), TELEMETRY_ERROR_SEVERITY_ORDER);
+    const totalCount = overall && overall.totalErrors != null ? Number(overall.totalErrors || 0) : Number(fallbackCounts.total || 0);
+    const scopeBits = [state && state.sourceLabel ? state.sourceLabel : ''];
+    if (state && state.sourceMode === 'remote') scopeBits.push('сводка со всех устройств');
+    else if (state && state.sourceMode === 'local') scopeBits.push('только данные этого браузера');
+    else if (state && state.sourceMode === 'remote_failed') scopeBits.push('детальный серверный отчёт временно недоступен');
+    const scopeHint = escapeHtml(scopeBits.filter(Boolean).join(' · '));
+    const shownHint = overall && totalCount > visibleItems.length
+      ? `В списке показано ${escapeHtml(String(visibleItems.length))} из ${escapeHtml(String(totalCount))} последних записей.`
+      : `В списке показано ${escapeHtml(String(visibleItems.length))} записей.`;
     const cards = [
-      ['Всего ошибок', counts.total, scopeHint],
-      [telemetryErrorSeverityLabel('critical'), counts.critical, TELEMETRY_ERROR_SEVERITY_META.critical.hint],
-      [telemetryErrorSeverityLabel('medium'), counts.medium, TELEMETRY_ERROR_SEVERITY_META.medium.hint],
-      [telemetryErrorSeverityLabel('low'), counts.low, TELEMETRY_ERROR_SEVERITY_META.low.hint],
-      [telemetryErrorSeverityLabel('diagnostic'), counts.diagnostic, TELEMETRY_ERROR_SEVERITY_META.diagnostic.hint]
+      ['Всего ошибок', totalCount, shownHint + ' ' + scopeHint],
+      [telemetryErrorSeverityLabel('critical'), severityCounts.critical || 0, TELEMETRY_ERROR_SEVERITY_META.critical.hint],
+      [telemetryErrorSeverityLabel('medium'), severityCounts.medium || 0, TELEMETRY_ERROR_SEVERITY_META.medium.hint],
+      [telemetryErrorSeverityLabel('low'), severityCounts.low || 0, TELEMETRY_ERROR_SEVERITY_META.low.hint],
+      [telemetryErrorSeverityLabel('diagnostic'), severityCounts.diagnostic || 0, TELEMETRY_ERROR_SEVERITY_META.diagnostic.hint]
     ];
     return cards.map(([label, value, hint]) => `
       <div class="telemetryStat">
@@ -1422,12 +1460,13 @@ function setTelemetryStatus(message, kind) {
     if (!elTelemetryErrorReportCard) return;
     const state = telemetryErrorReportState || { sourceLabel: '', sourceMode: 'local', baseFilters: getTelemetryFilters(), items: [], visibleItems: [], truncated: false, generatedAt: '' };
     if (elTelemetryErrorReportSummary) {
-      elTelemetryErrorReportSummary.innerHTML = buildTelemetryErrorSummaryCards(state.visibleItems, state.sourceLabel, state.baseFilters, state.sourceMode);
+      elTelemetryErrorReportSummary.innerHTML = buildTelemetryErrorSummaryCards(state);
     }
     if (elTelemetryErrorReportList) {
       const header = [];
-      if (state.truncated) header.push('<div class="hint mtSm">Показана ограниченная выборка последних ошибок. Для стабильности отчёт и экспорт не тянут бесконечный объём записей за раз.</div>');
+      if (state.truncated) header.push('<div class="hint mtSm">Показана ограниченная выборка последних ошибок. Для стабильности интерфейс показывает последние записи, а итоговые счётчики строятся по полному серверному скану выбранного периода.</div>');
       if (state.generatedAt) header.push(`<div class="hint mtSm">Последняя серверная генерация отчёта: ${escapeHtml(formatTelemetryDateTime(state.generatedAt))}</div>`);
+      if (state.remoteFailureMessage) header.push(`<div class="status err mtSm">${escapeHtml(state.remoteFailureMessage)}</div>`);
       elTelemetryErrorReportList.innerHTML = header.join('') + renderTelemetryErrorReportGroups(state.visibleItems);
     }
     const filterBits = [];
@@ -1435,43 +1474,83 @@ function setTelemetryStatus(message, kind) {
     if (state.uiFilters && state.uiFilters.category !== 'all') filterBits.push(telemetryErrorCategoryLabel(state.uiFilters.category));
     if (state.uiFilters && state.uiFilters.source !== 'all') filterBits.push(telemetryErrorSourceLabel(state.uiFilters.source));
     const suffix = filterBits.length ? (' Дополнительные фильтры: ' + filterBits.join(' · ') + '.') : '';
-    setTelemetryErrorReportStatus(`Показаны ошибки: ${state.sourceLabel}. Источник: ${state.sourceMode === 'remote' ? 'сводная аналитика со всех устройств' : 'только данные этого браузера'}. Найдено записей: ${state.visibleItems.length}.${suffix}`, state.truncated ? 'warn' : '');
+    if (state.sourceMode === 'remote_failed') {
+      setTelemetryErrorReportStatus(`Сводная аналитика доступна, но детальный серверный отчёт по ошибкам не получен. ${state.remoteFailureMessage || 'Попробуйте обновить отчёт.'}${suffix}`, 'err');
+      return;
+    }
+    const totalShown = state.remoteAggregates && state.remoteAggregates.totalErrors != null
+      ? `${state.visibleItems.length} из ${state.remoteAggregates.totalErrors}`
+      : String(state.visibleItems.length);
+    setTelemetryErrorReportStatus(`Показаны ошибки: ${state.sourceLabel}. Источник: ${state.sourceMode === 'remote' ? 'сводная аналитика со всех устройств' : 'только данные этого браузера'}. В отчёте: ${totalShown}.${suffix}`, state.truncated ? 'warn' : '');
   }
 
-  async function loadTelemetryErrorReportData() {
+  async function loadTelemetryErrorReportData(options) {
+    const cfg = options || {};
     const baseFilters = getTelemetryFilters();
     const uiFilters = getTelemetryErrorReportFilters();
-    let remote = null;
-    try {
-      remote = telemetry && telemetry.getRemoteErrors
-        ? await telemetry.getRemoteErrors({
-            days: baseFilters.days,
-            deviceType: (baseFilters.deviceType === 'all' ? '' : baseFilters.deviceType),
-            limit: 250,
-            items: 1200
-          })
-        : null;
-    } catch (_) {
-      remote = null;
+    const batchLimit = TELEMETRY_REMOTE_BATCH_LIMIT;
+    const itemLimit = Math.max(1, Math.min(TELEMETRY_ERROR_EXPORT_ITEM_LIMIT, Number(cfg.itemLimit || TELEMETRY_ERROR_MODAL_ITEM_LIMIT) || TELEMETRY_ERROR_MODAL_ITEM_LIMIT));
+    const remoteParams = {
+      days: baseFilters.days,
+      deviceType: (baseFilters.deviceType === 'all' ? '' : baseFilters.deviceType),
+      limit: batchLimit,
+      items: itemLimit,
+      severity: (uiFilters.severity === 'all' ? '' : uiFilters.severity),
+      category: (uiFilters.category === 'all' ? '' : uiFilters.category),
+      source: (uiFilters.source === 'all' ? '' : uiFilters.source)
+    };
+    const canLoadRemote = !!(telemetry && telemetry.getRemoteErrorsDetailed);
+    const [remoteErrorsResult, remoteSummaryResult] = await Promise.all([
+      canLoadRemote ? telemetry.getRemoteErrorsDetailed(remoteParams) : Promise.resolve({ ok: false, data: null, message: 'Telemetry endpoint is not configured', code: 'no_endpoint' }),
+      telemetry && telemetry.getRemoteSummaryDetailed
+        ? telemetry.getRemoteSummaryDetailed({ days: baseFilters.days, deviceType: (baseFilters.deviceType === 'all' ? '' : baseFilters.deviceType), limit: batchLimit })
+        : Promise.resolve({ ok: false, data: null, message: 'Telemetry summary is not available', code: 'no_summary' })
+    ]);
+
+    const remoteFeed = remoteErrorsResult && remoteErrorsResult.ok && remoteErrorsResult.data && Array.isArray(remoteErrorsResult.data.items)
+      ? remoteErrorsResult.data
+      : null;
+    const remoteSummary = remoteSummaryResult && remoteSummaryResult.ok && remoteSummaryResult.data
+      ? remoteSummaryResult.data
+      : null;
+
+    let sourceMode = 'local';
+    let rawItems = [];
+    let remoteFailureMessage = '';
+    if (remoteFeed) {
+      sourceMode = 'remote';
+      rawItems = remoteFeed.items;
+    } else if (remoteSummary) {
+      sourceMode = 'remote_failed';
+      rawItems = [];
+      const details = remoteErrorsResult && remoteErrorsResult.message ? ` Причина: ${remoteErrorsResult.message}.` : '';
+      remoteFailureMessage = `Детальный серверный отчёт по ошибкам не получен.${details}`;
+    } else {
+      sourceMode = 'local';
+      rawItems = ((telemetry && telemetry.getRecent ? telemetry.getRecent(itemLimit, baseFilters) : []).filter((item) => item && item.kind === 'error'));
     }
 
-    const sourceMode = remote && Array.isArray(remote.items) ? 'remote' : 'local';
-    const rawItems = sourceMode === 'remote'
-      ? remote.items
-      : ((telemetry && telemetry.getRecent ? telemetry.getRecent(1200, baseFilters) : []).filter((item) => item && item.kind === 'error'));
     const items = buildTelemetryErrorReportItems(rawItems);
-    const visibleItems = filterTelemetryErrorReportItems(items, uiFilters);
-    const sourceLabel = telemetrySourceLabel(sourceMode === 'remote' ? 'сводная аналитика' : 'данные этого браузера', baseFilters);
+    const visibleItems = sourceMode === 'remote' ? items : filterTelemetryErrorReportItems(items, uiFilters);
+    const sourceLabel = telemetrySourceLabel(sourceMode === 'remote' ? 'сводная аналитика' : (sourceMode === 'remote_failed' ? 'серверная сводка без деталей' : 'данные этого браузера'), baseFilters);
     telemetryErrorReportState = {
-      remote,
+      remote: remoteFeed,
+      remoteSummary,
+      remoteRequest: remoteErrorsResult,
       sourceMode,
       sourceLabel,
       baseFilters,
       uiFilters,
       items,
       visibleItems,
-      truncated: !!(remote && remote.truncated),
-      generatedAt: remote && remote.generatedAt ? remote.generatedAt : ''
+      truncated: !!(remoteFeed && remoteFeed.truncated),
+      generatedAt: remoteFeed && remoteFeed.generatedAt ? remoteFeed.generatedAt : '',
+      remoteFailureMessage,
+      remoteAggregates: remoteFeed ? {
+        totalErrors: Number(remoteFeed && remoteFeed.totals ? remoteFeed.totals.errors || 0 : 0),
+        bySeverity: Array.isArray(remoteFeed && remoteFeed.bySeverity) ? remoteFeed.bySeverity : [],
+        byCategory: Array.isArray(remoteFeed && remoteFeed.byCategory) ? remoteFeed.byCategory : []
+      } : null
     };
     renderTelemetryErrorReport();
     return telemetryErrorReportState;
@@ -1495,8 +1574,26 @@ function setTelemetryStatus(message, kind) {
     }));
   }
 
-  function exportTelemetryErrorReportCsv() {
+  async function getTelemetryErrorExportState() {
     const state = telemetryErrorReportState;
+    if (!state) return null;
+    if (state.sourceMode !== 'remote') return state;
+    const fresh = await loadTelemetryErrorReportData({ itemLimit: TELEMETRY_ERROR_EXPORT_ITEM_LIMIT });
+    if (fresh && fresh.sourceMode === 'remote') return fresh;
+    telemetryErrorReportState = state;
+    renderTelemetryErrorReport();
+    setTelemetryErrorReportStatus('Полный серверный экспорт не был загружен, поэтому выгружена текущая выборка отчёта.', 'warn');
+    return state;
+  }
+
+  async function exportTelemetryErrorReportCsv() {
+    const current = telemetryErrorReportState;
+    if (!current) return;
+    if (current.sourceMode === 'remote_failed') {
+      setTelemetryErrorReportStatus('Экспорт остановлен: серверная детализация ошибок не загружена. Сначала добейтесь успешной загрузки отчёта.', 'err');
+      return;
+    }
+    const state = await getTelemetryErrorExportState();
     if (!state) return;
     const rows = telemetryErrorExportRows(state.visibleItems);
     const columns = ['time', 'severity', 'category', 'source', 'title', 'technicalKey', 'device', 'shapeId', 'textureId', 'message', 'path', 'sessionId', 'visitorId'];
@@ -1507,8 +1604,14 @@ function setTelemetryStatus(message, kind) {
     downloadTextFile('webar_error_report.csv', csv, 'text/csv;charset=utf-8');
   }
 
-  function exportTelemetryErrorReportJson() {
-    const state = telemetryErrorReportState;
+  async function exportTelemetryErrorReportJson() {
+    const current = telemetryErrorReportState;
+    if (!current) return;
+    if (current.sourceMode === 'remote_failed') {
+      setTelemetryErrorReportStatus('Экспорт остановлен: серверная детализация ошибок не загружена. Сначала добейтесь успешной загрузки отчёта.', 'err');
+      return;
+    }
+    const state = await getTelemetryErrorExportState();
     if (!state) return;
     downloadJson('webar_error_report.json', {
       exportedAt: new Date().toISOString(),
@@ -3804,12 +3907,10 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
     });
 
     [elTelemetryErrorSeveritySelect, elTelemetryErrorCategorySelect, elTelemetryErrorSourceSelect].forEach((el) => {
-      el && el.addEventListener('change', () => {
+      el && el.addEventListener('change', async () => {
         telemetryTrack('admin_error_report_filter_change', Object.assign({}, getTelemetryFilters(), getTelemetryErrorReportFilters()));
         if (telemetryErrorReportState) {
-          telemetryErrorReportState.uiFilters = getTelemetryErrorReportFilters();
-          telemetryErrorReportState.visibleItems = filterTelemetryErrorReportItems(telemetryErrorReportState.items, telemetryErrorReportState.uiFilters);
-          renderTelemetryErrorReport();
+          await loadTelemetryErrorReportData();
         }
       });
     });
@@ -3860,14 +3961,14 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
       renderTelemetryPanel();
     });
 
-    elTelemetryErrorReportCsvBtn && elTelemetryErrorReportCsvBtn.addEventListener('click', () => {
+    elTelemetryErrorReportCsvBtn && elTelemetryErrorReportCsvBtn.addEventListener('click', async () => {
       telemetryTrack('admin_error_report_export_csv', Object.assign({}, getTelemetryFilters(), getTelemetryErrorReportFilters()));
-      exportTelemetryErrorReportCsv();
+      await exportTelemetryErrorReportCsv();
     });
 
-    elTelemetryErrorReportJsonBtn && elTelemetryErrorReportJsonBtn.addEventListener('click', () => {
+    elTelemetryErrorReportJsonBtn && elTelemetryErrorReportJsonBtn.addEventListener('click', async () => {
       telemetryTrack('admin_error_report_export_json', Object.assign({}, getTelemetryFilters(), getTelemetryErrorReportFilters()));
-      exportTelemetryErrorReportJson();
+      await exportTelemetryErrorReportJson();
     });
 
     elTelemetryClearBtn && elTelemetryClearBtn.addEventListener('click', () => {
