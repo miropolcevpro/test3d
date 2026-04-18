@@ -46,6 +46,9 @@ const API_BASE_URL = (runtimeConfig && typeof runtimeConfig.resolvePublicApiBase
   : ((typeof window !== 'undefined' && window.__API_BASE_URL__)
     ? String(window.__API_BASE_URL__).replace(/\/+$/, '') + '/'
     : '');
+const ADMIN_API_BASE_URL = (runtimeConfig && typeof runtimeConfig.resolveAdminApiBaseUrl === 'function')
+  ? String(runtimeConfig.resolveAdminApiBaseUrl() || '').replace(/\/+$/, '') + '/'
+  : '';
 const contentIdentity = (typeof window !== 'undefined' && window.__CONTENT_IDENTITY__) ? window.__CONTENT_IDENTITY__ : null;
 const _networkFallbackWarned = new Set();
 function warnNetworkFallbackOnce(key, ...args) {
@@ -736,6 +739,19 @@ function formatCalibrationScale(value) {
   return `${Number.isFinite(n) ? n.toFixed(2) : '1.00'}x`;
 }
 
+async function fetchAdminPalettePayload(shapeId, token) {
+  const apiBase = String(ADMIN_API_BASE_URL || API_BASE_URL || '').trim();
+  if (!apiBase) throw new Error('admin_api_missing');
+  const headers = new Headers({ Accept: 'application/json', Authorization: `Bearer ${token}` });
+  const url = `${apiBase.replace(/\/+$/, '')}/api/palettes/${encodeURIComponent(shapeId)}`;
+  const res = await fetch(url, { method: 'GET', headers, cache: 'no-store' });
+  let json = null;
+  try { json = await res.json(); } catch (_) {}
+  if (!res.ok) throw new Error((json && (json.message || json.error)) || `${res.status} ${res.statusText}`);
+  const { payload } = sanitizePalettePayload(json || {}, { context: url, shapeId });
+  return payload;
+}
+
 function clearAdminCalibrationStatusTimer() {
   if (state.adminCalibrationStatusTimer) {
     clearTimeout(state.adminCalibrationStatusTimer);
@@ -808,19 +824,16 @@ function applySelectedTileUvScaleLive(value) {
 }
 
 async function saveAdminCalibrationNow() {
-  if (!state.adminArEnabled || !API_BASE_URL) return false;
+  if (!state.adminArEnabled) return false;
   const token = getAdminSessionToken();
-  if (!token) return false;
+  if (!token) throw new Error('admin_token_missing');
   const shapeId = state.selectedShape && state.selectedShape.id ? String(state.selectedShape.id) : '';
   const tileId = state.selectedTile && state.selectedTile.id ? String(state.selectedTile.id) : '';
   if (!shapeId || !tileId) return false;
-  const directPaletteUrl = getDirectPaletteUrlForShape(state.selectedShape, SURFACE_PALETTE_BASE_URL);
-  if (!directPaletteUrl) throw new Error('palette_url_missing');
 
   setAdminCalibrationStatus('Сохраняем…', 'progress', true);
-  const rawPalette = await fetchJsonResource(directPaletteUrl, { label: `palette ${shapeId}`, cache: 'no-store' });
-  const { payload } = sanitizePalettePayload(rawPalette, { context: directPaletteUrl });
-  const items = Array.isArray(payload && payload.items) ? payload.items.slice() : [];
+  const palette = await fetchAdminPalettePayload(shapeId, token);
+  const items = Array.isArray(palette && palette.items) ? palette.items.slice() : [];
   const targetKey = comparableTextureKey(shapeId, tileId);
   const idx = items.findIndex((it) => comparableTextureKey(shapeId, it && (it.id || it.textureId || '')) === targetKey);
   if (idx < 0) throw new Error(`texture_not_found_in_palette:${tileId}`);
@@ -831,9 +844,16 @@ async function saveAdminCalibrationNow() {
   nextItem.params = nextParams;
   items[idx] = nextItem;
 
+  const apiBase = String(ADMIN_API_BASE_URL || API_BASE_URL || '').trim().replace(/\/+$/, '');
+  if (!apiBase) throw new Error('admin_api_missing');
   const headers = new Headers({ Accept: 'application/json', Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' });
-  const apiUrl = `${String(API_BASE_URL).replace(/\/+$/, '')}/api/palettes/${encodeURIComponent(shapeId)}`;
-  const res = await fetch(apiUrl, { method: 'POST', headers, cache: 'no-store', body: JSON.stringify({ shapeId, items }) });
+  const apiUrl = `${apiBase}/api/palettes/${encodeURIComponent(shapeId)}`;
+  const res = await fetch(apiUrl, {
+    method: 'POST',
+    headers,
+    cache: 'no-store',
+    body: JSON.stringify({ shapeId, items }),
+  });
   let json = null;
   try { json = await res.json(); } catch (_) {}
   if (!res.ok) throw new Error((json && (json.message || json.error)) || `${res.status} ${res.statusText}`);

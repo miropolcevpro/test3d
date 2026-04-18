@@ -1,3 +1,9 @@
+## 2026-04-18 — Patch f24y: AR admin calibration save fix
+- Release token: `20260418-f24y`
+- Исправлено сохранение `uvScale` из AR-калибровки: запись теперь идёт через тот же admin API `/api/palettes/{shapeId}`, что и обычное редактирование палитры.
+- Причина бага: в AR использовался public API base, который на сайте не был задан, поэтому визуальная калибровка применялась только локально в сессии и не записывалась в бакет.
+- Дополнительно чтение текущей палитры перед записью переведено на admin API, чтобы поведение совпадало с режимом настройки палитры в админке.
+
 ## Fix24x — Admin AR texture calibration via admin session
 - Added an admin-only AR calibration entry from the texture settings modal in the existing admin panel.
 - The site now honors a secure admin AR session and opens the requested shape/texture directly for calibration.
