@@ -919,7 +919,7 @@
   }
 
   function clearRemoteErrorsDetailed(payload) {
-    return postRemoteResult(buildRemoteUrl('', {}), Object.assign({ action: 'clear_errors' }, payload || {}));
+    return postRemoteResult(buildRemoteUrl('clear_errors', {}), Object.assign({ action: 'clear_errors', mode: 'clear_errors' }, payload || {}));
   }
 
   function getSyncStatus() {

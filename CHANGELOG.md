@@ -1,5 +1,5 @@
-## 20260418-f24aw — admin error report clear current errors
-- Release token: `20260418-f24aw`
+## 20260418-f24ax — admin error report clear current errors
+- Release token: `20260418-f24ax`
 - Added a dedicated `Очистить ошибки` action next to export in the admin error report modal.
 - Implemented soft server-side clearing for the current visible error selection: cleared error IDs are hidden from summary and detailed error reports without rewriting raw telemetry batches.
 - Added safe local-browser clearing fallback for local-only error reports and kept the rest of analytics, AR logic and telemetry ingestion unchanged.
