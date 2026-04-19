@@ -206,6 +206,87 @@ function findPolygonOverlap(polyA, polyB) {
   return null;
 }
 
+function getZoneEdges(zone) {
+  const out = [];
+  if (!zone) return out;
+  const points = toPlanarPoints(Array.isArray(zone.points) ? zone.points : []);
+  const isClosed = zone.closed !== false && points.length >= 3;
+  if (points.length < 2) return out;
+  const edgeCount = isClosed ? points.length : (points.length - 1);
+  for (let i = 0; i < edgeCount; i += 1) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    if (!a || !b || samePoint(a, b)) continue;
+    out.push([a, b, i]);
+  }
+  return out;
+}
+
+function getSegmentMidpoint(a, b) {
+  if (!a || !b) return null;
+  return {
+    x: (a.x + b.x) / 2,
+    y: (a.y + b.y) / 2,
+  };
+}
+
+export function validateZoneNextSegment({ currentPoints = [], nextPoint = null, zones = [], excludeZoneId = '' } = {}) {
+  const open = toPlanarPoints(currentPoints);
+  const next = toPlanarPoints([nextPoint])[0] || null;
+  if (!next) return { ok: false, reason: 'invalid_point' };
+  if (!open.length) return { ok: true, reason: '' };
+
+  const prev = open[open.length - 1];
+  if (!prev) return { ok: false, reason: 'invalid_point' };
+  if (samePoint(prev, next)) return { ok: false, reason: 'duplicate_point' };
+
+  if (open.length >= 2) {
+    for (let i = 0; i < open.length - 2; i += 1) {
+      const a = open[i];
+      const b = open[i + 1];
+      const kind = segmentIntersectionKind(a, b, prev, next);
+      if (kind !== 'none') {
+        return { ok: false, reason: 'self_segment_cross', detail: kind, segmentIndex: i };
+      }
+    }
+  }
+
+  const excluded = excludeZoneId ? String(excludeZoneId) : '';
+  const midpoint = getSegmentMidpoint(prev, next);
+  for (const zone of Array.isArray(zones) ? zones : []) {
+    if (!zone || (excluded && String(zone.id || '') === excluded)) continue;
+    const zonePointsRaw = Array.isArray(zone.points) ? zone.points : [];
+    if (zonePointsRaw.length < 2) continue;
+    const other = toPlanarPoints(zonePointsRaw);
+    const edges = getZoneEdges(zone);
+    for (const [a, b, edgeIndex] of edges) {
+      const kind = segmentIntersectionKind(a, b, prev, next);
+      if (kind === 'proper') {
+        return {
+          ok: false,
+          reason: 'zone_segment_cross',
+          detail: kind,
+          edgeIndex,
+          otherZoneId: zone.id ? String(zone.id) : '',
+          otherZoneTitle: zone.title ? String(zone.title) : '',
+        };
+      }
+    }
+    if (other.length >= 3) {
+      if (isPointStrictlyInsidePolygon(next, other) || (midpoint && isPointStrictlyInsidePolygon(midpoint, other))) {
+        return {
+          ok: false,
+          reason: 'inside_other_zone',
+          otherZoneId: zone.id ? String(zone.id) : '',
+          otherZoneTitle: zone.title ? String(zone.title) : '',
+        };
+      }
+    }
+  }
+
+  return { ok: true, reason: '' };
+}
+
 export function validateZoneContourAgainstZones({ candidatePoints = [], zones = [], excludeZoneId = '' } = {}) {
   const candidate = toPlanarPoints(candidatePoints);
   if (candidate.length < 3) {

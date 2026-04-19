@@ -449,7 +449,38 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   position:absolute;left:0;right:0;
   /* Keep main buttons above the bottom pattern strip */
   bottom:calc(var(--ar-bottom-strip) + 18px + var(--safe-bottom));
-  display:flex;justify-content:center;gap:18px;align-items:center;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  gap:10px;
+  align-items:center;
+}
+.arBottomCenterMain{
+  display:flex;
+  justify-content:center;
+  gap:18px;
+  align-items:center;
+}
+.arDraftAssist{
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+  padding:6px 10px;
+  border-radius:16px;
+  background:rgba(10,14,22,0.42);
+  border:1px solid rgba(255,255,255,0.12);
+  backdrop-filter: blur(10px);
+  box-shadow:0 10px 24px rgba(0,0,0,0.14);
+}
+.btnGhost--compact{
+  flex:0 0 auto;
+  min-width:112px;
+  padding:10px 12px;
+  border-radius:12px;
+  font-size:13px;
+  font-weight:900;
 }
 .fabPlus{
   width:88px;height:88px;border-radius:44px;
@@ -884,6 +915,8 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   .arZoneCompact{padding:8px 10px;}
   .arZoneCompactTitle{font-size:12px;}
   .arZoneCompactMeta{font-size:10px;}
+  .arDraftAssist{padding:5px 8px;gap:6px;}
+  .btnGhost--compact{min-width:96px;padding:9px 10px;font-size:12px;}
   .arZoneChip{min-width:104px;}
   .arZoneSummaryTitle{font-size:14px;}
   .arZoneActions{flex-wrap:wrap;}

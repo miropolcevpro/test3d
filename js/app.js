@@ -13,7 +13,7 @@ import { getArEnv, showArHelp, updateArEntryUI } from './app-ar-entry-helpers.js
 import { createArSessionHelpers } from './app-ar-session-helpers.js';
 import { createSelectionHelpers } from './app-selection-helpers.js';
 import { createArZoneHelpers } from './app-ar-zone-helpers.js';
-import { validateZoneContourAgainstZones } from './app-ar-zone-validation-helpers.js';
+import { validateZoneContourAgainstZones, validateZoneNextSegment } from './app-ar-zone-validation-helpers.js';
 import { computeZoneSnapTarget } from './app-ar-zone-snap-helpers.js';
 import { createZoneHardeningConfig, canCreateZone, canAddContourPoint, canStartHole, canAddHolePoint, describeZoneLimits } from './app-ar-zone-hardening-helpers.js';
 
@@ -211,6 +211,9 @@ const UI = {
   arDebugOverlay: document.getElementById('arDebugOverlay'),
   measureLayer: document.getElementById('measureLayer'),
   arBottomCenter: document.getElementById('arBottomCenter'),
+  arDraftAssist: document.getElementById('arDraftAssist'),
+  btnArUndo: document.getElementById('btnArUndo'),
+  btnArCancelZone: document.getElementById('btnArCancelZone'),
   btnArAdd: document.getElementById('btnArAdd'),
   btnArOk: document.getElementById('btnArOk'),
   postCloseBar: document.getElementById('postCloseBar'),
@@ -485,6 +488,8 @@ const state = {
   arZoneDeleteConfirmOpen: false,
   arZonePanelOpen: false,
   arZoneIntroHintSeen: false,
+  arDraftZoneId: '',
+  arDraftZoneOrigin: '',
   rotationPanelOpen: false,
   _paletteCache: new Map(),
   _paletteDefaultsCache: new Map(),
@@ -885,6 +890,132 @@ function maybeShowArZoneIntroHint() {
   showArRuntimeToast('Нажмите «Зоны», чтобы добавить новую зону, переключаться между зонами и менять текстуру активной зоны в нижней ленте.', 3600);
 }
 
+function setArDraftZoneContext(origin, zoneId) {
+  state.arDraftZoneOrigin = origin ? String(origin) : '';
+  state.arDraftZoneId = zoneId ? String(zoneId) : '';
+}
+
+function clearArDraftZoneContext(zoneId) {
+  const safeId = zoneId ? String(zoneId) : '';
+  if (!safeId || String(state.arDraftZoneId || '') === safeId) {
+    state.arDraftZoneOrigin = '';
+    state.arDraftZoneId = '';
+  }
+}
+
+function isCancelableCurrentDraftZone() {
+  if (!state.xrSession) return false;
+  if (!(state.phase === 'ar_draw' || state.phase === 'ar_cut')) return false;
+  const activeZone = getActiveZone({ createIfMissing: false });
+  if (!activeZone) return false;
+  if (String(state.arDraftZoneOrigin || '') !== 'add_zone') return false;
+  if (!state.arDraftZoneId || String(activeZone.id || '') !== String(state.arDraftZoneId || '')) return false;
+  return getZones().length > 1;
+}
+
+function syncArDraftAssistUi() {
+  const canUndoContour = !!(state.xrSession && state.phase === 'ar_draw' && Array.isArray(state.points) && state.points.length > 0);
+  const canUndoHole = !!(state.xrSession && state.phase === 'ar_cut' && Array.isArray(state.holePoints) && state.holePoints.length > 0);
+  const canUndo = canUndoContour || canUndoHole;
+  const canCancelZone = isCancelableCurrentDraftZone();
+  if (UI.arDraftAssist) show(UI.arDraftAssist, canUndo || canCancelZone);
+  if (UI.btnArUndo) {
+    UI.btnArUndo.disabled = !canUndo;
+    UI.btnArUndo.hidden = !canUndo;
+    UI.btnArUndo.textContent = state.phase === 'ar_cut' ? 'Назад · вырез' : 'Назад';
+    UI.btnArUndo.title = state.phase === 'ar_cut' ? 'Убрать последнюю точку текущего выреза' : 'Убрать последнюю точку контура';
+  }
+  if (UI.btnArCancelZone) {
+    UI.btnArCancelZone.disabled = !canCancelZone;
+    UI.btnArCancelZone.hidden = !canCancelZone;
+    UI.btnArCancelZone.title = canCancelZone ? 'Отменить только текущую новую зону и оставить уже готовые зоны' : 'Отменить текущую новую зону';
+  }
+}
+
+function undoActiveDraftStep() {
+  if (!state.xrSession) return false;
+  if (state.phase === 'ar_cut') {
+    if (!Array.isArray(state.holePoints) || !state.holePoints.length) return false;
+    state.holePoints.pop();
+    state.snapArmed = false;
+    state.snapKind = 'none';
+    state.snapPreview = null;
+    line = rebuildMarkersAndLine({ pointsGroup, points: state.points, holePoints: state.holePoints, phase: state.phase, anchorGroup, line, floorY: state.floorY, disposeObject3D, closed: state.closed });
+    rebuildFill();
+    updateAreaUI();
+    show(UI.btnArOk, state.holePoints.length >= 3);
+    syncArDraftAssistUi();
+    telemetryTrack('ar_zone_undo_point', telemetryCtx({ zoneId: String((getActiveZone({ createIfMissing: false }) || {}).id || ''), mode: 'hole', remaining: state.holePoints.length }));
+    return true;
+  }
+  if (state.phase === 'ar_draw') {
+    if (!Array.isArray(state.points) || !state.points.length) return false;
+    state.points.pop();
+    state.closed = false;
+    state.snapArmed = false;
+    state.snapKind = 'none';
+    state.snapPreview = null;
+    line = rebuildMarkersAndLine({ pointsGroup, points: state.points, holePoints: state.holePoints, phase: state.phase, anchorGroup, line, floorY: state.floorY, disposeObject3D, closed: false });
+    pointsGroup.visible = true;
+    if (line) line.visible = true;
+    if (UI.measureLayer) UI.measureLayer.style.display = 'block';
+    rebuildFill();
+    updateAreaUI();
+    show(UI.btnArOk, state.points.length >= 3);
+    syncArDraftAssistUi();
+    telemetryTrack('ar_zone_undo_point', telemetryCtx({ zoneId: String((getActiveZone({ createIfMissing: false }) || {}).id || ''), mode: 'contour', remaining: state.points.length }));
+    return true;
+  }
+  return false;
+}
+
+async function cancelCurrentDraftZone() {
+  if (!isCancelableCurrentDraftZone()) return false;
+  const activeZone = getActiveZone({ createIfMissing: false });
+  if (!activeZone) return false;
+  const zoneId = String(activeZone.id || '');
+  telemetryTrack('ar_zone_draft_cancel', telemetryCtx({ zoneId, totalZonesBefore: getZones().length, points: state.points.length, holes: state.holes.length }));
+  state.snapArmed = false;
+  state.snapKind = 'none';
+  state.snapPreview = null;
+  if (line) {
+    anchorGroup.remove(line);
+    disposeObject3D(line);
+    line = null;
+  }
+  pointsGroup.clear();
+  clearMeasureLabels();
+  const removed = removeZone(activeZone.id, { anchorGroup, disposeObject3D, preserveMaterial: tileMaterial });
+  clearArDraftZoneContext(zoneId);
+  if (!removed) return false;
+  const fallbackZone = getActiveZone({ createIfMissing: false }) || getZones()[0] || null;
+  if (fallbackZone) {
+    await activateArZoneById(fallbackZone.id, { track: false });
+    setActiveZoneStatus('final');
+  }
+  state.phase = 'ar_final';
+  state.closed = true;
+  state.holePoints = [];
+  show(UI.contourHint, false);
+  show(UI.scanHint, false);
+  show(UI.postCloseBar, false);
+  show(UI.arBottomCenter, false);
+  show(UI.btnArAdd, false);
+  show(UI.btnArOk, false);
+  show(UI.finalBar, true);
+  show(UI.finalColors, true);
+  pointsGroup.visible = false;
+  if (UI.measureLayer) UI.measureLayer.style.display = 'none';
+  syncArDraftAssistUi();
+  updateArBottomStripVar(UI);
+  updateAreaUI();
+  renderArZoneChips();
+  syncArZoneControlsUi();
+  showArRuntimeToast('Текущая новая зона отменена. Уже готовые зоны сохранены.', 2400);
+  telemetryTrack('ar_zone_draft_cancel_done', telemetryCtx({ zoneId, totalZonesAfter: getZones().length, activeZoneId: String((fallbackZone || {}).id || '') }));
+  return true;
+}
+
 function setArZonePanelOpen(open) {
   const canOpen = !!state.xrSession && state.phase === 'ar_final' && getZones().length > 0;
   const next = !!open && canOpen;
@@ -898,6 +1029,7 @@ function setArZonePanelOpen(open) {
   }
   updateArZoneBarVisibility();
   syncArZoneControlsUi();
+  syncArDraftAssistUi();
   updateArBottomStripVar(UI);
 }
 
@@ -986,6 +1118,7 @@ function updateArZoneBarVisibility() {
   if (UI.arZoneCompact) show(UI.arZoneCompact, hasZones);
   if (UI.arZoneBar) show(UI.arZoneBar, hasZones && !!state.arZonePanelOpen);
   if (hasZones) syncArZoneControlsUi();
+  syncArDraftAssistUi();
 }
 
 function renderArZoneChips() {
@@ -1138,13 +1271,24 @@ function buildZoneSnapPreview(localPoint) {
     if (String(zone.id || '') === String(activeZone.id || '')) return false;
     return Array.isArray(zone.points) && zone.points.length >= 2;
   });
-  return computeZoneSnapTarget({
+  const preview = computeZoneSnapTarget({
     point: localPoint,
     zones: candidateZones,
     excludeZoneId: activeZone.id,
     vertexThreshold: ZONE_VERTEX_SNAP_DIST_M,
     edgeThreshold: ZONE_EDGE_SNAP_DIST_M,
   });
+  if (!preview || !preview.armed || !preview.point || !Array.isArray(state.points) || state.points.length < 1) {
+    return preview;
+  }
+  const segmentValidation = validateZoneNextSegment({
+    currentPoints: state.points,
+    nextPoint: preview.point,
+    zones: candidateZones,
+    excludeZoneId: activeZone.id,
+  });
+  if (!segmentValidation || segmentValidation.ok) return preview;
+  return { armed: false, kind: 'none', point: localPoint || null };
 }
 
 function setZoneSnapPreview(preview) {
@@ -1216,6 +1360,51 @@ function handleActiveZoneContourValidationFailure(result) {
   return true;
 }
 
+function validateActiveZoneNextPoint(candidatePoint) {
+  const activeZone = getActiveZone({ createIfMissing: false });
+  if (!activeZone || !Array.isArray(state.points) || state.points.length < 1) {
+    return { ok: true, reason: '' };
+  }
+  const candidateZones = getZones().filter((zone) => {
+    if (!zone) return false;
+    if (String(zone.id || '') === String(activeZone.id || '')) return false;
+    return Array.isArray(zone.points) && zone.points.length >= 2;
+  });
+  return validateZoneNextSegment({
+    currentPoints: state.points,
+    nextPoint: candidatePoint,
+    zones: candidateZones,
+    excludeZoneId: activeZone.id,
+  });
+}
+
+function handleActiveZoneNextPointValidationFailure(result) {
+  const activeZone = getActiveZone({ createIfMissing: false });
+  if (!result || result.ok) return false;
+  const zoneId = activeZone && activeZone.id ? String(activeZone.id) : '';
+  if (result.reason === 'self_segment_cross') {
+    telemetryTrack('ar_zone_segment_blocked', telemetryCtx({ zoneId, reason: result.reason, detail: result.detail || '', points: state.points.length }));
+    showArRuntimeToast('Новая линия пересекает уже выставленный контур. Нажмите «Назад», чтобы убрать последнюю точку, и продолжайте по свободной кромке.', 3200);
+    return true;
+  }
+  if (result.reason === 'zone_segment_cross' || result.reason === 'inside_other_zone') {
+    telemetryTrack('ar_zone_segment_blocked', telemetryCtx({
+      zoneId,
+      reason: result.reason,
+      detail: result.detail || '',
+      otherZoneId: result.otherZoneId || '',
+      otherZoneTitle: result.otherZoneTitle || '',
+      points: state.points.length,
+    }));
+    const otherTitle = result.otherZoneTitle ? ` «${result.otherZoneTitle}»` : '';
+    showArRuntimeToast(`Нельзя провести линию через границу зоны${otherTitle}. Нажмите «Назад» и стыкуйте контур по внешней стороне или по общей кромке.`, 3400);
+    return true;
+  }
+  telemetryTrack('ar_zone_segment_blocked', telemetryCtx({ zoneId, reason: result.reason || 'unknown', points: state.points.length }));
+  showArRuntimeToast('Точку нельзя поставить в этом месте. Продолжайте контур по свободной стороне.', 2600);
+  return true;
+}
+
 function beginAddArZone() {
   if (!state.xrSession || !state.floorLocked) return null;
   const allowance = getZoneCreationAllowance();
@@ -1263,8 +1452,10 @@ function beginAddArZone() {
   updateAreaUI();
   renderArZoneChips();
   syncArZoneControlsUi();
+  setArDraftZoneContext('add_zone', zone.id);
+  syncArDraftAssistUi();
   telemetryTrack('ar_zone_add_start', telemetryCtx({ zoneId: String(zone.id), totalZones: getZones().length }));
-  showArRuntimeToast('Стройте новую зону как отдельный контур. После «Готово» выберите для неё текстуру в нижней ленте.', 3200);
+  showArRuntimeToast('Стройте новую зону как отдельный контур. Кнопка «Назад» убирает последнюю точку, а «Отменить зону» сохраняет уже готовые зоны.', 3400);
   return zone;
 }
 
@@ -2347,6 +2538,12 @@ function addPointAtWorld(worldPos) {
     }
   }
 
+  const nextPointValidation = validateActiveZoneNextPoint(snappedLocal);
+  if (handleActiveZoneNextPointValidationFailure(nextPointValidation)) {
+    setZoneSnapPreview(null);
+    return;
+  }
+
   if (snapPreview && snapPreview.armed) {
     if (snapPreview.kind === 'vertex') {
       telemetryTrack('ar_zone_snap_vertex', telemetryCtx({ zoneId: snapPreview.zoneId || '', points: state.points.length, targetVertexIndex: Number.isFinite(Number(snapPreview.vertexIndex)) ? Number(snapPreview.vertexIndex) : -1 }));
@@ -2368,6 +2565,7 @@ function addPointAtWorld(worldPos) {
 
 
   if (state.points.length >= 3) show(UI.btnArOk, true);
+  syncArDraftAssistUi();
 }
 
 function addPointFromReticle() {
@@ -2420,6 +2618,7 @@ function addHolePointLocal(local) {
   updateAreaUI();
 
   if (state.holePoints.length >= 3) show(UI.btnArOk, true);
+  syncArDraftAssistUi();
 }
 
 function closeHole() {
@@ -2449,6 +2648,7 @@ function closeHole() {
   updateAreaUI();
   setActiveZoneStatus('mask');
   renderArZoneChips();
+  syncArDraftAssistUi();
 }
 
 function closeContour() {
@@ -2479,10 +2679,12 @@ function closeContour() {
   updateArBottomStripVar(UI);
   setActiveZoneStatus('mask');
   renderArZoneChips();
+  syncArDraftAssistUi();
 } 
 
 
 function resetAll(keepFloor = false) {
+  clearArDraftZoneContext();
   state.points = [];
   state.holes = [];
   state.holePoints = [];
@@ -2559,6 +2761,8 @@ function resetAll(keepFloor = false) {
   show(UI.arBottomCenter, !inScan);
   show(UI.btnArAdd, !inScan);
   show(UI.btnArOk, false);
+
+  syncArDraftAssistUi();
 
   // restore guides visibility (they may be hidden in final mode)
   pointsGroup.visible = true;
@@ -3567,6 +3771,20 @@ UI.btnArAdd?.addEventListener('click', () => {
   addPointFromReticle();
 });
 
+UI.btnArUndo?.addEventListener('click', () => {
+  if (!undoActiveDraftStep()) {
+    showArRuntimeToast('Сейчас нечего отменять.', 1800);
+  }
+});
+
+UI.btnArCancelZone?.addEventListener('click', () => {
+  cancelCurrentDraftZone().catch((err) => {
+    console.warn('AR draft zone cancel failed', err);
+    telemetryError('ar_zone_draft_cancel_failed', err, telemetryCtx({ zoneId: String((getActiveZone({ createIfMissing: false }) || {}).id || '') }));
+    showArRuntimeToast('Не удалось отменить текущую новую зону. Попробуйте ещё раз.', 2400);
+  });
+});
+
 UI.btnArOk?.addEventListener('click', () => {
   if (state.phase === 'ar_cut') closeHole();
   else closeContour();
@@ -3644,6 +3862,7 @@ function enterActiveZoneEditMode() {
   updateAreaUI();
   renderArZoneChips();
   syncArZoneControlsUi();
+  syncArDraftAssistUi();
   return true;
 }
 
@@ -3687,6 +3906,7 @@ function enterActiveZoneCutoutMode() {
   if (UI.measureLayer) UI.measureLayer.style.display = 'block';
   renderArZoneChips();
   syncArZoneControlsUi();
+  syncArDraftAssistUi();
   return true;
 }
 
@@ -3738,6 +3958,7 @@ async function deleteActiveArZone() {
   setArZoneDeleteConfirmOpen(false);
   telemetryTrack('ar_zone_delete', telemetryCtx({ zoneId: String(activeZone.id || ''), totalZonesBefore: getZones().length }));
   const removed = removeZone(activeZone.id, { anchorGroup, disposeObject3D, preserveMaterial: tileMaterial });
+  clearArDraftZoneContext(String(activeZone.id || ''));
   if (!removed) return false;
   if (line) {
     anchorGroup.remove(line);
@@ -3767,6 +3988,7 @@ async function deleteActiveArZone() {
     updateAreaUI();
     renderArZoneChips();
     syncArZoneControlsUi();
+    syncArDraftAssistUi();
     telemetryTrack('ar_zone_delete_done', telemetryCtx({ zoneId: String(removed.id || ''), totalZonesAfter: 0, sceneResetToDraw: true }));
     showArRuntimeToast('Последняя зона удалена. Можно построить новую область.', 2400);
     pruneArRuntimeCaches();
@@ -3777,6 +3999,7 @@ async function deleteActiveArZone() {
   updateAreaUI();
   renderArZoneChips();
   syncArZoneControlsUi();
+  syncArDraftAssistUi();
   telemetryTrack('ar_zone_delete_done', telemetryCtx({ zoneId: String(removed.id || ''), totalZonesAfter: getZones().length, activeZoneId: String((fallbackZone || {}).id || '') }));
   showArRuntimeToast(`Зона удалена. Осталось зон: ${getZones().length}.`, 2200);
   pruneArRuntimeCaches();
@@ -3994,6 +4217,7 @@ UI.btnDone?.addEventListener('click', async () => {
     areaM2: Number(computeAreaM2().toFixed ? computeAreaM2().toFixed(3) : computeAreaM2()),
   }));
   setActiveZoneStatus('final');
+  clearArDraftZoneContext(String((activeZoneForDone || {}).id || ''));
   state.phase = 'ar_final';
   state.snapArmed = false;
   state.snapKind = 'none';
@@ -4042,6 +4266,7 @@ UI.btnDone?.addEventListener('click', async () => {
   renderArTextureRail();
   renderArZoneChips();
   syncArZoneControlsUi();
+  syncArDraftAssistUi();
   maybeShowArZoneIntroHint();
   ensureArTextureGroupsBuilt().catch((e) => {
     console.warn('AR texture rail build failed', e);

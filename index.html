@@ -235,8 +235,14 @@
 
       <!-- Основные кнопки разметки -->
       <div id="arBottomCenter" class="arBottomCenter">
-        <button id="btnArAdd" class="fabPlus" type="button" aria-label="Добавить точку">＋</button>
-        <button id="btnArOk" class="fabOk" type="button" aria-label="ОК" hidden>OK</button>
+        <div id="arDraftAssist" class="arDraftAssist" hidden>
+          <button id="btnArUndo" class="btnGhost btnGhost--compact" type="button">Назад</button>
+          <button id="btnArCancelZone" class="btnGhost btnGhost--compact btnGhost--danger" type="button" hidden>Отменить зону</button>
+        </div>
+        <div class="arBottomCenterMain">
+          <button id="btnArAdd" class="fabPlus" type="button" aria-label="Добавить точку">＋</button>
+          <button id="btnArOk" class="fabOk" type="button" aria-label="ОК" hidden>OK</button>
+        </div>
       </div>
 
       <!-- Шаг после замыкания: редактирование/вырез/готово -->
@@ -373,13 +379,13 @@
     window.setTimeout(hide, 3000);
   })();
 </script>
-<script src="js/runtime-config.js?v=20260418-f24bg"></script>
-<script src="js/site-env.js?v=20260418-f24bg"></script>
-  <script src="js/content-identity.js?v=20260418-f24bg"></script>
-<script src="js/sw-meta.js?v=20260418-f24bg"></script>
-<script src="js/sw-register.js?v=20260418-f24bg"></script>
-  <script src="js/telemetry.js?v=20260418-f24bg"></script>
-  <script type="module" src="js/app.js?v=20260418-f24bg"></script>
+<script src="js/runtime-config.js?v=20260418-f24bi"></script>
+<script src="js/site-env.js?v=20260418-f24bi"></script>
+  <script src="js/content-identity.js?v=20260418-f24bi"></script>
+<script src="js/sw-meta.js?v=20260418-f24bi"></script>
+<script src="js/sw-register.js?v=20260418-f24bi"></script>
+  <script src="js/telemetry.js?v=20260418-f24bi"></script>
+  <script type="module" src="js/app.js?v=20260418-f24bi"></script>
 
 
 </body>
