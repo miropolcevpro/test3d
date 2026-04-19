@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 
 const EPS = 1e-4;
-const DEFAULT_CURB_WIDTH = 0.08;
-const DEFAULT_CURB_HEIGHT = 0.12;
-const DEFAULT_CURB_Y_OFFSET = 0.01;
+const DEFAULT_CURB_WIDTH = 0.045;
+const DEFAULT_CURB_HEIGHT = 0.028;
+const DEFAULT_CURB_Y_OFFSET = 0.003;
+const DEFAULT_CURB_OUTER_GAP = 0.002;
 
 function ensureFinite(value, fallback = 0) {
   const num = Number(value);
@@ -85,6 +86,19 @@ function computeMidpoint(a, b) {
   };
 }
 
+function computePolygonSignedArea(points) {
+  const pts = Array.isArray(points) ? points.filter(Boolean) : [];
+  if (pts.length < 3) return 0;
+  let area = 0;
+  for (let i = 0; i < pts.length; i += 1) {
+    const a = pts[i];
+    const b = pts[(i + 1) % pts.length];
+    if (!a || !b) continue;
+    area += (a.x * b.y) - (b.x * a.y);
+  }
+  return area / 2;
+}
+
 function getZonePoints(zone) {
   const source = zone && Array.isArray(zone.points) ? zone.points : [];
   return source.map(clonePoint).filter(Boolean);
@@ -97,6 +111,9 @@ function getZoneEdges(zone) {
   if (!zoneId || points.length < 2) return edges;
   const isClosed = !!(zone && zone.closed !== false && points.length >= 3);
   const edgeCount = isClosed ? points.length : Math.max(0, points.length - 1);
+  const planarPoints = points.map(toPlanar).filter(Boolean);
+  const signedArea = isClosed ? computePolygonSignedArea(planarPoints) : 0;
+  const isCounterClockwise = signedArea > 0;
   for (let i = 0; i < edgeCount; i += 1) {
     const start = points[i];
     const end = points[(i + 1) % points.length];
@@ -105,6 +122,10 @@ function getZoneEdges(zone) {
     if (!a || !b || samePoint(a, b)) continue;
     const length = computeEdgeLength(a, b);
     if (length <= EPS) continue;
+    const dir = { x: (b.x - a.x) / length, y: (b.y - a.y) / length };
+    const outwardNormal = isCounterClockwise
+      ? { x: dir.y, y: -dir.x }
+      : { x: -dir.y, y: dir.x };
     edges.push({
       key: normalizeEdgeKey(zoneId, i, (i + 1) % points.length),
       zoneId,
@@ -116,6 +137,10 @@ function getZoneEdges(zone) {
       b,
       midpoint: computeMidpoint(a, b),
       length,
+      direction: dir,
+      outwardNormal,
+      signedArea,
+      isCounterClockwise,
       boundaryType: 'outer_boundary',
       sharedZoneIds: [],
       sharedEdgeKeys: [],
@@ -171,11 +196,21 @@ function buildCurbStripMesh({ edges = [], width = DEFAULT_CURB_WIDTH, height = D
     const dz = Number(end.z) - Number(start.z);
     const length = Math.hypot(dx, dz);
     if (!(length > EPS)) continue;
-    const baseY = (Number(start.y) + Number(end.y)) / 2;
-    const geometry = new THREE.BoxGeometry(length, height, width);
+    const trim = Math.min(width * 0.55, length * 0.2);
+    const usableLength = Math.max(EPS, length - (trim * 2));
+    const dirX = dx / length;
+    const dirZ = dz / length;
+    const normal = edge && edge.outwardNormal
+      ? { x: Number(edge.outwardNormal.x) || 0, y: Number(edge.outwardNormal.y) || 0 }
+      : { x: dirZ, y: -dirX };
+    const offsetDist = (width / 2) + DEFAULT_CURB_OUTER_GAP;
+    const centerX = (Number(start.x) + Number(end.x)) / 2 + (normal.x * offsetDist);
+    const centerZ = (Number(start.z) + Number(end.z)) / 2 + (normal.y * offsetDist);
+    const baseY = Math.max(Number(start.y), Number(end.y));
+    const geometry = new THREE.BoxGeometry(usableLength, height, width);
     const mesh = new THREE.Mesh(geometry, sharedMaterial);
     mesh.name = `ar-curb-segment-${String(edge.key || '')}`;
-    mesh.position.set((Number(start.x) + Number(end.x)) / 2, baseY + yOffset + (height / 2), (Number(start.z) + Number(end.z)) / 2);
+    mesh.position.set(centerX, baseY + yOffset + (height / 2), centerZ);
     mesh.rotation.y = Math.atan2(dz, dx);
     mesh.castShadow = false;
     mesh.receiveShadow = false;
@@ -185,6 +220,8 @@ function buildCurbStripMesh({ edges = [], width = DEFAULT_CURB_WIDTH, height = D
       boundaryType: String(edge.boundaryType || 'outer_boundary'),
       width,
       height,
+      usableLength,
+      offsetDist,
     };
     curbGroup.add(mesh);
   }

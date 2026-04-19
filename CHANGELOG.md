@@ -1,3 +1,8 @@
+## 20260419-f24bp — ar curb geometry stabilization
+- Release token: `20260419-f24bp`
+- Бордюры смещены наружу относительно внешнего контура зоны, уменьшены по высоте/ширине и обрезаются у углов, чтобы не пересекаться хаотично и не накладываться на плитку.
+- Исправлена нестабильная curb-геометрия на острых углах и уменьшена визуальная агрессивность бордюров в AR.
+
 ## 20260419-f24bo — ar curb ux polish
 - Release token: `20260419-f24bo`
 - Polished the curb sheet into a clearer mobile-first flow with preview, segmented choice chips for boundary mode, curb preset and color, plus clearer state text for the active zone.
