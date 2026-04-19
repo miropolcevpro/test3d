@@ -13,6 +13,7 @@ import { getArEnv, showArHelp, updateArEntryUI } from './app-ar-entry-helpers.js
 import { createArSessionHelpers } from './app-ar-session-helpers.js';
 import { createSelectionHelpers } from './app-selection-helpers.js';
 import { createArZoneHelpers } from './app-ar-zone-helpers.js';
+import { createArCurbHelpers } from './app-ar-curb-helpers.js';
 import { validateZoneContourAgainstZones, validateZoneNextSegment } from './app-ar-zone-validation-helpers.js';
 import { computeZoneSnapCandidates } from './app-ar-zone-snap-helpers.js';
 import { createZoneHardeningConfig, canCreateZone, canAddContourPoint, canStartHole, canAddHolePoint, describeZoneLimits } from './app-ar-zone-hardening-helpers.js';
@@ -234,7 +235,25 @@ const UI = {
   btnArZoneAddAction: document.getElementById('btnArZoneAddAction'),
   btnArZoneEdit: document.getElementById('btnArZoneEdit'),
   btnArZoneCutout: document.getElementById('btnArZoneCutout'),
+  btnArZoneCurb: document.getElementById('btnArZoneCurb'),
   btnArZoneDelete: document.getElementById('btnArZoneDelete'),
+  arCurbSheet: document.getElementById('arCurbSheet'),
+  arCurbMeta: document.getElementById('arCurbMeta'),
+  arCurbPreviewTitle: document.getElementById('arCurbPreviewTitle'),
+  arCurbPreviewMeta: document.getElementById('arCurbPreviewMeta'),
+  arCurbStateHint: document.getElementById('arCurbStateHint'),
+  arCurbModeChips: document.getElementById('arCurbModeChips'),
+  arCurbBoundaryModeSelect: document.getElementById('arCurbBoundaryModeSelect'),
+  arCurbSegmentsWrap: document.getElementById('arCurbSegmentsWrap'),
+  arCurbSegmentsHint: document.getElementById('arCurbSegmentsHint'),
+  arCurbSegments: document.getElementById('arCurbSegments'),
+  arCurbPresetChips: document.getElementById('arCurbPresetChips'),
+  arCurbPresetSelect: document.getElementById('arCurbPresetSelect'),
+  arCurbMaterialChips: document.getElementById('arCurbMaterialChips'),
+  arCurbMaterialSelect: document.getElementById('arCurbMaterialSelect'),
+  btnArCurbApply: document.getElementById('btnArCurbApply'),
+  btnArCurbRemove: document.getElementById('btnArCurbRemove'),
+  btnArCurbClose: document.getElementById('btnArCurbClose'),
   arZoneDeleteConfirm: document.getElementById('arZoneDeleteConfirm'),
   arZoneDeleteConfirmMeta: document.getElementById('arZoneDeleteConfirmMeta'),
   btnArZoneDeleteCancel: document.getElementById('btnArZoneDeleteCancel'),
@@ -483,11 +502,21 @@ const state = {
   arZones: [],
   activeZoneId: '',
   _arZoneSeq: 0,
+  arCurbs: [],
+  activeCurbId: '',
+  _arCurbSeq: 0,
   _arZoneCompat: null,
   arZoneUiBusy: false,
   arZoneDeleteConfirmOpen: false,
   arZonePanelOpen: false,
   arZoneIntroHintSeen: false,
+  arCurbSheetOpen: false,
+  arCurbIntroHintSeen: false,
+  arCurbDraftBoundaryMode: 'outer_perimeter',
+  arCurbDraftEdgeKeys: [],
+  arCurbDraftPresetId: 'standard',
+  arCurbDraftMaterialId: 'gray',
+  arCurbDraftZoneId: '',
   arDraftZoneId: '',
   arDraftZoneOrigin: '',
   rotationPanelOpen: false,
@@ -643,7 +672,40 @@ const {
   removeZone,
   clearAllZoneRuntime,
 } = arZoneHelpers;
+const arCurbHelpers = createArCurbHelpers({ state });
+const {
+  analyzeZoneEdges,
+  getOuterBoundaryEdges,
+  getCurbs,
+  getCurbsByZoneId,
+  upsertPerimeterCurb,
+  buildPerimeterCurbMesh,
+  attachCurbMesh,
+  removeCurb,
+  removeCurbsForZone,
+  clearAllCurbRuntime,
+  resetCurbStorage,
+} = arCurbHelpers;
+void analyzeZoneEdges;
+void getOuterBoundaryEdges;
+void getCurbs;
+void getCurbsByZoneId;
+void upsertPerimeterCurb;
+void buildPerimeterCurbMesh;
+void attachCurbMesh;
+void removeCurb;
 ensureSingleActiveZone();
+
+const AR_CURB_PRESETS = {
+  standard: { id: 'standard', label: 'Стандартный', width: 0.08, height: 0.12, yOffset: 0.01 },
+  garden: { id: 'garden', label: 'Садовый', width: 0.07, height: 0.09, yOffset: 0.008 },
+  tall: { id: 'tall', label: 'Высокий', width: 0.09, height: 0.18, yOffset: 0.012 },
+};
+const AR_CURB_MATERIALS = {
+  gray: { id: 'gray', label: 'Серый', color: 0xb3b8c2, roughness: 0.86, metalness: 0.04 },
+  graphite: { id: 'graphite', label: 'Графит', color: 0x5b6169, roughness: 0.9, metalness: 0.03 },
+  sand: { id: 'sand', label: 'Песочный', color: 0xb89d79, roughness: 0.88, metalness: 0.02 },
+};
 
 const SNAP_DIST_M = 0.10;
 const ZONE_VERTEX_SNAP_DIST_M = 0.12;
@@ -883,6 +945,339 @@ function getArZoneCompactMeta(zone) {
   return `${tileLabel} · ${rotationLabel} · ${zoneLabel}`;
 }
 
+function getArCurbPreset(presetId) {
+  const safeId = presetId ? String(presetId) : 'standard';
+  return AR_CURB_PRESETS[safeId] || AR_CURB_PRESETS.standard;
+}
+
+function getArCurbMaterialDef(materialId) {
+  const safeId = materialId ? String(materialId) : 'gray';
+  return AR_CURB_MATERIALS[safeId] || AR_CURB_MATERIALS.gray;
+}
+
+function createArCurbMaterial(materialId) {
+  const material = getArCurbMaterialDef(materialId);
+  return new THREE.MeshStandardMaterial({
+    color: material.color,
+    roughness: Number(material.roughness),
+    metalness: Number(material.metalness),
+  });
+}
+
+function getPrimaryCurbForZone(zoneId) {
+  const curbs = getCurbsByZoneId(zoneId);
+  return curbs.length ? curbs[0] : null;
+}
+
+function getActiveZonePrimaryCurb() {
+  const activeZone = getActiveZone({ createIfMissing: false });
+  if (!activeZone) return null;
+  return getPrimaryCurbForZone(activeZone.id);
+}
+
+function getArCurbSummaryLabel(curb) {
+  if (!curb) return 'Без бордюра';
+  const preset = getArCurbPreset(curb.presetId);
+  const material = getArCurbMaterialDef(curb.materialId);
+  const modeLabel = String(curb.boundaryMode || '') === 'outer_segments'
+    ? `Сегменты: ${Array.isArray(curb.edgeKeys) ? curb.edgeKeys.length : 0}`
+    : 'Весь периметр';
+  return `${preset.label} · ${material.label} · ${modeLabel}`;
+}
+
+function getOuterEdgeLabel(edge, index) {
+  const safeIndex = Number(index) + 1;
+  const length = Number(edge && edge.length);
+  const meters = Number.isFinite(length) ? `${length.toFixed(2)} м` : '';
+  return meters ? `Сегмент ${safeIndex} · ${meters}` : `Сегмент ${safeIndex}`;
+}
+
+function normalizeCurbEdgeKeysForZone(zoneId, edgeKeys) {
+  const allowed = new Set(getOuterBoundaryEdges(zoneId).map((edge) => String(edge.key || '')));
+  return (Array.isArray(edgeKeys) ? edgeKeys : [])
+    .map((item) => String(item || ''))
+    .filter((item, idx, arr) => item && allowed.has(item) && arr.indexOf(item) === idx);
+}
+
+function primeArCurbDraftForZone(zoneId, opts = {}) {
+  const safeZoneId = zoneId ? String(zoneId) : '';
+  if (!safeZoneId) {
+    state.arCurbDraftZoneId = '';
+    state.arCurbDraftBoundaryMode = 'outer_perimeter';
+    state.arCurbDraftEdgeKeys = [];
+    state.arCurbDraftPresetId = 'standard';
+    state.arCurbDraftMaterialId = 'gray';
+    return null;
+  }
+  const activeZone = getZoneById(safeZoneId);
+  if (!activeZone) return null;
+  const curb = getPrimaryCurbForZone(activeZone.id);
+  const outerEdges = getOuterBoundaryEdges(activeZone.id);
+  const allKeys = outerEdges.map((edge) => String(edge.key || ''));
+  const nextMode = curb && curb.boundaryMode === 'outer_segments' ? 'outer_segments' : 'outer_perimeter';
+  const nextKeys = curb
+    ? normalizeCurbEdgeKeysForZone(activeZone.id, curb.edgeKeys)
+    : allKeys.slice();
+  const nextPresetId = curb && curb.presetId ? String(curb.presetId) : 'standard';
+  const nextMaterialId = curb && curb.materialId ? String(curb.materialId) : 'gray';
+  if (opts.force || String(state.arCurbDraftZoneId || '') !== String(activeZone.id || '')) {
+    state.arCurbDraftZoneId = String(activeZone.id || '');
+    state.arCurbDraftBoundaryMode = nextMode;
+    state.arCurbDraftEdgeKeys = nextMode === 'outer_segments' ? nextKeys.slice() : allKeys.slice();
+    state.arCurbDraftPresetId = nextPresetId;
+    state.arCurbDraftMaterialId = nextMaterialId;
+    return { zone: activeZone, curb, outerEdges, allKeys };
+  }
+  state.arCurbDraftEdgeKeys = normalizeCurbEdgeKeysForZone(activeZone.id, state.arCurbDraftEdgeKeys);
+  if (!state.arCurbDraftPresetId) state.arCurbDraftPresetId = nextPresetId;
+  if (!state.arCurbDraftMaterialId) state.arCurbDraftMaterialId = nextMaterialId;
+  return { zone: activeZone, curb, outerEdges, allKeys };
+}
+
+function renderArCurbSegmentChips(activeZone, outerEdges) {
+  if (!UI.arCurbSegments) return;
+  UI.arCurbSegments.innerHTML = '';
+  const isSegmentsMode = String(state.arCurbDraftBoundaryMode || '') === 'outer_segments';
+  if (UI.arCurbSegmentsWrap) show(UI.arCurbSegmentsWrap, !!activeZone && isSegmentsMode);
+  if (!activeZone || !isSegmentsMode) return;
+  const edges = Array.isArray(outerEdges) ? outerEdges : [];
+  if (!edges.length) {
+    if (UI.arCurbSegmentsHint) UI.arCurbSegmentsHint.textContent = 'У этой зоны нет доступных внешних сегментов для отдельного выбора.';
+    return;
+  }
+  if (UI.arCurbSegmentsHint) {
+    UI.arCurbSegmentsHint.textContent = 'Сегменты перечислены по порядку обхода внешнего контура зоны. Общие швы между зонами сюда не попадают.';
+  }
+  const selected = new Set(normalizeCurbEdgeKeysForZone(activeZone.id, state.arCurbDraftEdgeKeys));
+  for (let i = 0; i < edges.length; i += 1) {
+    const edge = edges[i];
+    const key = String(edge.key || '');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `arCurbSegmentChip${selected.has(key) ? ' is-active' : ''}`;
+    btn.dataset.edgeKey = key;
+    btn.setAttribute('aria-pressed', selected.has(key) ? 'true' : 'false');
+    btn.textContent = getOuterEdgeLabel(edge, i);
+    btn.title = `${selected.has(key) ? 'Убрать' : 'Добавить'} ${getOuterEdgeLabel(edge, i)} в бордюр активной зоны`;
+    UI.arCurbSegments.appendChild(btn);
+  }
+}
+
+function syncChoiceChipGroup(container, datasetKey, activeValue) {
+  if (!container) return;
+  const safeValue = activeValue == null ? '' : String(activeValue);
+  container.querySelectorAll('[data-' + datasetKey + ']').forEach((node) => {
+    const value = node && node.dataset ? String(node.dataset[datasetKey] || '') : '';
+    const isActive = value === safeValue;
+    node.classList.toggle('is-active', isActive);
+    node.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+  });
+}
+
+function getDraftCurbSheetState(activeZone, curb, outerEdges) {
+  const safeZone = activeZone || null;
+  const boundaryMode = String(state.arCurbDraftBoundaryMode || 'outer_perimeter');
+  const presetId = state.arCurbDraftPresetId ? String(state.arCurbDraftPresetId) : (curb && curb.presetId ? String(curb.presetId) : 'standard');
+  const materialId = state.arCurbDraftMaterialId ? String(state.arCurbDraftMaterialId) : (curb && curb.materialId ? String(curb.materialId) : 'gray');
+  const preset = getArCurbPreset(presetId);
+  const material = getArCurbMaterialDef(materialId);
+  const selectedKeys = safeZone
+    ? normalizeCurbEdgeKeysForZone(safeZone.id, boundaryMode === 'outer_segments' ? state.arCurbDraftEdgeKeys : (Array.isArray(outerEdges) ? outerEdges.map((edge) => String(edge.key || '')) : []))
+    : [];
+  return { boundaryMode, preset, material, selectedKeys };
+}
+
+function syncArCurbSheetUi() {
+  const activeZone = getActiveZone({ createIfMissing: false });
+  const draft = activeZone ? primeArCurbDraftForZone(activeZone.id) : null;
+  const curb = draft ? draft.curb : (activeZone ? getPrimaryCurbForZone(activeZone.id) : null);
+  const outerEdges = draft ? draft.outerEdges : [];
+  const outerKeys = draft ? draft.allKeys : [];
+  const { boundaryMode, preset, material, selectedKeys } = getDraftCurbSheetState(activeZone, curb, outerEdges);
+  const modeLabel = boundaryMode === 'outer_segments'
+    ? (selectedKeys.length ? `Выбрано сегментов: ${selectedKeys.length}` : 'Выберите внешние сегменты')
+    : 'Весь внешний периметр';
+  if (UI.arCurbMeta) {
+    UI.arCurbMeta.textContent = activeZone ? `${activeZone.title || 'Активная зона'} · ${getArZoneTileLabel(activeZone)}` : '';
+  }
+  if (UI.arCurbPreviewTitle) {
+    UI.arCurbPreviewTitle.textContent = `${preset.label} · ${material.label}`;
+  }
+  if (UI.arCurbPreviewMeta) {
+    UI.arCurbPreviewMeta.textContent = activeZone
+      ? `${activeZone.title || 'Активная зона'} · ${modeLabel}`
+      : modeLabel;
+  }
+  if (UI.arCurbBoundaryModeSelect) UI.arCurbBoundaryModeSelect.value = boundaryMode;
+  if (UI.arCurbPresetSelect) UI.arCurbPresetSelect.value = preset.id;
+  if (UI.arCurbMaterialSelect) UI.arCurbMaterialSelect.value = material.id;
+  syncChoiceChipGroup(UI.arCurbModeChips, 'curbMode', boundaryMode);
+  syncChoiceChipGroup(UI.arCurbPresetChips, 'curbPreset', preset.id);
+  syncChoiceChipGroup(UI.arCurbMaterialChips, 'curbMaterial', material.id);
+  renderArCurbSegmentChips(activeZone, outerEdges);
+  if (UI.arCurbStateHint) {
+    if (!activeZone) {
+      UI.arCurbStateHint.textContent = 'Выберите активную зону, чтобы настроить её бордюр.';
+    } else if (curb) {
+      UI.arCurbStateHint.textContent = `Сейчас у зоны: ${getArCurbSummaryLabel(curb)}. Доступных внешних сегментов: ${outerEdges.length}.`;
+    } else if (boundaryMode === 'outer_segments') {
+      UI.arCurbStateHint.textContent = `Будут выбраны только отмеченные сегменты: ${selectedKeys.length} из ${outerEdges.length}. На общих швах бордюр не строится.`;
+    } else {
+      UI.arCurbStateHint.textContent = 'Сейчас у активной зоны бордюр не установлен. Применение построит бордюр по всему внешнему периметру зоны.';
+    }
+  }
+  if (UI.btnArCurbApply) {
+    const canApply = !!(activeZone && state.xrSession && state.phase === 'ar_final' && (boundaryMode !== 'outer_segments' || selectedKeys.length > 0));
+    UI.btnArCurbApply.disabled = !canApply;
+    UI.btnArCurbApply.textContent = boundaryMode === 'outer_segments'
+      ? `Применить к зоне (${selectedKeys.length})`
+      : 'Применить к зоне';
+  }
+  if (UI.btnArCurbRemove) {
+    UI.btnArCurbRemove.disabled = !(activeZone && curb);
+  }
+}
+
+function setArCurbSheetOpen(open) {
+  const next = !!open && !!state.xrSession && state.phase === 'ar_final' && !!getActiveZone({ createIfMissing: false });
+  state.arCurbSheetOpen = next;
+  if (next) {
+    setRotationPanelOpen(false);
+    setCalibrationPanelOpen(false);
+    if (state.arZonePanelOpen) setArZonePanelOpen(false);
+    setArZoneDeleteConfirmOpen(false);
+    state.arCurbIntroHintSeen = true;
+    const activeZone = getActiveZone({ createIfMissing: false });
+    if (activeZone) primeArCurbDraftForZone(activeZone.id, { force: true });
+  } else {
+    state.arCurbDraftZoneId = '';
+  }
+  if (UI.arCurbSheet) show(UI.arCurbSheet, next);
+  syncArCurbSheetUi();
+  syncArZoneControlsUi();
+  try { updateArBottomStripVar(UI); } catch (_) {}
+}
+
+function maybeShowArCurbIntroHint() {
+  if (state.arCurbIntroHintSeen) return;
+  if (!state.xrSession || state.phase !== 'ar_final') return;
+  if (!getActiveZone({ createIfMissing: false })) return;
+  state.arCurbIntroHintSeen = true;
+  showArRuntimeToast('Откройте «Бордюр» у активной зоны: можно покрыть весь внешний периметр или только выбранные внешние сегменты. На общих швах между зонами бордюр не ставится.', 3800);
+}
+
+function toggleArCurbDraftEdge(edgeKey) {
+  const activeZone = getActiveZone({ createIfMissing: false });
+  if (!activeZone) return false;
+  const safeKey = edgeKey ? String(edgeKey) : '';
+  if (!safeKey) return false;
+  const allowed = new Set(getOuterBoundaryEdges(activeZone.id).map((edge) => String(edge.key || '')));
+  if (!allowed.has(safeKey)) return false;
+  state.arCurbDraftBoundaryMode = 'outer_segments';
+  const current = new Set(normalizeCurbEdgeKeysForZone(activeZone.id, state.arCurbDraftEdgeKeys));
+  if (current.has(safeKey)) current.delete(safeKey);
+  else current.add(safeKey);
+  state.arCurbDraftEdgeKeys = Array.from(current);
+  syncArCurbSheetUi();
+  telemetryTrack('ar_curb_segment_select', telemetryCtx({ zoneId: String(activeZone.id || ''), edgeKey: safeKey, selected: current.has(safeKey), selectedCount: state.arCurbDraftEdgeKeys.length }));
+  return true;
+}
+
+function rebuildCurbsForZone(zoneId, opts = {}) {
+  const activeZone = zoneId ? getZoneById(zoneId) : null;
+  if (!activeZone) return false;
+  const curbs = getCurbsByZoneId(activeZone.id);
+  if (!curbs.length) return false;
+  let rebuilt = false;
+  for (const curb of curbs) {
+    const preset = getArCurbPreset(curb.presetId || 'standard');
+    const material = getArCurbMaterialDef(curb.materialId || 'gray');
+    const boundaryMode = String(curb.boundaryMode || 'outer_perimeter');
+    const edgeKeys = boundaryMode === 'outer_segments' ? normalizeCurbEdgeKeysForZone(activeZone.id, curb.edgeKeys) : null;
+    const built = buildPerimeterCurbMesh(activeZone.id, {
+      presetId: preset.id,
+      materialId: material.id,
+      boundaryMode,
+      edgeKeys,
+      width: preset.width,
+      height: preset.height,
+      yOffset: preset.yOffset,
+      material: createArCurbMaterial(material.id),
+    });
+    if (!built || !built.curb || !built.mesh || !Array.isArray(built.edges) || !built.edges.length) {
+      removeCurbsForZone(activeZone.id, { anchorGroup, disposeObject3D });
+      continue;
+    }
+    attachCurbMesh(built.curb.id, built.mesh, { anchorGroup });
+    rebuilt = true;
+  }
+  syncArCurbSheetUi();
+  syncArZoneControlsUi();
+  if (rebuilt && opts.track) telemetryTrack('ar_curb_rebuild', telemetryCtx({ zoneId: String(activeZone.id || ''), totalCurbs: getCurbs().length }));
+  return rebuilt;
+}
+
+function applyPerimeterCurbToActiveZone() {
+  const activeZone = getActiveZone({ createIfMissing: false });
+  if (!activeZone || !state.xrSession || state.phase !== 'ar_final') return false;
+  const preset = getArCurbPreset(state.arCurbDraftPresetId || 'standard');
+  const material = getArCurbMaterialDef(state.arCurbDraftMaterialId || 'gray');
+  const boundaryMode = UI.arCurbBoundaryModeSelect && UI.arCurbBoundaryModeSelect.value === 'outer_segments' ? 'outer_segments' : 'outer_perimeter';
+  const edgeKeys = boundaryMode === 'outer_segments' ? normalizeCurbEdgeKeysForZone(activeZone.id, state.arCurbDraftEdgeKeys) : null;
+  if (boundaryMode === 'outer_segments' && !edgeKeys.length) {
+    showArRuntimeToast('Выберите хотя бы один внешний сегмент для бордюра.', 2600);
+    syncArCurbSheetUi();
+    return false;
+  }
+  const built = buildPerimeterCurbMesh(activeZone.id, {
+    presetId: preset.id,
+    materialId: material.id,
+    boundaryMode,
+    edgeKeys,
+    width: preset.width,
+    height: preset.height,
+    yOffset: preset.yOffset,
+    material: createArCurbMaterial(material.id),
+  });
+  if (!built || !built.curb || !built.mesh || !Array.isArray(built.edges) || !built.edges.length) {
+    showArRuntimeToast('Для этой зоны сейчас нет доступного внешнего периметра под бордюр. Общие швы между зонами не бордюрятся.', 3400);
+    syncArCurbSheetUi();
+    return false;
+  }
+  attachCurbMesh(built.curb.id, built.mesh, { anchorGroup });
+  state.activeCurbId = String(built.curb.id || '');
+  state.arCurbDraftZoneId = String(activeZone.id || '');
+  state.arCurbDraftBoundaryMode = boundaryMode;
+  state.arCurbDraftEdgeKeys = Array.isArray(built.curb.edgeKeys) ? built.curb.edgeKeys.slice() : [];
+  state.arCurbDraftPresetId = preset.id;
+  state.arCurbDraftMaterialId = material.id;
+  syncArCurbSheetUi();
+  syncArZoneControlsUi();
+  telemetryTrack('ar_curb_apply', telemetryCtx({ zoneId: String(activeZone.id || ''), curbId: String(built.curb.id || ''), presetId: preset.id, materialId: material.id, edgeCount: built.edges.length, boundaryMode }));
+  showArRuntimeToast(boundaryMode === 'outer_segments'
+    ? `Бордюр применён на ${built.edges.length} сегм. · ${preset.label.toLowerCase()} · ${material.label.toLowerCase()}.`
+    : `Бордюр применён: ${preset.label.toLowerCase()} · ${material.label.toLowerCase()}.`, 2200);
+  return true;
+}
+
+function removeActiveZoneCurb() {
+  const activeZone = getActiveZone({ createIfMissing: false });
+  if (!activeZone) return false;
+  const removed = removeCurbsForZone(activeZone.id, { anchorGroup, disposeObject3D });
+  const allKeys = getOuterBoundaryEdges(activeZone.id).map((edge) => String(edge.key || ''));
+  state.arCurbDraftZoneId = String(activeZone.id || '');
+  state.arCurbDraftBoundaryMode = 'outer_perimeter';
+  state.arCurbDraftEdgeKeys = allKeys;
+  state.arCurbDraftPresetId = 'standard';
+  state.arCurbDraftMaterialId = 'gray';
+  syncArCurbSheetUi();
+  syncArZoneControlsUi();
+  if (!removed.length) return false;
+  telemetryTrack('ar_curb_remove', telemetryCtx({ zoneId: String(activeZone.id || ''), removed: removed.length }));
+  showArRuntimeToast('Бордюр удалён только у активной зоны.', 2200);
+  return true;
+}
+
 function maybeShowArZoneIntroHint() {
   if (state.arZoneIntroHintSeen) return;
   if (!state.xrSession || state.phase !== 'ar_final') return;
@@ -986,6 +1381,7 @@ async function cancelCurrentDraftZone() {
   }
   pointsGroup.clear();
   clearMeasureLabels();
+  removeCurbsForZone(activeZone.id, { anchorGroup, disposeObject3D });
   const removed = removeZone(activeZone.id, { anchorGroup, disposeObject3D, preserveMaterial: tileMaterial });
   clearArDraftZoneContext(zoneId);
   if (!removed) return false;
@@ -1024,6 +1420,7 @@ function setArZonePanelOpen(open) {
   if (next) {
     setRotationPanelOpen(false);
     setCalibrationPanelOpen(false);
+    if (state.arCurbSheetOpen) setArCurbSheetOpen(false);
     setArZoneDeleteConfirmOpen(false);
     try { setShapePickerOpen(false, { UI, updateArTopStripVar, updateArBottomStripVar }); } catch (_) {}
     state.arZoneIntroHintSeen = true;
@@ -1052,8 +1449,9 @@ function syncArZoneControlsUi() {
   }
   if (UI.arZoneSummaryMeta) {
     const totalZones = getZones().length;
+    const curbLabel = zone ? getArCurbSummaryLabel(getPrimaryCurbForZone(zone.id)) : 'Без бордюра';
     const extra = totalZones > 1 ? ` · Всего зон: ${totalZones}` : '';
-    UI.arZoneSummaryMeta.textContent = `${tileLabel} · Вращение ${rotationLabel}${extra}`;
+    UI.arZoneSummaryMeta.textContent = `${tileLabel} · Вращение ${rotationLabel} · Бордюр: ${curbLabel}${extra}`;
   }
   if (UI.rotationPanelMeta) {
     UI.rotationPanelMeta.textContent = `${zoneTitle} · ${tileLabel}`;
@@ -1107,15 +1505,25 @@ function syncArZoneControlsUi() {
     UI.btnArZoneCutout.textContent = zone ? `Вырез · ${zoneTitle}` : 'Вырез в зоне';
     UI.btnArZoneCutout.title = zone ? `Добавить вырез в зоне «${zoneTitle}»` : 'Добавить вырез в активной зоне';
   }
+  if (UI.btnArZoneCurb) {
+    UI.btnArZoneCurb.disabled = !zoneActionsEnabled;
+    UI.btnArZoneCurb.textContent = zone ? `Бордюр · ${zoneTitle}` : 'Бордюр';
+    const curbSummary = zone ? getArCurbSummaryLabel(getPrimaryCurbForZone(zone.id)) : 'Без бордюра';
+    UI.btnArZoneCurb.title = zone ? `Настроить бордюр для зоны «${zoneTitle}». Сейчас: ${curbSummary}.` : 'Настроить бордюр активной зоны';
+  }
   if (UI.btnArZoneDelete) {
     UI.btnArZoneDelete.disabled = !zoneActionsEnabled || !!state.arZoneDeleteConfirmOpen;
     UI.btnArZoneDelete.title = zone ? `Удалить зону «${zoneTitle}»` : 'Удалить активную зону';
   }
+  syncArCurbSheetUi();
 }
 
 function updateArZoneBarVisibility() {
   const hasZones = !!state.xrSession && state.phase === 'ar_final' && getZones().length > 0;
-  if (!hasZones) state.arZonePanelOpen = false;
+  if (!hasZones) {
+    state.arZonePanelOpen = false;
+    state.arCurbSheetOpen = false;
+  }
   if (UI.arZoneCompact) show(UI.arZoneCompact, hasZones);
   if (UI.arZoneBar) show(UI.arZoneBar, hasZones && !!state.arZonePanelOpen);
   if (hasZones) syncArZoneControlsUi();
@@ -1202,6 +1610,7 @@ async function activateArZoneById(zoneId, opts = {}) {
       updateArBottomStripVar(UI);
     }
     syncArZoneControlsUi();
+    if (state.arCurbSheetOpen) syncArCurbSheetUi();
     if (opts.track) telemetryTrack('ar_zone_select', telemetryCtx({ zoneId: String(zone.id), totalZones: getZones().length }));
     return zone;
   } finally {
@@ -1436,6 +1845,7 @@ function beginAddArZone() {
   clearMeasureLabels();
   state.phase = 'ar_draw';
   setArZonePanelOpen(false);
+  setArCurbSheetOpen(false);
   setRotationPanelOpen(false);
   setCalibrationPanelOpen(false);
   try { setShapePickerOpen(false, { UI, updateArTopStripVar, updateArBottomStripVar }); } catch (_) {}
@@ -1671,6 +2081,7 @@ function syncAdminCalibrationUi() {
 function setCalibrationPanelOpen(open) {
   const next = !!open && state.phase === 'ar_final' && state.adminArEnabled && !!state.selectedTile;
   state.adminCalibrationOpen = next;
+  if (next && state.arCurbSheetOpen) setArCurbSheetOpen(false);
   if (UI.calibrationPanel) show(UI.calibrationPanel, next);
   if (UI.btnArCalibrate) {
     UI.btnArCalibrate.classList.toggle('active', next);
@@ -2697,6 +3108,7 @@ function hardCleanupArScene(opts = {}) {
     clearArDraftZoneContext();
     try { setCalibrationPanelOpen(false); } catch (_) {}
     try { setArZoneDeleteConfirmOpen(false); } catch (_) {}
+    try { setArCurbSheetOpen(false); } catch (_) {}
     try { setArZonePanelOpen(false); } catch (_) {}
     try { setRotationPanelOpen(false); } catch (_) {}
 
@@ -2715,6 +3127,7 @@ function hardCleanupArScene(opts = {}) {
     }
 
     trackArZoneRuntimeCleanup(reason, { hard: true });
+    clearAllCurbRuntime({ anchorGroup, disposeObject3D });
     clearAllZoneRuntime({ anchorGroup, disposeObject3D, preserveMaterial: null });
 
     try {
@@ -2731,6 +3144,7 @@ function hardCleanupArScene(opts = {}) {
     setCompatFillMesh(null);
     setCompatTileMaterial(null);
 
+    resetCurbStorage();
     resetToSingleZone({ preserveSelection, preserveRotation });
 
     clearMeasureLabels();
@@ -2754,6 +3168,7 @@ function hardCleanupArScene(opts = {}) {
 
 function resetAll(keepFloor = false) {
   clearArDraftZoneContext();
+  setArCurbSheetOpen(false);
   state.points = [];
   state.holes = [];
   state.holePoints = [];
@@ -2795,6 +3210,7 @@ function resetAll(keepFloor = false) {
   }
 
   trackArZoneRuntimeCleanup('reset_all', { keepFloor: !!keepFloor });
+  clearAllCurbRuntime({ anchorGroup, disposeObject3D });
   clearAllZoneRuntime({ anchorGroup, disposeObject3D, preserveMaterial: tileMaterial });
   if (fillMesh) {
     anchorGroup.remove(fillMesh);
@@ -2804,6 +3220,7 @@ function resetAll(keepFloor = false) {
     setCompatFillMesh(null);
   }
 
+  resetCurbStorage();
   resetToSingleZone({ preserveSelection: true, preserveRotation: true });
   setCompatTileMaterial(tileMaterial);
 
@@ -3824,6 +4241,7 @@ UI.btnArBack?.addEventListener('click', async () => {
   telemetryTrack('ar_back_click', telemetryCtx());
   setCalibrationPanelOpen(false);
   setArZoneDeleteConfirmOpen(false);
+  setArCurbSheetOpen(false);
   setArZonePanelOpen(false);
   await stopAR();
 });
@@ -3832,6 +4250,7 @@ UI.btnArReset?.addEventListener('click', async () => {
   telemetryTrack('ar_reset_click', telemetryCtx());
   setCalibrationPanelOpen(false);
   setArZoneDeleteConfirmOpen(false);
+  setArCurbSheetOpen(false);
   setArZonePanelOpen(false);
   await fullRestartAR();
 });
@@ -3875,6 +4294,7 @@ function setRotationPanelOpen(open) {
   if (next) {
     setCalibrationPanelOpen(false);
     if (state.arZonePanelOpen) setArZonePanelOpen(false);
+    if (state.arCurbSheetOpen) setArCurbSheetOpen(false);
   }
   if (UI.rotationPanel) show(UI.rotationPanel, next);
   if (UI.btnTextureRotate) {
@@ -3901,6 +4321,7 @@ function enterActiveZoneEditMode() {
   show(UI.finalColors, false);
   show(UI.contourHint, false);
   setArZonePanelOpen(false);
+  setArCurbSheetOpen(false);
   setRotationPanelOpen(false);
   show(UI.finalBar, false);
   if (typeof updateArBottomStripVar === 'function') updateArBottomStripVar(UI);
@@ -3993,6 +4414,7 @@ function setArZoneDeleteConfirmOpen(open) {
     }
   }
   if (shouldOpen) {
+    if (state.arCurbSheetOpen) setArCurbSheetOpen(false);
     setRotationPanelOpen(false);
   }
   if (UI.arZoneDeleteConfirm) {
@@ -4026,6 +4448,7 @@ async function deleteActiveArZone() {
   if (!activeZone) return false;
   setArZoneDeleteConfirmOpen(false);
   telemetryTrack('ar_zone_delete', telemetryCtx({ zoneId: String(activeZone.id || ''), totalZonesBefore: getZones().length }));
+  removeCurbsForZone(activeZone.id, { anchorGroup, disposeObject3D });
   const removed = removeZone(activeZone.id, { anchorGroup, disposeObject3D, preserveMaterial: tileMaterial });
   clearArDraftZoneContext(String(activeZone.id || ''));
   if (!removed) return false;
@@ -4038,6 +4461,8 @@ async function deleteActiveArZone() {
   clearMeasureLabels();
   if (!getZones().length) {
     setArZonePanelOpen(false);
+    setArCurbSheetOpen(false);
+    resetCurbStorage();
     resetToSingleZone({ preserveSelection: true, preserveRotation: true });
     setCompatFillMesh(null);
     setCompatTileMaterial(tileMaterial);
@@ -4065,6 +4490,7 @@ async function deleteActiveArZone() {
   }
   const fallbackZone = getActiveZone({ createIfMissing: false }) || getZones()[0] || null;
   if (fallbackZone) await activateArZoneById(fallbackZone.id, { track: false });
+  if (state.arCurbSheetOpen) syncArCurbSheetUi();
   updateAreaUI();
   renderArZoneChips();
   syncArZoneControlsUi();
@@ -4196,6 +4622,7 @@ function ensureArFinalControlsBound() {
       if (!UI.shapePickerPanel || !UI.shapePickerList) return;
       telemetryTrack('ar_shape_picker_toggle', telemetryCtx());
       setArZonePanelOpen(false);
+      setArCurbSheetOpen(false);
       setRotationPanelOpen(false);
       setCalibrationPanelOpen(false);
       try {
@@ -4224,6 +4651,7 @@ function ensureArFinalControlsBound() {
   if (UI.btnArSnapshot && !UI.btnArSnapshot.__arBound) {
     UI.btnArSnapshot.addEventListener('click', () => {
       setArZonePanelOpen(false);
+      setArCurbSheetOpen(false);
       setCalibrationPanelOpen(false);
       telemetryTrack('ar_snapshot_click', telemetryCtx({ cameraAccess: !!state.cameraAccessEnabled }));
       handleArSnapshotRequest().catch((err) => {
@@ -4253,6 +4681,11 @@ UI.btnArZoneCutout?.addEventListener('click', () => {
   enterActiveZoneCutoutMode();
 });
 
+UI.btnArZoneCurb?.addEventListener('click', () => {
+  maybeShowArCurbIntroHint();
+  setArCurbSheetOpen(true);
+});
+
 UI.btnArZoneDelete?.addEventListener('click', () => {
   requestDeleteActiveArZone();
 });
@@ -4273,6 +4706,88 @@ UI.arZoneDeleteConfirm?.addEventListener('click', (event) => {
   if (event && event.target === UI.arZoneDeleteConfirm) {
     setArZoneDeleteConfirmOpen(false);
   }
+});
+
+UI.btnArCurbApply?.addEventListener('click', () => {
+  if (applyPerimeterCurbToActiveZone()) {
+    setArCurbSheetOpen(false);
+  }
+});
+
+UI.btnArCurbRemove?.addEventListener('click', () => {
+  if (!removeActiveZoneCurb()) {
+    showArRuntimeToast('У активной зоны пока нет бордюра.', 1800);
+    return;
+  }
+  setArCurbSheetOpen(false);
+});
+
+UI.btnArCurbClose?.addEventListener('click', () => {
+  setArCurbSheetOpen(false);
+});
+
+UI.arCurbSheet?.addEventListener('click', (event) => {
+  if (event && event.target === UI.arCurbSheet) {
+    setArCurbSheetOpen(false);
+  }
+});
+
+UI.arCurbModeChips?.addEventListener('click', (event) => {
+  const button = event && event.target ? event.target.closest('[data-curb-mode]') : null;
+  if (!button) return;
+  const value = button.dataset ? String(button.dataset.curbMode || 'outer_perimeter') : 'outer_perimeter';
+  if (UI.arCurbBoundaryModeSelect) UI.arCurbBoundaryModeSelect.value = value;
+  UI.arCurbBoundaryModeSelect?.dispatchEvent(new Event('change', { bubbles: true }));
+});
+
+UI.arCurbPresetChips?.addEventListener('click', (event) => {
+  const button = event && event.target ? event.target.closest('[data-curb-preset]') : null;
+  if (!button) return;
+  const value = button.dataset ? String(button.dataset.curbPreset || 'standard') : 'standard';
+  if (UI.arCurbPresetSelect) UI.arCurbPresetSelect.value = value;
+  state.arCurbDraftPresetId = value;
+  syncArCurbSheetUi();
+});
+
+UI.arCurbMaterialChips?.addEventListener('click', (event) => {
+  const button = event && event.target ? event.target.closest('[data-curb-material]') : null;
+  if (!button) return;
+  const value = button.dataset ? String(button.dataset.curbMaterial || 'gray') : 'gray';
+  if (UI.arCurbMaterialSelect) UI.arCurbMaterialSelect.value = value;
+  state.arCurbDraftMaterialId = value;
+  syncArCurbSheetUi();
+});
+
+UI.arCurbBoundaryModeSelect?.addEventListener('change', () => {
+  const activeZone = getActiveZone({ createIfMissing: false });
+  if (!activeZone) return;
+  const mode = UI.arCurbBoundaryModeSelect && UI.arCurbBoundaryModeSelect.value === 'outer_segments' ? 'outer_segments' : 'outer_perimeter';
+  state.arCurbDraftBoundaryMode = mode;
+  const allKeys = getOuterBoundaryEdges(activeZone.id).map((edge) => String(edge.key || ''));
+  if (mode === 'outer_segments') {
+    const normalized = normalizeCurbEdgeKeysForZone(activeZone.id, state.arCurbDraftEdgeKeys);
+    state.arCurbDraftEdgeKeys = normalized.length ? normalized : allKeys.slice();
+  } else {
+    state.arCurbDraftEdgeKeys = allKeys.slice();
+  }
+  syncArCurbSheetUi();
+});
+
+UI.arCurbSegments?.addEventListener('click', (event) => {
+  const button = event && event.target ? event.target.closest('.arCurbSegmentChip') : null;
+  if (!button) return;
+  const edgeKey = button.dataset ? button.dataset.edgeKey : '';
+  toggleArCurbDraftEdge(edgeKey);
+});
+
+UI.arCurbPresetSelect?.addEventListener('change', () => {
+  state.arCurbDraftPresetId = UI.arCurbPresetSelect && UI.arCurbPresetSelect.value ? String(UI.arCurbPresetSelect.value) : 'standard';
+  syncArCurbSheetUi();
+});
+
+UI.arCurbMaterialSelect?.addEventListener('change', () => {
+  state.arCurbDraftMaterialId = UI.arCurbMaterialSelect && UI.arCurbMaterialSelect.value ? String(UI.arCurbMaterialSelect.value) : 'gray';
+  syncArCurbSheetUi();
 });
 
 UI.btnDone?.addEventListener('click', async () => {
@@ -4321,6 +4836,10 @@ UI.btnDone?.addEventListener('click', async () => {
   // Atomic Texture Apply (optional): hide fill until core maps are ready (fixes "pale first fill").
   if (state.atomicTexEnabled && typeof atomicEnsureFinalMaterialReady === 'function') {
     await atomicEnsureFinalMaterialReady();
+  }
+
+  if (activeZone) {
+    rebuildCurbsForZone(activeZone.id, { track: false });
   }
 
   ensureArFinalControlsBound();

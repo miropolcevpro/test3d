@@ -288,7 +288,67 @@
           <div id="arZoneActions" class="arZoneActions">
             <button id="btnArZoneEdit" class="btnGhost" type="button">Изменить зону</button>
             <button id="btnArZoneCutout" class="btnGhost" type="button">Вырез в зоне</button>
+            <button id="btnArZoneCurb" class="btnGhost" type="button">Бордюр</button>
             <button id="btnArZoneDelete" class="btnGhost btnGhost--danger" type="button">Удалить зону</button>
+          </div>
+        </div>
+        <div id="arCurbSheet" class="arDialogBackdrop" hidden>
+          <div class="arDialogCard arDialogCard--sheet" role="dialog" aria-modal="true" aria-labelledby="arCurbTitle" aria-describedby="arCurbHint">
+            <div class="arDialogTitle" id="arCurbTitle">Бордюр зоны</div>
+            <div class="arDialogText" id="arCurbHint">Бордюр ставится только по внешнему краю активной зоны. На общих швах между зонами бордюр не ставится.</div>
+            <div id="arCurbMeta" class="arDialogMeta"></div>
+            <div id="arCurbPreview" class="arCurbPreview">
+              <div class="arCurbPreviewEyebrow">Что будет применено</div>
+              <div id="arCurbPreviewTitle" class="arCurbPreviewTitle">Стандартный · Серый</div>
+              <div id="arCurbPreviewMeta" class="arCurbPreviewMeta">Весь внешний периметр</div>
+            </div>
+            <div class="arFieldBlock">
+              <span class="arFieldLabel">Режим бордюра</span>
+              <div id="arCurbModeChips" class="arChoiceChips" role="group" aria-label="Режим бордюра">
+                <button type="button" class="arChoiceChip" data-curb-mode="outer_perimeter" aria-pressed="true">Весь периметр</button>
+                <button type="button" class="arChoiceChip" data-curb-mode="outer_segments" aria-pressed="false">Выбрать сегменты</button>
+              </div>
+              <select id="arCurbBoundaryModeSelect" class="arFieldSelect arFieldSelect--hidden" aria-hidden="true" tabindex="-1">
+                <option value="outer_perimeter">Весь внешний периметр</option>
+                <option value="outer_segments">Выбрать сегменты</option>
+              </select>
+            </div>
+            <div id="arCurbSegmentsWrap" class="arCurbSegmentsWrap" hidden>
+              <div id="arCurbSegmentsHint" class="arDialogMeta">Сегменты перечислены по порядку обхода внешнего контура зоны. Общие швы между зонами сюда не попадают.</div>
+              <div id="arCurbSegments" class="arCurbSegments"></div>
+            </div>
+            <div class="arFieldBlock">
+              <span class="arFieldLabel">Тип бордюра</span>
+              <div id="arCurbPresetChips" class="arChoiceChips" role="group" aria-label="Тип бордюра">
+                <button type="button" class="arChoiceChip" data-curb-preset="standard" aria-pressed="true">Стандартный</button>
+                <button type="button" class="arChoiceChip" data-curb-preset="garden" aria-pressed="false">Садовый</button>
+                <button type="button" class="arChoiceChip" data-curb-preset="tall" aria-pressed="false">Высокий</button>
+              </div>
+              <select id="arCurbPresetSelect" class="arFieldSelect arFieldSelect--hidden" aria-hidden="true" tabindex="-1">
+                <option value="standard">Стандартный</option>
+                <option value="garden">Садовый</option>
+                <option value="tall">Высокий</option>
+              </select>
+            </div>
+            <div class="arFieldBlock">
+              <span class="arFieldLabel">Цвет бордюра</span>
+              <div id="arCurbMaterialChips" class="arChoiceChips" role="group" aria-label="Цвет бордюра">
+                <button type="button" class="arChoiceChip arChoiceChip--swatch" data-curb-material="gray" aria-pressed="true"><span class="arChoiceChipSwatch arChoiceChipSwatch--gray"></span>Серый</button>
+                <button type="button" class="arChoiceChip arChoiceChip--swatch" data-curb-material="graphite" aria-pressed="false"><span class="arChoiceChipSwatch arChoiceChipSwatch--graphite"></span>Графит</button>
+                <button type="button" class="arChoiceChip arChoiceChip--swatch" data-curb-material="sand" aria-pressed="false"><span class="arChoiceChipSwatch arChoiceChipSwatch--sand"></span>Песочный</button>
+              </div>
+              <select id="arCurbMaterialSelect" class="arFieldSelect arFieldSelect--hidden" aria-hidden="true" tabindex="-1">
+                <option value="gray">Серый</option>
+                <option value="graphite">Графит</option>
+                <option value="sand">Песочный</option>
+              </select>
+            </div>
+            <div id="arCurbStateHint" class="arDialogMeta"></div>
+            <div class="arDialogActions arDialogActions--stack">
+              <button id="btnArCurbApply" class="btnGhost" type="button">Применить бордюр</button>
+              <button id="btnArCurbRemove" class="btnGhost btnGhost--danger" type="button">Удалить бордюр</button>
+              <button id="btnArCurbClose" class="btnGhost" type="button">Закрыть</button>
+            </div>
           </div>
         </div>
         <div id="arZoneDeleteConfirm" class="arDialogBackdrop" hidden>
@@ -379,13 +439,13 @@
     window.setTimeout(hide, 3000);
   })();
 </script>
-<script src="js/runtime-config.js?v=20260419-f24bk"></script>
-<script src="js/site-env.js?v=20260419-f24bk"></script>
-  <script src="js/content-identity.js?v=20260419-f24bk"></script>
-<script src="js/sw-meta.js?v=20260419-f24bk"></script>
-<script src="js/sw-register.js?v=20260419-f24bk"></script>
-  <script src="js/telemetry.js?v=20260419-f24bk"></script>
-  <script type="module" src="js/app.js?v=20260419-f24bk"></script>
+<script src="js/runtime-config.js?v=20260419-f24bo"></script>
+<script src="js/site-env.js?v=20260419-f24bo"></script>
+  <script src="js/content-identity.js?v=20260419-f24bo"></script>
+<script src="js/sw-meta.js?v=20260419-f24bo"></script>
+<script src="js/sw-register.js?v=20260419-f24bo"></script>
+  <script src="js/telemetry.js?v=20260419-f24bo"></script>
+  <script type="module" src="js/app.js?v=20260419-f24bo"></script>
 
 
 </body>

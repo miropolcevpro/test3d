@@ -1,3 +1,15 @@
+## 20260419-f24bo — ar curb ux polish
+- Release token: `20260419-f24bo`
+- Polished the curb sheet into a clearer mobile-first flow with preview, segmented choice chips for boundary mode, curb preset and color, plus clearer state text for the active zone.
+- Added a draft curb preview card so users can see what will be applied before committing, including the current zone and whether the whole outer perimeter or selected outer segments will be used.
+- Made curb apply/remove less intrusive: after applying or removing a curb, the sheet closes automatically so the AR view stays clean while the curb remains linked to the active zone.
+
+## 20260419-f24bo — ar curb perimeter ui
+- Release token: `20260419-f24bo`
+- Opened the first visible curb workflow in AR: the active zone now has a dedicated «Бордюр» action with an internal curb sheet for applying or removing a border without leaving the session.
+- Added perimeter-only curb application for the active zone, with preset and material selection; curbs are built only along outer boundary edges and never on shared seams between zones.
+- Added curb rebuild and cleanup hooks for zone finalization, zone deletion, draft cancel and AR reset/restart so curb meshes stay synchronized with the current zone geometry.
+
 ## 20260419-f24bk — ar multizone hard reset cleanup
 - Release token: `20260419-f24bk`
 - Hard reset AR now performs a full local scene cleanup before the next session, so stale multizone meshes and textures do not survive restart.

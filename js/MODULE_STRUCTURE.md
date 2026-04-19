@@ -30,6 +30,7 @@ This project now keeps `js/app.js` as the orchestration layer and pushes reusabl
 - `app-ar-zone-validation-helpers.js` — геометрическая валидация зон, self-intersection и anti-overlap guards
 - `app-ar-zone-snap-helpers.js` — snap к вершинам и рёбрам существующих зон для удобной стыковки
 - `app-ar-zone-hardening-helpers.js` — лимиты многозонной сцены, guard-функции для зон/точек/вырезов и безопасные hardening-конфиги
+- `app-ar-curb-helpers.js` — внутренняя curb-model для бордюров, анализ внешних/общих рёбер зоны, базовый генератор curb strip mesh и cleanup бордюрного runtime
 
 ## Rule for future work
 - Keep `updateXR()` and core AR runtime orchestration in `app.js` until a dedicated AR runtime split is planned and validated separately.
