@@ -17,7 +17,7 @@ export function createArSessionHelpers(ctx = {}) {
     getTileMaterial,
     getPreviewPlane,
     getFillMesh,
-    resetToSingleZone,
+    hardCleanupArScene,
   } = ctx;
 
   async function checkXrSupport() {
@@ -30,6 +30,7 @@ export function createArSessionHelpers(ctx = {}) {
   }
 
   function cleanupXR() {
+    try { hardCleanupArScene?.({ reason: state._restartingAR ? 'xr_session_restart_cleanup' : 'xr_session_end_cleanup' }); } catch (_) {}
     state.xrSession = null;
     try { updateTexLoadMaxParallel({ xrActive: !!(state && state.xrSession) }); } catch (_) {}
     state.referenceSpace = null;
@@ -56,7 +57,6 @@ export function createArSessionHelpers(ctx = {}) {
     state.floorSamples = [];
     state.floorYEstimate = null;
     state.textureRotationDeg = 0;
-    try { resetToSingleZone?.({ preserveSelection: true, preserveRotation: false }); } catch (_) {}
     state.rotationPanelOpen = false;
     state.arTextureRailStartShapeId = '';
     state.arTextureGroups = [];

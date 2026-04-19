@@ -833,6 +833,7 @@ const arSessionHelpers = createArSessionHelpers({
   getPreviewPlane: () => previewPlane,
   getFillMesh: () => getCompatFillMesh(),
   resetToSingleZone: (opts = {}) => resetToSingleZone(opts),
+  hardCleanupArScene: (opts = {}) => hardCleanupArScene(opts),
 });
 const { checkXrSupport, cleanupXR, stopAR, fullRestartAR } = arSessionHelpers;
 
@@ -2682,6 +2683,71 @@ function closeContour() {
   syncArDraftAssistUi();
 } 
 
+
+function hardCleanupArScene(opts = {}) {
+  if (state._hardCleanupArSceneActive) return;
+  state._hardCleanupArSceneActive = true;
+  const reason = opts.reason ? String(opts.reason) : 'hard_cleanup';
+  const preserveSelection = opts.preserveSelection !== false;
+  const preserveRotation = !!opts.preserveRotation;
+  try {
+    clearArDraftZoneContext();
+    try { setCalibrationPanelOpen(false); } catch (_) {}
+    try { setArZoneDeleteConfirmOpen(false); } catch (_) {}
+    try { setArZonePanelOpen(false); } catch (_) {}
+    try { setRotationPanelOpen(false); } catch (_) {}
+
+    state.points = [];
+    state.holes = [];
+    state.holePoints = [];
+    state.closed = false;
+    state.hasEverClosedContour = false;
+
+    try { pointsGroup.clear(); } catch (_) {}
+
+    if (line) {
+      try { anchorGroup.remove(line); } catch (_) {}
+      try { disposeObject3D(line); } catch (_) {}
+      line = null;
+    }
+
+    trackArZoneRuntimeCleanup(reason, { hard: true });
+    clearAllZoneRuntime({ anchorGroup, disposeObject3D, preserveMaterial: null });
+
+    try {
+      const children = Array.isArray(anchorGroup.children) ? anchorGroup.children.slice() : [];
+      for (const child of children) {
+        if (!child || child === pointsGroup) continue;
+        try { anchorGroup.remove(child); } catch (_) {}
+        try { disposeObject3D(child); } catch (_) {}
+      }
+    } catch (_) {}
+
+    fillMesh = null;
+    tileMaterial = null;
+    setCompatFillMesh(null);
+    setCompatTileMaterial(null);
+
+    resetToSingleZone({ preserveSelection, preserveRotation });
+
+    clearMeasureLabels();
+    if (UI.measureLayer) UI.measureLayer.style.display = 'block';
+    pointsGroup.visible = true;
+    show(UI.postCloseBar, false);
+    show(UI.finalBar, false);
+    show(UI.finalColors, false);
+    show(UI.contourHint, false);
+    show(UI.btnArOk, false);
+    syncArDraftAssistUi();
+    renderArZoneChips();
+    syncArZoneControlsUi();
+    updateAreaUI();
+    pruneArRuntimeCaches();
+    try { updateArBottomStripVar(UI); } catch (_) {}
+  } finally {
+    state._hardCleanupArSceneActive = false;
+  }
+}
 
 function resetAll(keepFloor = false) {
   clearArDraftZoneContext();
