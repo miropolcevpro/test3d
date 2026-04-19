@@ -697,9 +697,9 @@ void removeCurb;
 ensureSingleActiveZone();
 
 const AR_CURB_PRESETS = {
-  standard: { id: 'standard', label: 'Стандартный', width: 0.045, height: 0.028, yOffset: 0.003 },
-  garden: { id: 'garden', label: 'Садовый', width: 0.04, height: 0.022, yOffset: 0.0025 },
-  tall: { id: 'tall', label: 'Высокий', width: 0.05, height: 0.038, yOffset: 0.0035 },
+  standard: { id: 'standard', label: 'Стандартный', width: 0.022, height: 0.014, yOffset: 0.0015 },
+  garden: { id: 'garden', label: 'Садовый', width: 0.02, height: 0.012, yOffset: 0.0012 },
+  tall: { id: 'tall', label: 'Высокий', width: 0.026, height: 0.018, yOffset: 0.0018 },
 };
 const AR_CURB_MATERIALS = {
   gray: { id: 'gray', label: 'Серый', color: 0xb3b8c2, roughness: 0.86, metalness: 0.04 },

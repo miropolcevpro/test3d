@@ -1,10 +1,12 @@
 import * as THREE from 'three';
 
 const EPS = 1e-4;
-const DEFAULT_CURB_WIDTH = 0.045;
-const DEFAULT_CURB_HEIGHT = 0.028;
-const DEFAULT_CURB_Y_OFFSET = 0.003;
-const DEFAULT_CURB_OUTER_GAP = 0.002;
+const DEFAULT_CURB_WIDTH = 0.022;
+const DEFAULT_CURB_HEIGHT = 0.014;
+const DEFAULT_CURB_Y_OFFSET = 0.0015;
+const DEFAULT_CURB_INNER_GAP = 0.0005;
+const DEFAULT_CURB_OUTER_GAP = 0.001;
+const DEFAULT_CURB_MITER_LIMIT = 2.5;
 
 function ensureFinite(value, fallback = 0) {
   const num = Number(value);
@@ -99,6 +101,115 @@ function computePolygonSignedArea(points) {
   return area / 2;
 }
 
+function pointInPolygon(point, polygon, eps = EPS) {
+  if (!point || !Array.isArray(polygon) || polygon.length < 3) return false;
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
+    const a = polygon[i];
+    const b = polygon[j];
+    if (!a || !b) continue;
+    if (pointOnSegment(point, a, b, eps)) return true;
+    const intersects = ((a.y > point.y) !== (b.y > point.y))
+      && (point.x < (((b.x - a.x) * (point.y - a.y)) / ((b.y - a.y) || (eps || 1e-9))) + a.x);
+    if (intersects) inside = !inside;
+  }
+  return inside;
+}
+
+function flipNormal(normal) {
+  return normal ? { x: -Number(normal.x || 0), y: -Number(normal.y || 0) } : { x: 0, y: 0 };
+}
+
+function validateOutwardNormal(midpoint, normal, polygon, probeDist = 0.01, eps = EPS) {
+  if (!midpoint || !normal || !Array.isArray(polygon) || polygon.length < 3) return normal || { x: 0, y: 0 };
+  const probe = { x: midpoint.x + (normal.x * probeDist), y: midpoint.y + (normal.y * probeDist) };
+  if (pointInPolygon(probe, polygon, eps)) return flipNormal(normal);
+  return normal;
+}
+
+function offsetPlanarPoint(point, normal, distance) {
+  if (!point || !normal) return null;
+  return { x: point.x + (normal.x * distance), y: point.y + (normal.y * distance) };
+}
+
+function intersectInfiniteLines(a1, a2, b1, b2, eps = EPS) {
+  if (!a1 || !a2 || !b1 || !b2) return null;
+  const x1 = a1.x;
+  const y1 = a1.y;
+  const x2 = a2.x;
+  const y2 = a2.y;
+  const x3 = b1.x;
+  const y3 = b1.y;
+  const x4 = b2.x;
+  const y4 = b2.y;
+  const denom = ((x1 - x2) * (y3 - y4)) - ((y1 - y2) * (x3 - x4));
+  if (Math.abs(denom) <= eps) return null;
+  const detA = (x1 * y2) - (y1 * x2);
+  const detB = (x3 * y4) - (y3 * x4);
+  const x = ((detA * (x3 - x4)) - ((x1 - x2) * detB)) / denom;
+  const y = ((detA * (y3 - y4)) - ((y1 - y2) * detB)) / denom;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return { x, y };
+}
+
+function planarToWorld(planar, y) {
+  if (!planar) return null;
+  return new THREE.Vector3(Number(planar.x || 0), Number(y || 0), Number(planar.y || 0));
+}
+
+function buildCurbPrismGeometry(innerStart, innerEnd, outerEnd, outerStart, baseY, height) {
+  const verts = [
+    planarToWorld(innerStart, baseY),
+    planarToWorld(innerEnd, baseY),
+    planarToWorld(outerEnd, baseY),
+    planarToWorld(outerStart, baseY),
+    planarToWorld(innerStart, baseY + height),
+    planarToWorld(innerEnd, baseY + height),
+    planarToWorld(outerEnd, baseY + height),
+    planarToWorld(outerStart, baseY + height),
+  ];
+  if (verts.some((v) => !v)) return null;
+  const pos = new Float32Array(verts.length * 3);
+  verts.forEach((v, idx) => {
+    pos[(idx * 3) + 0] = v.x;
+    pos[(idx * 3) + 1] = v.y;
+    pos[(idx * 3) + 2] = v.z;
+  });
+  const indices = [
+    0, 2, 1, 0, 3, 2,
+    4, 5, 6, 4, 6, 7,
+    0, 4, 5, 0, 5, 1,
+    3, 6, 2, 3, 7, 6,
+    0, 7, 4, 0, 3, 7,
+    1, 5, 6, 1, 6, 2,
+  ];
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+function computeOuterMiterPoint(currentEdge, adjacentEdge, atEnd, offsetDist, miterLimit = DEFAULT_CURB_MITER_LIMIT) {
+  if (!currentEdge) return null;
+  const currentStart = offsetPlanarPoint(currentEdge.a, currentEdge.outwardNormal, offsetDist);
+  const currentEnd = offsetPlanarPoint(currentEdge.b, currentEdge.outwardNormal, offsetDist);
+  const fallback = atEnd ? currentEnd : currentStart;
+  if (!adjacentEdge) return fallback;
+  const otherStart = offsetPlanarPoint(adjacentEdge.a, adjacentEdge.outwardNormal, offsetDist);
+  const otherEnd = offsetPlanarPoint(adjacentEdge.b, adjacentEdge.outwardNormal, offsetDist);
+  const hit = atEnd
+    ? intersectInfiniteLines(currentStart, currentEnd, otherStart, otherEnd)
+    : intersectInfiniteLines(otherStart, otherEnd, currentStart, currentEnd);
+  if (!hit) return fallback;
+  const vertex = atEnd ? currentEdge.b : currentEdge.a;
+  const miterLen = Math.hypot(hit.x - vertex.x, hit.y - vertex.y);
+  if (!Number.isFinite(miterLen) || miterLen > (offsetDist * Math.max(1, miterLimit))) return fallback;
+  return hit;
+}
+
 function getZonePoints(zone) {
   const source = zone && Array.isArray(zone.points) ? zone.points : [];
   return source.map(clonePoint).filter(Boolean);
@@ -114,6 +225,7 @@ function getZoneEdges(zone) {
   const planarPoints = points.map(toPlanar).filter(Boolean);
   const signedArea = isClosed ? computePolygonSignedArea(planarPoints) : 0;
   const isCounterClockwise = signedArea > 0;
+  const probeDist = Math.max(DEFAULT_CURB_WIDTH * 0.5, 0.01);
   for (let i = 0; i < edgeCount; i += 1) {
     const start = points[i];
     const end = points[(i + 1) % points.length];
@@ -123,9 +235,10 @@ function getZoneEdges(zone) {
     const length = computeEdgeLength(a, b);
     if (length <= EPS) continue;
     const dir = { x: (b.x - a.x) / length, y: (b.y - a.y) / length };
-    const outwardNormal = isCounterClockwise
+    let outwardNormal = isCounterClockwise
       ? { x: dir.y, y: -dir.x }
       : { x: -dir.y, y: dir.x };
+    outwardNormal = validateOutwardNormal(computeMidpoint(a, b), outwardNormal, planarPoints, probeDist, EPS);
     edges.push({
       key: normalizeEdgeKey(zoneId, i, (i + 1) % points.length),
       zoneId,
@@ -189,6 +302,14 @@ function buildCurbStripMesh({ edges = [], width = DEFAULT_CURB_WIDTH, height = D
   curbGroup.name = 'ar-curb-group';
   const sharedMaterial = makeCurbMaterial({ material });
   curbGroup.userData.curb = { width, height, yOffset };
+  const byStart = new Map();
+  const byEnd = new Map();
+  for (const edge of validEdges) {
+    byStart.set(`${String(edge.zoneId || '')}:${Number(edge.startIndex)}`, edge);
+    byEnd.set(`${String(edge.zoneId || '')}:${Number(edge.endIndex)}`, edge);
+  }
+  const innerOffset = Math.max(0, DEFAULT_CURB_INNER_GAP);
+  const outerOffset = Math.max(innerOffset + EPS, width + DEFAULT_CURB_OUTER_GAP);
   for (const edge of validEdges) {
     const start = edge.start;
     const end = edge.end;
@@ -196,22 +317,26 @@ function buildCurbStripMesh({ edges = [], width = DEFAULT_CURB_WIDTH, height = D
     const dz = Number(end.z) - Number(start.z);
     const length = Math.hypot(dx, dz);
     if (!(length > EPS)) continue;
-    const trim = Math.min(width * 0.55, length * 0.2);
-    const usableLength = Math.max(EPS, length - (trim * 2));
-    const dirX = dx / length;
-    const dirZ = dz / length;
-    const normal = edge && edge.outwardNormal
-      ? { x: Number(edge.outwardNormal.x) || 0, y: Number(edge.outwardNormal.y) || 0 }
-      : { x: dirZ, y: -dirX };
-    const offsetDist = (width / 2) + DEFAULT_CURB_OUTER_GAP;
-    const centerX = (Number(start.x) + Number(end.x)) / 2 + (normal.x * offsetDist);
-    const centerZ = (Number(start.z) + Number(end.z)) / 2 + (normal.y * offsetDist);
-    const baseY = Math.max(Number(start.y), Number(end.y));
-    const geometry = new THREE.BoxGeometry(usableLength, height, width);
+    const zoneKey = String(edge.zoneId || '');
+    const prevEdge = byEnd.get(`${zoneKey}:${Number(edge.startIndex)}`) || null;
+    const nextEdge = byStart.get(`${zoneKey}:${Number(edge.endIndex)}`) || null;
+    const innerStart = computeOuterMiterPoint(edge, prevEdge, false, innerOffset);
+    const innerEnd = computeOuterMiterPoint(edge, nextEdge, true, innerOffset);
+    const outerStart = computeOuterMiterPoint(edge, prevEdge, false, outerOffset);
+    const outerEnd = computeOuterMiterPoint(edge, nextEdge, true, outerOffset);
+    if (!innerStart || !innerEnd || !outerStart || !outerEnd) continue;
+    const footprint = Math.max(
+      computeEdgeLength(innerStart, innerEnd),
+      computeEdgeLength(outerStart, outerEnd),
+      computeEdgeLength(innerStart, outerStart),
+      computeEdgeLength(innerEnd, outerEnd),
+    );
+    if (!(footprint > EPS)) continue;
+    const baseY = Math.max(Number(start.y), Number(end.y)) + yOffset;
+    const geometry = buildCurbPrismGeometry(innerStart, innerEnd, outerEnd, outerStart, baseY, height);
+    if (!geometry) continue;
     const mesh = new THREE.Mesh(geometry, sharedMaterial);
     mesh.name = `ar-curb-segment-${String(edge.key || '')}`;
-    mesh.position.set(centerX, baseY + yOffset + (height / 2), centerZ);
-    mesh.rotation.y = Math.atan2(dz, dx);
     mesh.castShadow = false;
     mesh.receiveShadow = false;
     mesh.userData.curbSegment = {
@@ -220,8 +345,8 @@ function buildCurbStripMesh({ edges = [], width = DEFAULT_CURB_WIDTH, height = D
       boundaryType: String(edge.boundaryType || 'outer_boundary'),
       width,
       height,
-      usableLength,
-      offsetDist,
+      innerOffset,
+      outerOffset,
     };
     curbGroup.add(mesh);
   }
