@@ -110,6 +110,25 @@ function pointOnPolygonBoundary(point, poly, eps = EPS) {
   return false;
 }
 
+function interpolatePoint(a, b, t) {
+  if (!a || !b) return null;
+  return {
+    x: a.x + ((b.x - a.x) * t),
+    y: a.y + ((b.y - a.y) * t),
+  };
+}
+
+function segmentLiesOnPolygonBoundary(a, b, poly, eps = EPS) {
+  if (!a || !b || !Array.isArray(poly) || poly.length < 2) return false;
+  if (!pointOnPolygonBoundary(a, poly, eps) || !pointOnPolygonBoundary(b, poly, eps)) return false;
+  const sampleTs = [0.2, 0.35, 0.5, 0.65, 0.8];
+  for (const t of sampleTs) {
+    const sample = interpolatePoint(a, b, t);
+    if (!sample || !pointOnPolygonBoundary(sample, poly, eps)) return false;
+  }
+  return true;
+}
+
 function isPointStrictlyInsidePolygon(point, poly, eps = EPS) {
   if (!point || !Array.isArray(poly) || poly.length < 3) return false;
   if (pointOnPolygonBoundary(point, poly, eps)) return false;
@@ -259,6 +278,7 @@ export function validateZoneNextSegment({ currentPoints = [], nextPoint = null, 
     if (zonePointsRaw.length < 2) continue;
     const other = toPlanarPoints(zonePointsRaw);
     const edges = getZoneEdges(zone);
+    const segmentSharesBoundary = other.length >= 2 && segmentLiesOnPolygonBoundary(prev, next, other);
     for (const [a, b, edgeIndex] of edges) {
       const kind = segmentIntersectionKind(a, b, prev, next);
       if (kind === 'proper') {
@@ -271,9 +291,21 @@ export function validateZoneNextSegment({ currentPoints = [], nextPoint = null, 
           otherZoneTitle: zone.title ? String(zone.title) : '',
         };
       }
+      if (!segmentSharesBoundary && kind === 'colinear_overlap') {
+        return {
+          ok: false,
+          reason: 'zone_segment_cross',
+          detail: kind,
+          edgeIndex,
+          otherZoneId: zone.id ? String(zone.id) : '',
+          otherZoneTitle: zone.title ? String(zone.title) : '',
+        };
+      }
     }
     if (other.length >= 3) {
-      if (isPointStrictlyInsidePolygon(next, other) || (midpoint && isPointStrictlyInsidePolygon(midpoint, other))) {
+      const nextInside = isPointStrictlyInsidePolygon(next, other);
+      const midpointInside = midpoint && isPointStrictlyInsidePolygon(midpoint, other);
+      if ((nextInside || midpointInside) && !segmentSharesBoundary) {
         return {
           ok: false,
           reason: 'inside_other_zone',

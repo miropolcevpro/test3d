@@ -89,7 +89,7 @@ function iterateZoneEdges(zones = [], excludeZoneId = '') {
   return out;
 }
 
-export function computeZoneSnapTarget({
+export function computeZoneSnapCandidates({
   point = null,
   zones = [],
   excludeZoneId = '',
@@ -97,62 +97,61 @@ export function computeZoneSnapTarget({
   edgeThreshold = 0.08,
 } = {}) {
   const source = toLocalPoint(point);
-  if (!source) return { armed: false, kind: 'none', point: null };
+  if (!source) return [];
 
   const vertexThresholdSq = Math.max(0, Number(vertexThreshold) || 0) ** 2;
   const edgeThresholdSq = Math.max(0, Number(edgeThreshold) || 0) ** 2;
+  const candidates = [];
 
-  let bestVertex = null;
   for (const candidate of iterateZoneVertices(zones, excludeZoneId)) {
     const distanceSq = distXZSquared(source, candidate.point);
     if (!(distanceSq <= vertexThresholdSq)) continue;
-    if (!bestVertex || distanceSq < bestVertex.distanceSq) {
-      bestVertex = { ...candidate, distanceSq };
-    }
-  }
-  if (bestVertex) {
-    return {
+    candidates.push({
       armed: true,
       kind: 'vertex',
-      point: bestVertex.point.clone(),
-      distanceM: Math.sqrt(bestVertex.distanceSq),
-      zoneId: bestVertex.zoneId,
-      zoneTitle: bestVertex.zoneTitle,
-      vertexIndex: bestVertex.vertexIndex,
+      point: candidate.point.clone(),
+      distanceM: Math.sqrt(distanceSq),
+      distanceSq,
+      zoneId: candidate.zoneId,
+      zoneTitle: candidate.zoneTitle,
+      vertexIndex: candidate.vertexIndex,
       sourcePoint: source.clone(),
-    };
+    });
   }
 
-  let bestEdge = null;
   for (const edge of iterateZoneEdges(zones, excludeZoneId)) {
     const projected = projectPointToSegmentXZ(source, edge.a, edge.b);
     if (!projected) continue;
     const projectedPoint = new THREE.Vector3(projected.x, source.y, projected.z);
     const distanceSq = distXZSquared(source, projectedPoint);
     if (!(distanceSq <= edgeThresholdSq)) continue;
-    if (!bestEdge || distanceSq < bestEdge.distanceSq) {
-      bestEdge = {
-        ...edge,
-        point: projectedPoint,
-        projectionT: projected.t,
-        distanceSq,
-      };
-    }
-  }
-
-  if (bestEdge) {
-    return {
+    candidates.push({
       armed: true,
       kind: 'edge',
-      point: bestEdge.point.clone(),
-      distanceM: Math.sqrt(bestEdge.distanceSq),
-      zoneId: bestEdge.zoneId,
-      zoneTitle: bestEdge.zoneTitle,
-      edgeIndex: bestEdge.edgeIndex,
-      projectionT: bestEdge.projectionT,
+      point: projectedPoint,
+      distanceM: Math.sqrt(distanceSq),
+      distanceSq,
+      zoneId: edge.zoneId,
+      zoneTitle: edge.zoneTitle,
+      edgeIndex: edge.edgeIndex,
+      projectionT: projected.t,
       sourcePoint: source.clone(),
-    };
+    });
   }
 
+  candidates.sort((a, b) => {
+    const kindDelta = (a.kind === 'vertex' ? 0 : 1) - (b.kind === 'vertex' ? 0 : 1);
+    if (kindDelta !== 0) return kindDelta;
+    return a.distanceSq - b.distanceSq;
+  });
+
+  return candidates;
+}
+
+export function computeZoneSnapTarget(opts = {}) {
+  const source = toLocalPoint(opts.point);
+  if (!source) return { armed: false, kind: 'none', point: null };
+  const candidates = computeZoneSnapCandidates(opts);
+  if (candidates.length) return candidates[0];
   return { armed: false, kind: 'none', point: source.clone() };
 }

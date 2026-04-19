@@ -1,13 +1,13 @@
-## 20260418-f24bj — ar multizone hard reset cleanup
-- Release token: `20260418-f24bj`
+## 20260419-f24bk — ar multizone hard reset cleanup
+- Release token: `20260419-f24bk`
 - Hard reset AR now performs a full local scene cleanup before the next session, so stale multizone meshes and textures do not survive restart.
 - Cleanup is executed on XR session end/restart and removes orphan anchor children before resetting zone state.
 - Added live validation for the next segment while drawing AR zones, so a new point is blocked immediately when the segment would cross an existing zone or the current contour.
 - Made zone snapping geometry-safe: vertex/edge snap is now accepted only when the snapped segment stays valid, preventing the UI from magnetizing users into an invalid crossing.
 - Added clearer AR runtime messaging when a new point would cut through a neighbouring zone instead of following the outer side or the shared edge.
 
-## 20260418-f24bg — ar multizone compact zone ui panel
-- Release token: `20260418-f24bg`
+## 20260419-f24bk — ar multizone compact zone ui panel
+- Release token: `20260419-f24bk`
 - Reworked AR multi-zone controls into a compact default layout: the main final bar now shows the action row, a slim active-zone status line and the texture rail, while the full zone manager stays hidden until the user opens `Зоны`.
 - Added a dedicated zone management sheet with active-zone summary, add-zone action, zone chips, edit/cutout/delete actions and an explicit close button to reduce screen occlusion in AR.
 - Added user guidance for multi-zone work: intro hints explain that new zones can be added from `Зоны` and textures are changed for the active zone in the lower texture rail.

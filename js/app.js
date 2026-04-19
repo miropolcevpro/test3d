@@ -14,7 +14,7 @@ import { createArSessionHelpers } from './app-ar-session-helpers.js';
 import { createSelectionHelpers } from './app-selection-helpers.js';
 import { createArZoneHelpers } from './app-ar-zone-helpers.js';
 import { validateZoneContourAgainstZones, validateZoneNextSegment } from './app-ar-zone-validation-helpers.js';
-import { computeZoneSnapTarget } from './app-ar-zone-snap-helpers.js';
+import { computeZoneSnapCandidates } from './app-ar-zone-snap-helpers.js';
 import { createZoneHardeningConfig, canCreateZone, canAddContourPoint, canStartHole, canAddHolePoint, describeZoneLimits } from './app-ar-zone-hardening-helpers.js';
 
 const runtimeConfig = (typeof window !== 'undefined' && window.__RUNTIME_CONFIG__) ? window.__RUNTIME_CONFIG__ : null;
@@ -1272,23 +1272,26 @@ function buildZoneSnapPreview(localPoint) {
     if (String(zone.id || '') === String(activeZone.id || '')) return false;
     return Array.isArray(zone.points) && zone.points.length >= 2;
   });
-  const preview = computeZoneSnapTarget({
+  const snapCandidates = computeZoneSnapCandidates({
     point: localPoint,
     zones: candidateZones,
     excludeZoneId: activeZone.id,
     vertexThreshold: ZONE_VERTEX_SNAP_DIST_M,
     edgeThreshold: ZONE_EDGE_SNAP_DIST_M,
   });
-  if (!preview || !preview.armed || !preview.point || !Array.isArray(state.points) || state.points.length < 1) {
-    return preview;
+  if (!Array.isArray(snapCandidates) || !snapCandidates.length || !Array.isArray(state.points) || state.points.length < 1) {
+    return snapCandidates && snapCandidates.length ? snapCandidates[0] : { armed: false, kind: 'none', point: localPoint || null };
   }
-  const segmentValidation = validateZoneNextSegment({
-    currentPoints: state.points,
-    nextPoint: preview.point,
-    zones: candidateZones,
-    excludeZoneId: activeZone.id,
-  });
-  if (!segmentValidation || segmentValidation.ok) return preview;
+  for (const preview of snapCandidates) {
+    if (!preview || !preview.armed || !preview.point) continue;
+    const segmentValidation = validateZoneNextSegment({
+      currentPoints: state.points,
+      nextPoint: preview.point,
+      zones: candidateZones,
+      excludeZoneId: activeZone.id,
+    });
+    if (!segmentValidation || segmentValidation.ok) return preview;
+  }
   return { armed: false, kind: 'none', point: localPoint || null };
 }
 
