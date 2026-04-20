@@ -1,5 +1,10 @@
-## 20260419-f24bt — ar curb vertical seam seat tuning
-- Release token: `20260419-f24bt`
+## 20260419-f24bu — ar curb surface reference alignment
+- Release token: `20260419-f24bu`
+- Бордюр теперь опирается на ту же surface-plane, что и плоскость мощения, через модель embeddedDepth + exposedHeight.
+- Убран вертикальный эффект левитации: бордюр должен выглядеть немного выше текстуры, но без пустой воздушной щели.
+
+## 20260419-f24bu — ar curb vertical seam seat tuning
+- Release token: `20260419-f24bu`
 - Lowered curb seating relative to the paving plane, switched segment base anchoring to the lower edge reference, and tuned contact overlap so the curb visually meets the paving without a floating vertical seam.
 
 ## 20260419-f24bs — ar curb edge contact seam tuning

@@ -294,13 +294,27 @@ function makeCurbMaterial(opts = {}) {
   });
 }
 
-function buildCurbStripMesh({ edges = [], width = DEFAULT_CURB_WIDTH, height = DEFAULT_CURB_HEIGHT, yOffset = DEFAULT_CURB_Y_OFFSET, material = null } = {}) {
+function buildCurbStripMesh({
+  edges = [],
+  width = DEFAULT_CURB_WIDTH,
+  height = DEFAULT_CURB_HEIGHT,
+  yOffset = DEFAULT_CURB_Y_OFFSET,
+  surfaceY = null,
+  embeddedDepth = 0,
+  exposedHeight = null,
+  material = null,
+} = {}) {
   const validEdges = Array.isArray(edges) ? edges.filter((edge) => edge && edge.start && edge.end) : [];
   if (!validEdges.length) return null;
   const curbGroup = new THREE.Group();
   curbGroup.name = 'ar-curb-group';
   const sharedMaterial = makeCurbMaterial({ material });
-  curbGroup.userData.curb = { width, height, yOffset };
+  const safeEmbeddedDepth = Math.max(0, ensureFinite(embeddedDepth, 0));
+  const resolvedHeight = Math.max(EPS, Number.isFinite(exposedHeight)
+    ? Math.max(0, ensureFinite(exposedHeight, 0)) + safeEmbeddedDepth
+    : ensureFinite(height, DEFAULT_CURB_HEIGHT));
+  const hasSurfaceY = Number.isFinite(surfaceY);
+  curbGroup.userData.curb = { width, height: resolvedHeight, yOffset, surfaceY, embeddedDepth: safeEmbeddedDepth, exposedHeight };
   const byStart = new Map();
   const byEnd = new Map();
   for (const edge of validEdges) {
@@ -332,8 +346,10 @@ function buildCurbStripMesh({ edges = [], width = DEFAULT_CURB_WIDTH, height = D
       computeEdgeLength(innerEnd, outerEnd),
     );
     if (!(footprint > EPS)) continue;
-    const baseY = Math.min(Number(start.y), Number(end.y)) + yOffset;
-    const geometry = buildCurbPrismGeometry(innerStart, innerEnd, outerEnd, outerStart, baseY, height);
+    const baseY = hasSurfaceY
+      ? Number(surfaceY) - safeEmbeddedDepth
+      : Math.min(Number(start.y), Number(end.y)) + yOffset;
+    const geometry = buildCurbPrismGeometry(innerStart, innerEnd, outerEnd, outerStart, baseY, resolvedHeight);
     if (!geometry) continue;
     const mesh = new THREE.Mesh(geometry, sharedMaterial);
     mesh.name = `ar-curb-segment-${String(edge.key || '')}`;
@@ -344,10 +360,13 @@ function buildCurbStripMesh({ edges = [], width = DEFAULT_CURB_WIDTH, height = D
       zoneId: String(edge.zoneId || ''),
       boundaryType: String(edge.boundaryType || 'outer_boundary'),
       width,
-      height,
+      height: resolvedHeight,
       innerOffset,
       outerOffset,
       contactOverlap,
+      surfaceY: hasSurfaceY ? Number(surfaceY) : null,
+      embeddedDepth: safeEmbeddedDepth,
+      exposedHeight: Number.isFinite(exposedHeight) ? Number(exposedHeight) : null,
     };
     curbGroup.add(mesh);
   }
@@ -474,6 +493,9 @@ export function createArCurbHelpers(ctx = {}) {
       width: ensureFinite(opts.width, curb.width),
       height: ensureFinite(opts.height, curb.height),
       yOffset: ensureFinite(opts.yOffset, curb.yOffset),
+      surfaceY: Number.isFinite(opts.surfaceY) ? Number(opts.surfaceY) : null,
+      embeddedDepth: ensureFinite(opts.embeddedDepth, 0),
+      exposedHeight: Number.isFinite(opts.exposedHeight) ? Number(opts.exposedHeight) : null,
       material: opts.material || null,
     });
     return { curb, mesh, edges: selectedEdges };

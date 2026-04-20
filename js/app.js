@@ -698,10 +698,11 @@ void attachCurbMesh;
 void removeCurb;
 ensureSingleActiveZone();
 
+const AR_FILL_SURFACE_Y_OFFSET = 0.003;
 const AR_CURB_PRESETS = {
-  standard: { id: 'standard', label: 'Стандартный', width: 0.022, height: 0.014, yOffset: 0.0015 },
-  garden: { id: 'garden', label: 'Садовый', width: 0.02, height: 0.012, yOffset: 0.0012 },
-  tall: { id: 'tall', label: 'Высокий', width: 0.026, height: 0.018, yOffset: 0.0018 },
+  standard: { id: 'standard', label: 'Стандартный', width: 0.022, exposedHeight: 0.0055, embeddedDepth: 0.0022 },
+  garden: { id: 'garden', label: 'Садовый', width: 0.02, exposedHeight: 0.0048, embeddedDepth: 0.002 },
+  tall: { id: 'tall', label: 'Высокий', width: 0.026, exposedHeight: 0.007, embeddedDepth: 0.0024 },
 };
 const AR_CURB_MATERIALS = {
   gray: { id: 'gray', label: 'Серый', color: 0xb3b8c2, roughness: 0.86, metalness: 0.04 },
@@ -1202,8 +1203,11 @@ function rebuildCurbsForZone(zoneId, opts = {}) {
       boundaryMode,
       edgeKeys,
       width: preset.width,
-      height: preset.height,
-      yOffset: preset.yOffset,
+      height: preset.exposedHeight + preset.embeddedDepth,
+      yOffset: AR_FILL_SURFACE_Y_OFFSET - preset.embeddedDepth,
+      surfaceY: Number(state.floorY || 0) + AR_FILL_SURFACE_Y_OFFSET,
+      embeddedDepth: preset.embeddedDepth,
+      exposedHeight: preset.exposedHeight,
       material: createArCurbMaterial(material.id),
     });
     if (!built || !built.curb || !built.mesh || !Array.isArray(built.edges) || !built.edges.length) {
@@ -1237,8 +1241,11 @@ function applyPerimeterCurbToActiveZone() {
     boundaryMode,
     edgeKeys,
     width: preset.width,
-    height: preset.height,
-    yOffset: preset.yOffset,
+    height: preset.exposedHeight + preset.embeddedDepth,
+    yOffset: AR_FILL_SURFACE_Y_OFFSET - preset.embeddedDepth,
+    surfaceY: Number(state.floorY || 0) + AR_FILL_SURFACE_Y_OFFSET,
+    embeddedDepth: preset.embeddedDepth,
+    exposedHeight: preset.exposedHeight,
     material: createArCurbMaterial(material.id),
   });
   if (!built || !built.curb || !built.mesh || !Array.isArray(built.edges) || !built.edges.length) {
