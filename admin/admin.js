@@ -1,5 +1,5 @@
 // BUILD: v28 2026-01-16f (runtime-config)
-const __BUILD_ID__ = "20260420-f24cd";
+const __BUILD_ID__ = "20260420-f24ce";
 console.log("[Admin] build", __BUILD_ID__);
 /* Admin (Step 3 start) — shapes list + shape details (read-only palette), router scaffold */
 (async () => {
@@ -104,6 +104,127 @@ function getToken() {
       throw err;
     }
     return json;
+  }
+
+  function buildQueryString(obj = {}) {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(obj || {})) {
+      if (value === undefined || value === null) continue;
+      params.set(key, String(value));
+    }
+    const qs = params.toString();
+    return qs ? `?${qs}` : '';
+  }
+
+  async function apiFetchFirstAvailable(candidates = []) {
+    let lastErr = null;
+    for (const entry of candidates) {
+      if (!entry || !entry.path) continue;
+      try {
+        return await apiFetch(entry.path, entry.opts || {});
+      } catch (err) {
+        lastErr = err;
+        const status = Number(err?.status || 0);
+        if (status && ![404, 405, 501].includes(status)) break;
+      }
+    }
+    throw lastErr || new Error('API endpoint not available');
+  }
+
+  async function apiGetConfig() {
+    const cfg = await tryLoadRemoteConfig();
+    if (cfg) return cfg;
+    return apiFetch('/api/config');
+  }
+
+  async function fallbackSyncTexture(shapeId, textureId) {
+    const canonicalId = canonicalTextureId(shapeId, textureId);
+    await ensureBucketIndexLoaded(shapeId, { forceReload: true });
+    const idx = state.bucketIndexByShapeId.get(shapeId) || { textures: [] };
+    const textures = Array.isArray(idx?.textures) ? idx.textures : [];
+    const bucketTex = textures.find((t) => canonicalTextureId(shapeId, t?.textureId || t?.id || '') === canonicalId);
+    if (!bucketTex) {
+      throw new Error(`Текстура "${canonicalId}" не найдена в бакете surfaces/${shapeId}/.`);
+    }
+    if (isBucketTextureBroken(bucketTex)) {
+      throw new Error(`Текстура "${canonicalId}" неполная в бакете: нужны albedo + normal + roughness + height в 1k.`);
+    }
+
+    const palette = await ensurePaletteLoaded(shapeId, { forceReload: true });
+    const items = Array.isArray(palette?.items) ? palette.items : [];
+    const existing = items.find((item) => canonicalTextureId(shapeId, item?.id || item?.textureId || '') === canonicalId) || null;
+    const synced = buildPaletteItemFromBucket(shapeId, canonicalId, bucketTex);
+    const merged = {
+      ...synced,
+      ...(existing && typeof existing === 'object' ? { name: existing.name || synced.name } : {}),
+      tileSizeM: existing?.tileSizeM || synced.tileSizeM,
+      params: (existing && typeof existing.params === 'object' && existing.params) ? { ...existing.params } : {},
+    };
+    await upsertItemAndSavePalette(shapeId, merged);
+    return { ok: true, fallback: true, paletteResult: { upserted: 1 } };
+  }
+
+  async function apiSyncTexture(shapeId, textureId) {
+    const sid = encodeURIComponent(shapeId || '');
+    const tid = encodeURIComponent(canonicalTextureId(shapeId, textureId));
+    try {
+      return await apiFetchFirstAvailable([
+        { path: `/api/textures/${sid}/${tid}/sync`, opts: { method: 'POST' } },
+        { path: `/api/surfaces/${sid}/${tid}/sync`, opts: { method: 'POST' } },
+        { path: `/api/textures/${sid}/${tid}`, opts: { method: 'POST', body: JSON.stringify({ action: 'sync' }) } },
+      ]);
+    } catch (err) {
+      const status = Number(err?.status || 0);
+      if (status && ![404, 405, 501].includes(status)) throw err;
+      return fallbackSyncTexture(shapeId, textureId);
+    }
+  }
+
+  async function fallbackDeleteTexture(shapeId, textureId, { palette = true, files = false } = {}) {
+    if (!palette) {
+      throw new Error('Удаление файлов без backend DELETE API недоступно. Палитра не изменялась.');
+    }
+    const paletteDoc = await ensurePaletteLoaded(shapeId, { forceReload: true });
+    const items = Array.isArray(paletteDoc?.items) ? [...paletteDoc.items] : [];
+    const canonicalId = canonicalTextureId(shapeId, textureId);
+    const nextItems = items.filter((item) => canonicalTextureId(shapeId, item?.id || item?.textureId || '') !== canonicalId);
+    const removed = items.length - nextItems.length;
+    if (removed <= 0) {
+      throw new Error(`Текстура "${canonicalId}" не найдена в палитре формы "${shapeId}".`);
+    }
+    const nextPalette = { ...(paletteDoc && typeof paletteDoc === 'object' ? paletteDoc : {}), shapeId, items: nextItems };
+    await savePalette(shapeId, nextPalette);
+    return {
+      ok: true,
+      fallback: true,
+      paletteResult: { removed },
+      filesResult: {
+        deletedObjects: 0,
+        deletedPrefixes: [],
+        deleteErrors: files ? [{ reason: 'delete_api_unavailable', textureId: canonicalId }] : [],
+      },
+      message: files
+        ? 'Текстура удалена из палитры. Backend DELETE API для удаления файлов бакета недоступен, поэтому файлы surfaces/... не удалялись.'
+        : 'Текстура удалена из палитры.',
+    };
+  }
+
+  async function apiDeleteTexture(shapeId, textureId, { palette = true, files = true } = {}) {
+    const sid = encodeURIComponent(shapeId || '');
+    const tid = encodeURIComponent(canonicalTextureId(shapeId, textureId));
+    const qs = buildQueryString({ palette: palette ? 1 : 0, files: files ? 1 : 0 });
+    try {
+      return await apiFetchFirstAvailable([
+        { path: `/api/textures/${sid}/${tid}${qs}`, opts: { method: 'DELETE' } },
+        { path: `/api/surfaces/${sid}/${tid}${qs}`, opts: { method: 'DELETE' } },
+        { path: `/api/textures/${sid}/${tid}/delete`, opts: { method: 'POST', body: JSON.stringify({ palette, files }) } },
+        { path: `/api/surfaces/${sid}/${tid}/delete`, opts: { method: 'POST', body: JSON.stringify({ palette, files }) } },
+      ]);
+    } catch (err) {
+      const status = Number(err?.status || 0);
+      if (status && ![404, 405, 501].includes(status)) throw err;
+      return fallbackDeleteTexture(shapeId, textureId, { palette, files });
+    }
   }
 
   // In GitHub Pages the admin lives under /<repo>/admin/, while site assets are under /<repo>/assets/.

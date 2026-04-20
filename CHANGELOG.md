@@ -1,3 +1,9 @@
+## 20260420-f24ce — admin texture delete and sync api helpers restore
+- Release token: `20260420-f24ce`
+- Restored the missing admin API helper layer for texture maintenance: `apiGetConfig`, `apiDeleteTexture`, and `apiSyncTexture` are now defined again, so delete and sync actions no longer crash with `ReferenceError`.
+- Added safe endpoint probing with fallback behavior: if the backend does not expose dedicated delete/sync routes, admin now falls back to palette-level sync/delete using the existing palette and bucket index APIs instead of failing immediately.
+- Preserved the existing admin flows, upload pipeline, palette save logic, AR runtime, multizone, curb behavior, telemetry packaging, and backend upload bundle layout.
+
 ## 20260420-f24cd — ar admin calibration tab touch fix
 - Release token: `20260420-f24cd`
 - Fixed AR admin calibration tab/button responsiveness by removing the over-aggressive touch guard that intercepted panel interactions before they reached the target controls. Outside-tap collapse now uses a safer inside/outside target check, so `Масштаб`, `Визуально`, reset, collapse, and other calibration buttons remain clickable while tap-outside close still works.
