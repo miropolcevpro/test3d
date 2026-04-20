@@ -463,16 +463,30 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
 }
 .arDraftAssist{
   display:flex;
-  justify-content:center;
-  align-items:center;
+  flex-direction:column;
+  align-items:stretch;
   gap:8px;
-  flex-wrap:wrap;
-  padding:6px 10px;
+  width:min(440px, calc(100vw - 28px));
+  padding:8px 10px;
   border-radius:16px;
   background:rgba(10,14,22,0.42);
   border:1px solid rgba(255,255,255,0.12);
   backdrop-filter: blur(10px);
   box-shadow:0 10px 24px rgba(0,0,0,0.14);
+}
+.arDraftAssistHint{
+  color:rgba(255,255,255,0.94);
+  font-size:12px;
+  line-height:1.3;
+  font-weight:900;
+  text-align:center;
+}
+.arDraftAssistActions{
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
 }
 .btnGhost--compact{
   flex:0 0 auto;
@@ -1064,7 +1078,9 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   .arZoneCompact{padding:8px 10px;}
   .arZoneCompactTitle{font-size:12px;}
   .arZoneCompactMeta{font-size:10px;}
-  .arDraftAssist{padding:5px 8px;gap:6px;}
+    .arDraftAssist{width:min(420px, calc(100vw - 24px));padding:7px 8px;gap:6px;}
+  .arDraftAssistHint{font-size:11px;}
+  .arDraftAssistActions{gap:6px;}
   .btnGhost--compact{min-width:96px;padding:9px 10px;font-size:12px;}
   .arZoneChip{min-width:104px;}
   .arZoneSummaryTitle{font-size:14px;}

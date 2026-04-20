@@ -209,10 +209,12 @@ const UI = {
   arArea: document.getElementById('arArea'),
   scanHint: document.getElementById('scanHint'),
   contourHint: document.getElementById('contourHint'),
+  contourHintText: document.querySelector('#contourHint .contourHintText'),
   arDebugOverlay: document.getElementById('arDebugOverlay'),
   measureLayer: document.getElementById('measureLayer'),
   arBottomCenter: document.getElementById('arBottomCenter'),
   arDraftAssist: document.getElementById('arDraftAssist'),
+  arDraftAssistHint: document.getElementById('arDraftAssistHint'),
   btnArUndo: document.getElementById('btnArUndo'),
   btnArCancelZone: document.getElementById('btnArCancelZone'),
   btnArAdd: document.getElementById('btnArAdd'),
@@ -1098,14 +1100,14 @@ function syncArCurbSheetUi() {
     ? (selectedKeys.length ? `Выбрано сегментов: ${selectedKeys.length}` : 'Выберите внешние сегменты')
     : 'Весь внешний периметр';
   if (UI.arCurbMeta) {
-    UI.arCurbMeta.textContent = activeZone ? `${activeZone.title || 'Активная зона'} · ${getArZoneTileLabel(activeZone)}` : '';
+    UI.arCurbMeta.textContent = activeZone ? `${getArZoneDisplayTitle(activeZone)} · ${getArZoneTileLabel(activeZone)}` : '';
   }
   if (UI.arCurbPreviewTitle) {
     UI.arCurbPreviewTitle.textContent = `${preset.label} · ${material.label}`;
   }
   if (UI.arCurbPreviewMeta) {
     UI.arCurbPreviewMeta.textContent = activeZone
-      ? `${activeZone.title || 'Активная зона'} · ${modeLabel}`
+      ? `${getArZoneDisplayTitle(activeZone)} · ${modeLabel}`
       : modeLabel;
   }
   if (UI.arCurbBoundaryModeSelect) UI.arCurbBoundaryModeSelect.value = boundaryMode;
@@ -1314,7 +1316,8 @@ function syncArDraftAssistUi() {
   const canUndoHole = !!(state.xrSession && state.phase === 'ar_cut' && Array.isArray(state.holePoints) && state.holePoints.length > 0);
   const canUndo = canUndoContour || canUndoHole;
   const canCancelZone = isCancelableCurrentDraftZone();
-  if (UI.arDraftAssist) show(UI.arDraftAssist, canUndo || canCancelZone);
+  const canShowAssist = !!(state.xrSession && (state.phase === 'ar_draw' || state.phase === 'ar_cut'));
+  if (UI.arDraftAssist) show(UI.arDraftAssist, canShowAssist);
   if (UI.btnArUndo) {
     UI.btnArUndo.disabled = !canUndo;
     UI.btnArUndo.hidden = !canUndo;
@@ -1324,8 +1327,10 @@ function syncArDraftAssistUi() {
   if (UI.btnArCancelZone) {
     UI.btnArCancelZone.disabled = !canCancelZone;
     UI.btnArCancelZone.hidden = !canCancelZone;
+    UI.btnArCancelZone.textContent = state.phase === 'ar_cut' ? 'Отменить вырез' : 'Отменить зону';
     UI.btnArCancelZone.title = canCancelZone ? 'Отменить только текущую новую зону и оставить уже готовые зоны' : 'Отменить текущую новую зону';
   }
+  syncArDraftGuidanceUi();
 }
 
 function undoActiveDraftStep() {
@@ -1433,7 +1438,7 @@ function setArZonePanelOpen(open) {
 
 function syncArZoneControlsUi() {
   const zone = getActiveZone({ createIfMissing: false });
-  const zoneTitle = zone && zone.title ? String(zone.title) : 'Зона';
+  const zoneTitle = getArZoneDisplayTitle(zone);
   const zoneStatus = zone && zone.status ? String(zone.status) : '';
   const tileLabel = getArZoneTileLabel(zone);
   const rotationLabel = formatArZoneRotationLabel(zone ? zone.textureRotationDeg : state.textureRotationDeg);
@@ -1530,6 +1535,68 @@ function updateArZoneBarVisibility() {
   syncArDraftAssistUi();
 }
 
+
+function getOrderedArZones() {
+  return getZones().filter(Boolean);
+}
+
+function getArZoneDisplayIndex(zoneOrId) {
+  const zoneId = zoneOrId && typeof zoneOrId === 'object' ? String(zoneOrId.id || '') : String(zoneOrId || '');
+  if (!zoneId) return -1;
+  const zones = getOrderedArZones();
+  for (let index = 0; index < zones.length; index += 1) {
+    const zone = zones[index];
+    if (zone && String(zone.id || '') === zoneId) return index;
+  }
+  return -1;
+}
+
+function getArZoneDisplayLabel(zoneOrId) {
+  const index = getArZoneDisplayIndex(zoneOrId);
+  return index >= 0 ? `Зона ${index + 1}` : 'Зона';
+}
+
+function getArZoneDisplayTitle(zone) {
+  if (!zone) return 'Зона';
+  return getArZoneDisplayLabel(zone);
+}
+
+function getArDraftAssistHintText() {
+  if (!state.xrSession) return '';
+  if (state.phase === 'ar_cut') {
+    const count = Array.isArray(state.holePoints) ? state.holePoints.length : 0;
+    return count > 0
+      ? 'Продолжайте контур выреза или замкните его у первой точки.'
+      : 'Поставьте первую точку выреза кнопкой «+».';
+  }
+  if (state.phase !== 'ar_draw') return '';
+  const activeZone = getActiveZone({ createIfMissing: false });
+  const zoneTitle = activeZone ? getArZoneDisplayTitle(activeZone) : 'Новая зона';
+  const count = Array.isArray(state.points) ? state.points.length : 0;
+  if (isCancelableCurrentDraftZone()) {
+    return count > 0
+      ? `${zoneTitle}: продолжайте контур или замкните зону у первой точки.`
+      : `${zoneTitle}: поставьте первую точку новой зоны кнопкой «+».`;
+  }
+  return count > 0
+    ? 'Продолжайте контур или замкните фигуру у первой точки.'
+    : 'Поставьте следующую точку контура кнопкой «+».';
+}
+
+function syncArDraftGuidanceUi() {
+  const assistVisible = !!(UI.arDraftAssist && !UI.arDraftAssist.hidden);
+  const drawLikePhase = !!(state.xrSession && (state.phase === 'ar_draw' || state.phase === 'ar_cut'));
+  const hintText = getArDraftAssistHintText();
+  if (UI.arDraftAssistHint) {
+    UI.arDraftAssistHint.textContent = hintText;
+    UI.arDraftAssistHint.hidden = !assistVisible || !hintText;
+  }
+  if (UI.contourHintText && drawLikePhase && !assistVisible && hintText) {
+    UI.contourHintText.textContent = hintText;
+  }
+  if (UI.contourHint && assistVisible) show(UI.contourHint, false);
+}
+
 function renderArZoneChips() {
   if (!UI.arZoneChips) return;
   const zones = getZones();
@@ -1554,7 +1621,7 @@ function renderArZoneChips() {
     btn.dataset.status = status;
     const label = document.createElement('span');
     label.className = 'arZoneChip__label';
-    label.textContent = zone.title || `Зона ${index + 1}`;
+    label.textContent = getArZoneDisplayTitle(zone);
     const meta = document.createElement('span');
     meta.className = 'arZoneChip__meta';
     meta.textContent = `${getArZoneTileLabel(zone)} · ${formatArZoneRotationLabel(zone.textureRotationDeg || 0)}`;
@@ -1827,9 +1894,7 @@ function beginAddArZone() {
     syncArZoneControlsUi();
     return null;
   }
-  const nextTitle = `Зона ${getZones().length + 1}`;
   const zone = createDraftZone({
-    title: nextTitle,
     tileId: state.selectedTile && state.selectedTile.id ? String(state.selectedTile.id) : '',
     textureRotationDeg: state.textureRotationDeg || 0,
     status: 'draft',
@@ -4387,7 +4452,7 @@ function enterActiveZoneCutoutMode() {
   show(UI.arBottomCenter, true);
 
   UI.scanHint.querySelector('.scanTitle').textContent = 'СДЕЛАЙТЕ ВЫРЕЗ';
-  UI.scanHint.querySelector('.scanText').textContent = `Поставьте точки внутри ${activeZone.title || 'зоны'}. Замкните контур рядом с первой точкой.`;
+  UI.scanHint.querySelector('.scanText').textContent = `Поставьте точки внутри ${getArZoneDisplayTitle(activeZone)}. Замкните контур рядом с первой точкой.`;
   show(UI.scanHint, true);
 
   line = rebuildMarkersAndLine({ pointsGroup, points: state.points, holePoints: state.holePoints, phase: state.phase, anchorGroup, line, floorY: state.floorY, disposeObject3D, closed: true });
@@ -4406,7 +4471,7 @@ function setArZoneDeleteConfirmOpen(open) {
   const activeZone = getActiveZone({ createIfMissing: false });
   if (UI.arZoneDeleteConfirmMeta) {
     if (activeZone && shouldOpen) {
-      const zoneTitle = activeZone.title || 'Активная зона';
+      const zoneTitle = getArZoneDisplayTitle(activeZone);
       const tileLabel = getArZoneTileLabel(activeZone);
       UI.arZoneDeleteConfirmMeta.textContent = `${zoneTitle} · ${tileLabel}`;
     } else {
