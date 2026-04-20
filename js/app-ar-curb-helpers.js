@@ -4,8 +4,7 @@ const EPS = 1e-4;
 const DEFAULT_CURB_WIDTH = 0.022;
 const DEFAULT_CURB_HEIGHT = 0.014;
 const DEFAULT_CURB_Y_OFFSET = 0.0015;
-const DEFAULT_CURB_INNER_GAP = 0.0005;
-const DEFAULT_CURB_OUTER_GAP = 0.001;
+const DEFAULT_CURB_CONTACT_OVERLAP = 0.0012;
 const DEFAULT_CURB_MITER_LIMIT = 2.5;
 
 function ensureFinite(value, fallback = 0) {
@@ -308,8 +307,9 @@ function buildCurbStripMesh({ edges = [], width = DEFAULT_CURB_WIDTH, height = D
     byStart.set(`${String(edge.zoneId || '')}:${Number(edge.startIndex)}`, edge);
     byEnd.set(`${String(edge.zoneId || '')}:${Number(edge.endIndex)}`, edge);
   }
-  const innerOffset = Math.max(0, DEFAULT_CURB_INNER_GAP);
-  const outerOffset = Math.max(innerOffset + EPS, width + DEFAULT_CURB_OUTER_GAP);
+  const contactOverlap = Math.max(0, DEFAULT_CURB_CONTACT_OVERLAP);
+  const innerOffset = -contactOverlap;
+  const outerOffset = Math.max(innerOffset + EPS, width - contactOverlap);
   for (const edge of validEdges) {
     const start = edge.start;
     const end = edge.end;
@@ -347,6 +347,7 @@ function buildCurbStripMesh({ edges = [], width = DEFAULT_CURB_WIDTH, height = D
       height,
       innerOffset,
       outerOffset,
+      contactOverlap,
     };
     curbGroup.add(mesh);
   }

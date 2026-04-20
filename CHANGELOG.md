@@ -1,17 +1,21 @@
-## 20260419-f24br — ar draft assist layout and deterministic zone numbering
-- Release token: `20260419-f24br`
+## 20260419-f24bs — ar curb edge contact seam tuning
+- Release token: `20260419-f24bs`
+- Tuned the curb contact seam so the inner curb face seats against the paving contour with a tiny controlled overlap, eliminating the visible gap while preserving the stabilized outer-edge alignment logic.
+
+## 20260419-f24bs — ar draft assist layout and deterministic zone numbering
+- Release token: `20260419-f24bs`
 - Объединён нижний draft-assist в единый компактный assist-bar: короткая подсказка и кнопки `Назад` / `Отменить зону` больше не конфликтуют и не перекрывают друг друга.
 - Подсказки в режимах построения и выреза стали короче и контекстнее, чтобы новый пользователь видел следующий шаг без перегруженного нижнего UI.
 - Пользовательские названия зон теперь считаются по текущему порядку зон в сцене: первая зона всегда отображается как `Зона 1`, вторая как `Зона 2` и так далее, независимо от внутренних id и исторического sequence.
 
-## 20260419-f24br — ar curb contour-edge alignment hardening
-- Release token: `20260419-f24br`
+## 20260419-f24bs — ar curb contour-edge alignment hardening
+- Release token: `20260419-f24bs`
 - Бордюрная геометрия перестроена от реальных рёбер контура: сегменты теперь строятся как edge-aligned призмы с miter/butt логикой, а не как смещённые box-меши по центру ребра.
 - Нормали внешнего смещения теперь дополнительно валидируются пробой относительно полигона, чтобы бордюр всегда уходил наружу контура, а не случайно внутрь.
 - Уменьшены дефолтные размеры пресетов бордюров, чтобы они были слегка выше текстуры и визуально не доминировали над зоной мощения.
 
-## 20260419-f24br — ar curb geometry stabilization
-- Release token: `20260419-f24br`
+## 20260419-f24bs — ar curb geometry stabilization
+- Release token: `20260419-f24bs`
 - Бордюры смещены наружу относительно внешнего контура зоны, уменьшены по высоте/ширине и обрезаются у углов, чтобы не пересекаться хаотично и не накладываться на плитку.
 - Исправлена нестабильная curb-геометрия на острых углах и уменьшена визуальная агрессивность бордюров в AR.
 
