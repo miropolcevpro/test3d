@@ -6,6 +6,9 @@ const DEFAULT_CURB_HEIGHT = 0.01;
 const DEFAULT_CURB_Y_OFFSET = -0.0006;
 const DEFAULT_CURB_CONTACT_OVERLAP = 0.0022;
 const DEFAULT_CURB_MITER_LIMIT = 2.5;
+const DEFAULT_CURB_INNER_LIP_WIDTH = 0.0016;
+const DEFAULT_CURB_INNER_LIP_EMBED = 0.0014;
+const DEFAULT_CURB_INNER_LIP_RAISE = 0.00012;
 
 function ensureFinite(value, fallback = 0) {
   const num = Number(value);
@@ -302,6 +305,9 @@ function buildCurbStripMesh({
   surfaceY = null,
   embeddedDepth = 0,
   exposedHeight = null,
+  innerLipWidth = DEFAULT_CURB_INNER_LIP_WIDTH,
+  innerLipEmbed = DEFAULT_CURB_INNER_LIP_EMBED,
+  innerLipRaise = DEFAULT_CURB_INNER_LIP_RAISE,
   material = null,
 } = {}) {
   const validEdges = Array.isArray(edges) ? edges.filter((edge) => edge && edge.start && edge.end) : [];
@@ -314,7 +320,10 @@ function buildCurbStripMesh({
     ? Math.max(0, ensureFinite(exposedHeight, 0)) + safeEmbeddedDepth
     : ensureFinite(height, DEFAULT_CURB_HEIGHT));
   const hasSurfaceY = Number.isFinite(surfaceY);
-  curbGroup.userData.curb = { width, height: resolvedHeight, yOffset, surfaceY, embeddedDepth: safeEmbeddedDepth, exposedHeight };
+  const safeInnerLipWidth = Math.max(0, ensureFinite(innerLipWidth, DEFAULT_CURB_INNER_LIP_WIDTH));
+  const safeInnerLipEmbed = Math.max(0, ensureFinite(innerLipEmbed, DEFAULT_CURB_INNER_LIP_EMBED));
+  const safeInnerLipRaise = Math.max(0, ensureFinite(innerLipRaise, DEFAULT_CURB_INNER_LIP_RAISE));
+  curbGroup.userData.curb = { width, height: resolvedHeight, yOffset, surfaceY, embeddedDepth: safeEmbeddedDepth, exposedHeight, innerLipWidth: safeInnerLipWidth, innerLipEmbed: safeInnerLipEmbed, innerLipRaise: safeInnerLipRaise };
   const byStart = new Map();
   const byEnd = new Map();
   for (const edge of validEdges) {
@@ -367,8 +376,38 @@ function buildCurbStripMesh({
       surfaceY: hasSurfaceY ? Number(surfaceY) : null,
       embeddedDepth: safeEmbeddedDepth,
       exposedHeight: Number.isFinite(exposedHeight) ? Number(exposedHeight) : null,
+      innerLipWidth: safeInnerLipWidth,
+      innerLipEmbed: safeInnerLipEmbed,
+      innerLipRaise: safeInnerLipRaise,
     };
     curbGroup.add(mesh);
+    if (hasSurfaceY && safeInnerLipWidth > EPS) {
+      const lipInnerOffset = innerOffset - safeInnerLipWidth;
+      const lipInnerStart = computeOuterMiterPoint(edge, prevEdge, false, lipInnerOffset);
+      const lipInnerEnd = computeOuterMiterPoint(edge, nextEdge, true, lipInnerOffset);
+      if (lipInnerStart && lipInnerEnd) {
+        const lipBaseY = Number(surfaceY) - safeInnerLipEmbed;
+        const lipHeight = Math.max(EPS, safeInnerLipEmbed + safeInnerLipRaise);
+        const lipGeometry = buildCurbPrismGeometry(lipInnerStart, lipInnerEnd, innerEnd, innerStart, lipBaseY, lipHeight);
+        if (lipGeometry) {
+          const lipMesh = new THREE.Mesh(lipGeometry, sharedMaterial);
+          lipMesh.name = `ar-curb-seam-${String(edge.key || '')}`;
+          lipMesh.castShadow = false;
+          lipMesh.receiveShadow = false;
+          lipMesh.userData.curbSegment = {
+            edgeKey: String(edge.key || ''),
+            zoneId: String(edge.zoneId || ''),
+            boundaryType: String(edge.boundaryType || 'outer_boundary'),
+            role: 'inner_lip',
+            width: safeInnerLipWidth,
+            surfaceY: Number(surfaceY),
+            embeddedDepth: safeInnerLipEmbed,
+            exposedHeight: safeInnerLipRaise,
+          };
+          curbGroup.add(lipMesh);
+        }
+      }
+    }
   }
   if (!curbGroup.children.length) {
     try { sharedMaterial.dispose?.(); } catch (_) {}

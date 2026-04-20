@@ -1,10 +1,14 @@
-## 20260419-f24bu — ar curb surface reference alignment
-- Release token: `20260419-f24bu`
+## 20260419-f24bv — ar curb contact profile seam closure
+- Release token: `20260419-f24bv`
+- Adds a tiny inner contact lip profile for curb segments to visually close the remaining vertical seam between paving and curb without changing zone geometry, UI, or multizone logic.
+
+## 20260419-f24bv — ar curb surface reference alignment
+- Release token: `20260419-f24bv`
 - Бордюр теперь опирается на ту же surface-plane, что и плоскость мощения, через модель embeddedDepth + exposedHeight.
 - Убран вертикальный эффект левитации: бордюр должен выглядеть немного выше текстуры, но без пустой воздушной щели.
 
-## 20260419-f24bu — ar curb vertical seam seat tuning
-- Release token: `20260419-f24bu`
+## 20260419-f24bv — ar curb vertical seam seat tuning
+- Release token: `20260419-f24bv`
 - Lowered curb seating relative to the paving plane, switched segment base anchoring to the lower edge reference, and tuned contact overlap so the curb visually meets the paving without a floating vertical seam.
 
 ## 20260419-f24bs — ar curb edge contact seam tuning
