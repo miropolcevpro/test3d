@@ -1,3 +1,7 @@
+## 20260419-f24bt — ar curb vertical seam seat tuning
+- Release token: `20260419-f24bt`
+- Lowered curb seating relative to the paving plane, switched segment base anchoring to the lower edge reference, and tuned contact overlap so the curb visually meets the paving without a floating vertical seam.
+
 ## 20260419-f24bs — ar curb edge contact seam tuning
 - Release token: `20260419-f24bs`
 - Tuned the curb contact seam so the inner curb face seats against the paving contour with a tiny controlled overlap, eliminating the visible gap while preserving the stabilized outer-edge alignment logic.

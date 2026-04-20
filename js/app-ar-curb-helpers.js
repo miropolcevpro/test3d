@@ -2,9 +2,9 @@ import * as THREE from 'three';
 
 const EPS = 1e-4;
 const DEFAULT_CURB_WIDTH = 0.022;
-const DEFAULT_CURB_HEIGHT = 0.014;
-const DEFAULT_CURB_Y_OFFSET = 0.0015;
-const DEFAULT_CURB_CONTACT_OVERLAP = 0.0012;
+const DEFAULT_CURB_HEIGHT = 0.01;
+const DEFAULT_CURB_Y_OFFSET = -0.0006;
+const DEFAULT_CURB_CONTACT_OVERLAP = 0.0022;
 const DEFAULT_CURB_MITER_LIMIT = 2.5;
 
 function ensureFinite(value, fallback = 0) {
@@ -332,7 +332,7 @@ function buildCurbStripMesh({ edges = [], width = DEFAULT_CURB_WIDTH, height = D
       computeEdgeLength(innerEnd, outerEnd),
     );
     if (!(footprint > EPS)) continue;
-    const baseY = Math.max(Number(start.y), Number(end.y)) + yOffset;
+    const baseY = Math.min(Number(start.y), Number(end.y)) + yOffset;
     const geometry = buildCurbPrismGeometry(innerStart, innerEnd, outerEnd, outerStart, baseY, height);
     if (!geometry) continue;
     const mesh = new THREE.Mesh(geometry, sharedMaterial);
