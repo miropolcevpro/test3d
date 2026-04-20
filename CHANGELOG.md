@@ -1,3 +1,9 @@
+## 20260420-f24bx — homepage quick ar cta and rail priority order
+- Release token: `20260420-f24bx`
+- Added a safe homepage CTA button directly under the quick AR rail; it launches visualization through the existing quick-launch pipeline instead of introducing a separate AR entry flow.
+- Changed quick AR rail ordering so items from `Брусчатка` appear first, then `Новый город`, `Старый город`, `Антика`, with all remaining shapes continuing after them in the existing alphabetical order.
+- Kept AR geometry, multizone, curb logic, admin, telemetry, and backend release packaging unchanged.
+
 ## 20260419-f24bw — ar zone action order and curb ux simplification
 - Release token: `20260419-f24bw`
 - Reordered final AR action row to: Rotation → Zones+ → Snapshot → Shape picker.

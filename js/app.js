@@ -183,6 +183,7 @@ const UI = {
   quickArExpanded: document.getElementById('quickArExpanded'),
   quickArStatus: document.getElementById('quickArStatus'),
   btnQuickArToggle: document.getElementById('btnQuickArToggle'),
+  btnQuickArLaunch: document.getElementById('btnQuickArLaunch'),
 
   // Detail
   btnDetailBack: document.getElementById('btnDetailBack'),
@@ -2484,6 +2485,26 @@ function renderQuickLaunchSection() {
     toggleEl: UI.btnQuickArToggle,
     expanded: !!state.quickLaunchExpanded,
   });
+  syncQuickArLaunchButton();
+}
+
+function getPrimaryQuickLaunchItem() {
+  const list = Array.isArray(state.quickLaunchItems) ? state.quickLaunchItems : [];
+  return list.length ? list[0] : null;
+}
+
+function syncQuickArLaunchButton() {
+  if (!UI.btnQuickArLaunch) return;
+  const primaryItem = getPrimaryQuickLaunchItem();
+  const isAvailable = !!primaryItem;
+  UI.btnQuickArLaunch.hidden = !isAvailable;
+  UI.btnQuickArLaunch.disabled = !isAvailable || !!state._launchingQuickAr;
+  UI.btnQuickArLaunch.setAttribute('aria-disabled', (!isAvailable || !!state._launchingQuickAr) ? 'true' : 'false');
+  if (isAvailable) {
+    UI.btnQuickArLaunch.setAttribute('aria-label', `Режим визуализации: ${primaryItem.shapeName} — ${primaryItem.tileName}`);
+  } else {
+    UI.btnQuickArLaunch.removeAttribute('aria-label');
+  }
 }
 
 function toggleQuickLaunchExpanded() {
@@ -2524,6 +2545,7 @@ async function launchQuickArPreset(item) {
   if (!item || !item.shapeId || !item.tileId) return;
   if (state._launchingQuickAr) return;
   state._launchingQuickAr = true;
+  syncQuickArLaunchButton();
   const restoreStatus = UI.quickArStatus ? UI.quickArStatus.textContent : '';
   try {
     telemetryTrack('quick_ar_launch', { shapeId: String(item.shapeId || ''), tileId: String(item.tileId || ''), shapeName: String(item.shapeName || ''), tileName: String(item.tileName || '') });
@@ -2541,6 +2563,7 @@ async function launchQuickArPreset(item) {
     setQuickArStatus('Не удалось запустить AR. Попробуйте ещё раз.');
   } finally {
     state._launchingQuickAr = false;
+    syncQuickArLaunchButton();
     setTimeout(() => {
       if (!state._launchingQuickAr && UI.quickArStatus && /^(AR готов|Не удалось)/.test(UI.quickArStatus.textContent || '')) {
         UI.quickArStatus.textContent = restoreStatus || UI.quickArStatus.textContent;
@@ -4265,6 +4288,18 @@ ensureArFinalControlsBound();
 UI.btnQuickArToggle?.addEventListener('click', () => {
   telemetryTrack('quick_ar_toggle', telemetryCtx({ expandedNext: !state.quickLaunchExpanded }));
   toggleQuickLaunchExpanded();
+});
+
+UI.btnQuickArLaunch?.addEventListener('click', async () => {
+  const primaryItem = getPrimaryQuickLaunchItem();
+  if (!primaryItem) return;
+  telemetryTrack('quick_ar_cta_launch', telemetryCtx({
+    shapeId: String(primaryItem.shapeId || ''),
+    tileId: String(primaryItem.tileId || ''),
+    shapeName: String(primaryItem.shapeName || ''),
+    tileName: String(primaryItem.tileName || ''),
+  }));
+  await launchQuickArPreset(primaryItem);
 });
 
 UI.catalogSearch?.addEventListener('input', () => {

@@ -1,5 +1,20 @@
+const QUICK_LAUNCH_SHAPE_PRIORITY = new Map([
+  ['bruschatka', 0],
+  ['new_gorod', 1],
+  ['old_gorod', 2],
+  ['antika', 3],
+]);
+
+function getQuickLaunchShapePriority(item) {
+  const shapeId = String(item?.shapeId || '').trim().toLowerCase();
+  if (QUICK_LAUNCH_SHAPE_PRIORITY.has(shapeId)) return QUICK_LAUNCH_SHAPE_PRIORITY.get(shapeId);
+  return Number.POSITIVE_INFINITY;
+}
+
 export function sortQuickLaunchItems(items = []) {
   return [...(Array.isArray(items) ? items : [])].sort((a, b) => {
+    const priorityCmp = getQuickLaunchShapePriority(a) - getQuickLaunchShapePriority(b);
+    if (priorityCmp !== 0) return priorityCmp;
     const shapeCmp = String(a?.shapeName || '').localeCompare(String(b?.shapeName || ''), 'ru', { sensitivity: 'base' });
     if (shapeCmp !== 0) return shapeCmp;
     return String(a?.tileName || '').localeCompare(String(b?.tileName || ''), 'ru', { sensitivity: 'base' });

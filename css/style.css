@@ -156,6 +156,9 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   max-width:none;
   width:100%;
 }
+.quickArCtaWrap{margin-top:12px;}
+.quickArCtaBtn{width:100%;}
+.quickArCtaBtn[hidden]{display:none !important;}
 @media (min-width: 900px){
   .quickArExpanded{grid-template-columns:repeat(4, minmax(0,1fr));}
 }
