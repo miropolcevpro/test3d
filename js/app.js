@@ -4471,6 +4471,18 @@ if (!document.__adminCalibrationDismissBound) {
   document.__adminCalibrationDismissBound = true;
 }
 
+if (UI.calibrationPanel && !UI.calibrationPanel.__touchGuardBound) {
+  const stopInside = (event) => {
+    if (!state.adminCalibrationOpen || !event) return;
+    event.stopPropagation();
+  };
+  UI.calibrationPanel.addEventListener('pointerdown', stopInside, true);
+  UI.calibrationPanel.addEventListener('click', stopInside, true);
+  UI.calibrationPanel.addEventListener('touchstart', stopInside, { capture: true, passive: true });
+  UI.calibrationPanel.addEventListener('touchmove', stopInside, { capture: true, passive: true });
+  UI.calibrationPanel.__touchGuardBound = true;
+}
+
 ensureArFinalControlsBound();
 
 UI.btnQuickArToggle?.addEventListener('click', () => {
