@@ -1166,7 +1166,7 @@ function maybeShowArCurbIntroHint() {
   if (!state.xrSession || state.phase !== 'ar_final') return;
   if (!getActiveZone({ createIfMissing: false })) return;
   state.arCurbIntroHintSeen = true;
-  showArRuntimeToast('Откройте «Бордюр» у активной зоны: можно покрыть весь внешний периметр или только выбранные внешние сегменты. На общих швах между зонами бордюр не ставится.', 3800);
+  showArRuntimeToast('Откройте «Бордюр» наверху панели зоны: можно покрыть весь внешний периметр или только выбранные внешние сегменты. На общих швах между зонами бордюр не ставится.', 3800);
 }
 
 function toggleArCurbDraftEdge(edgeKey) {
@@ -1292,7 +1292,7 @@ function maybeShowArZoneIntroHint() {
   if (!state.xrSession || state.phase !== 'ar_final') return;
   if (!getZones().length) return;
   state.arZoneIntroHintSeen = true;
-  showArRuntimeToast('Нажмите «Зоны», чтобы добавить новую зону, переключаться между зонами и менять текстуру активной зоны в нижней ленте.', 3600);
+  showArRuntimeToast('Нажмите «Зоны+», чтобы добавить новую зону, переключаться между зонами и менять текстуру активной зоны в нижней ленте.', 3600);
 }
 
 function setArDraftZoneContext(origin, zoneId) {
@@ -1519,9 +1519,11 @@ function syncArZoneControlsUi() {
   }
   if (UI.btnArZoneCurb) {
     UI.btnArZoneCurb.disabled = !zoneActionsEnabled;
-    UI.btnArZoneCurb.textContent = zone ? `Бордюр · ${zoneTitle}` : 'Бордюр';
-    const curbSummary = zone ? getArCurbSummaryLabel(getPrimaryCurbForZone(zone.id)) : 'Без бордюра';
+    UI.btnArZoneCurb.textContent = 'Бордюр';
+    const curb = zone ? getPrimaryCurbForZone(zone.id) : null;
+    const curbSummary = zone ? getArCurbSummaryLabel(curb) : 'Без бордюра';
     UI.btnArZoneCurb.title = zone ? `Настроить бордюр для зоны «${zoneTitle}». Сейчас: ${curbSummary}.` : 'Настроить бордюр активной зоны';
+    UI.btnArZoneCurb.classList.toggle('is-active', !!(state.arCurbSheetOpen || curb));
   }
   if (UI.btnArZoneDelete) {
     UI.btnArZoneDelete.disabled = !zoneActionsEnabled || !!state.arZoneDeleteConfirmOpen;

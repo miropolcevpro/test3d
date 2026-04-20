@@ -1,3 +1,9 @@
+## 20260419-f24bw — ar zone action order and curb ux simplification
+- Release token: `20260419-f24bw`
+- Reordered final AR action row to: Rotation → Zones+ → Snapshot → Shape picker.
+- Moved curb entry to the top action row in the zone sheet to simplify the curb flow.
+- Strengthened visible active highlighting for curb mode, preset, material, selected segments, and the main curb action.
+
 ## 20260419-f24bv — ar curb contact profile seam closure
 - Release token: `20260419-f24bv`
 - Adds a tiny inner contact lip profile for curb segments to visually close the remaining vertical seam between paving and curb without changing zone geometry, UI, or multizone logic.

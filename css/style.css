@@ -532,6 +532,19 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   font-weight:900;
   color:#0a0c10;
 }
+.btnGhost--primary{
+  background:rgba(90,167,255,0.95);
+  border-color:rgba(90,167,255,0.98);
+  color:#fff;
+  box-shadow:0 10px 22px rgba(47,108,255,0.22);
+}
+.btnGhost.is-active,
+.btnGhost--primary.is-active{
+  background:rgba(90,167,255,0.98);
+  border-color:rgba(90,167,255,1);
+  color:#fff;
+  box-shadow:0 12px 24px rgba(47,108,255,0.28);
+}
 .btnPrimaryWide{
   width:100%;margin-top:10px;
   background:rgba(90,167,255,0.95);
@@ -657,7 +670,7 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   line-height:1;
   white-space:nowrap;
 }
-.arZoneBarTopActions{display:flex;width:100%;}
+.arZoneBarTopActions{display:flex;gap:8px;width:100%;}
 .arZoneBarTopActions .btnGhost{width:100%;}
 .arZoneBarHint{
   color:rgba(255,255,255,0.78);
@@ -881,9 +894,14 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   gap:8px;
 }
 .arChoiceChip.is-active{
-  background:rgba(90,167,255,0.94);
-  border-color:rgba(90,167,255,0.98);
-  box-shadow:0 8px 18px rgba(47,108,255,0.24);
+  background:linear-gradient(180deg, rgba(90,167,255,0.98), rgba(61,130,255,0.96));
+  border-color:rgba(120,189,255,1);
+  color:#fff;
+  box-shadow:0 10px 22px rgba(47,108,255,0.28);
+}
+.arChoiceChip.is-active .arChoiceChipSwatch{
+  border-color:rgba(255,255,255,0.82);
+  box-shadow:0 0 0 2px rgba(255,255,255,0.26), inset 0 1px 2px rgba(255,255,255,0.22);
 }
 .arChoiceChip--swatch{
   min-width:98px;
