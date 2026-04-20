@@ -284,6 +284,10 @@ const UI = {
   btnCalibrationScalePlus: document.getElementById('btnCalibrationScalePlus'),
   calibrationScaleValue: document.getElementById('calibrationScaleValue'),
   calibrationScaleSlider: document.getElementById('calibrationScaleSlider'),
+  btnCalibrationTabScale: document.getElementById('btnCalibrationTabScale'),
+  btnCalibrationTabVisual: document.getElementById('btnCalibrationTabVisual'),
+  calibrationScaleSection: document.getElementById('calibrationScaleSection'),
+  calibrationVisualSection: document.getElementById('calibrationVisualSection'),
   calibrationStatus: document.getElementById('calibrationStatus'),
   snapshotToast: document.getElementById('snapshotToast'),
   snapshotLogoOverlay: document.getElementById('snapshotLogoOverlay'),
@@ -543,6 +547,7 @@ const state = {
   adminCalibrationSavePromise: null,
   adminCalibrationStatusTimer: 0,
   adminCalibrationTargetKey: '',
+  adminCalibrationTab: 'scale',
 
   // internal guards
   _restartingAR: false,
@@ -1070,8 +1075,13 @@ function renderArCurbSegmentChips(activeZone, outerEdges) {
 function syncChoiceChipGroup(container, datasetKey, activeValue) {
   if (!container) return;
   const safeValue = activeValue == null ? '' : String(activeValue);
-  container.querySelectorAll('[data-' + datasetKey + ']').forEach((node) => {
-    const value = node && node.dataset ? String(node.dataset[datasetKey] || '') : '';
+  const safeKey = datasetKey == null ? '' : String(datasetKey);
+  const attrName = safeKey
+    ? safeKey.replace(/([A-Z])/g, '-$1').toLowerCase()
+    : '';
+  if (!attrName) return;
+  container.querySelectorAll('[data-' + attrName + ']').forEach((node) => {
+    const value = node && node.dataset ? String(node.dataset[safeKey] || '') : '';
     const isActive = value === safeValue;
     node.classList.toggle('is-active', isActive);
     node.setAttribute('aria-pressed', isActive ? 'true' : 'false');
@@ -1964,6 +1974,17 @@ function formatCalibrationScale(value) {
   return `${Number.isFinite(n) ? n.toFixed(2) : '1.00'}x`;
 }
 
+const ADMIN_VISUAL_CALIBRATION_SCHEMA = [
+  { key: 'exposureMult', inputId: 'calibrationExposureSlider', valueId: 'calibrationExposureValue', min: 0.60, max: 1.60, step: 0.01, defaultValue: 1.0 },
+  { key: 'contrast', inputId: 'calibrationContrastSlider', valueId: 'calibrationContrastValue', min: 0.70, max: 1.30, step: 0.01, defaultValue: 1.0 },
+  { key: 'saturation', inputId: 'calibrationSaturationSlider', valueId: 'calibrationSaturationValue', min: 0.00, max: 1.50, step: 0.01, defaultValue: 1.0 },
+  { key: 'roughnessMult', inputId: 'calibrationRoughnessSlider', valueId: 'calibrationRoughnessValue', min: 0.50, max: 1.60, step: 0.01, defaultValue: 1.0 },
+  { key: 'specStrength', inputId: 'calibrationSpecSlider', valueId: 'calibrationSpecValue', min: 0.00, max: 1.20, step: 0.01, defaultValue: 1.0 },
+  { key: 'normalScale', inputId: 'calibrationNormalSlider', valueId: 'calibrationNormalValue', min: 0.00, max: 2.00, step: 0.01, defaultValue: 1.0 },
+  { key: 'bumpScale', inputId: 'calibrationBumpSlider', valueId: 'calibrationBumpValue', min: 0.00, max: 2.00, step: 0.01, defaultValue: 1.0 },
+];
+const ADMIN_VISUAL_CALIBRATION_SCHEMA_BY_KEY = new Map(ADMIN_VISUAL_CALIBRATION_SCHEMA.map((item) => [item.key, item]));
+
 async function fetchAdminPalettePayload(shapeId, token) {
   const apiBase = String(ADMIN_API_BASE_URL || API_BASE_URL || '').trim();
   if (!apiBase) throw new Error('admin_api_missing');
@@ -2013,6 +2034,32 @@ function getSelectedTileUvScaleValue() {
   return 1.0;
 }
 
+function getSelectedTileVisualParamValue(key) {
+  const schema = ADMIN_VISUAL_CALIBRATION_SCHEMA_BY_KEY.get(String(key || ''));
+  if (!schema) return 1.0;
+  const params = (state.selectedTile && state.selectedTile.params && typeof state.selectedTile.params === 'object') ? state.selectedTile.params : null;
+  const raw = params ? Number(params[key]) : NaN;
+  if (Number.isFinite(raw)) return clamp(raw, schema.min, schema.max);
+  return schema.defaultValue;
+}
+
+function getAdminCalibrationSnapshot() {
+  const out = { uvScale: clamp(getSelectedTileUvScaleValue(), 0.70, 1.50) };
+  for (const schema of ADMIN_VISUAL_CALIBRATION_SCHEMA) {
+    out[schema.key] = getSelectedTileVisualParamValue(schema.key);
+  }
+  return out;
+}
+
+function getCalibrationVisualControl(schemaOrKey) {
+  const schema = (schemaOrKey && typeof schemaOrKey === 'object') ? schemaOrKey : ADMIN_VISUAL_CALIBRATION_SCHEMA_BY_KEY.get(String(schemaOrKey || ''));
+  if (!schema) return { input: null, value: null };
+  return {
+    input: document.getElementById(schema.inputId),
+    value: document.getElementById(schema.valueId),
+  };
+}
+
 function updateCalibrationUiValue(value) {
   const safe = clamp(Number(value) || 1, 0.70, 1.50);
   state.adminCalibrationScale = safe;
@@ -2020,32 +2067,114 @@ function updateCalibrationUiValue(value) {
   if (UI.calibrationScaleSlider) UI.calibrationScaleSlider.value = safe.toFixed(2);
 }
 
-function applySelectedTileUvScaleLive(value) {
-  const safe = clamp(Number(value) || 1, 0.70, 1.50);
-  if (!state.selectedTile) return safe;
-  const params = (state.selectedTile.params && typeof state.selectedTile.params === 'object') ? { ...state.selectedTile.params } : {};
-  params.uvScale = safe;
-  state.selectedTile.params = params;
+function updateCalibrationVisualUi(values = null) {
+  const snapshot = (values && typeof values === 'object') ? values : getAdminCalibrationSnapshot();
+  for (const schema of ADMIN_VISUAL_CALIBRATION_SCHEMA) {
+    const safe = clamp(Number(snapshot[schema.key]) || schema.defaultValue, schema.min, schema.max);
+    const control = getCalibrationVisualControl(schema);
+    if (control.input) control.input.value = safe.toFixed(2);
+    if (control.value) control.value.textContent = safe.toFixed(2);
+  }
+}
 
+function setAdminCalibrationTab(tab) {
+  const next = tab === 'visual' ? 'visual' : 'scale';
+  state.adminCalibrationTab = next;
+  if (UI.btnCalibrationTabScale) {
+    const active = next === 'scale';
+    UI.btnCalibrationTabScale.classList.toggle('is-active', active);
+    UI.btnCalibrationTabScale.setAttribute('aria-selected', active ? 'true' : 'false');
+  }
+  if (UI.btnCalibrationTabVisual) {
+    const active = next === 'visual';
+    UI.btnCalibrationTabVisual.classList.toggle('is-active', active);
+    UI.btnCalibrationTabVisual.setAttribute('aria-selected', active ? 'true' : 'false');
+  }
+  if (UI.calibrationScaleSection) UI.calibrationScaleSection.hidden = next !== 'scale';
+  if (UI.calibrationVisualSection) UI.calibrationVisualSection.hidden = next !== 'visual';
+}
+
+function patchSelectedTileAdminCalibrationParams(patch = {}) {
+  const snapshot = getAdminCalibrationSnapshot();
+  const next = { ...snapshot };
+  if (Object.prototype.hasOwnProperty.call(patch, 'uvScale')) next.uvScale = clamp(Number(patch.uvScale) || 1, 0.70, 1.50);
+  for (const schema of ADMIN_VISUAL_CALIBRATION_SCHEMA) {
+    if (!Object.prototype.hasOwnProperty.call(patch, schema.key)) continue;
+    next[schema.key] = clamp(Number(patch[schema.key]) || schema.defaultValue, schema.min, schema.max);
+  }
+  if (!state.selectedTile) return next;
+  const params = (state.selectedTile.params && typeof state.selectedTile.params === 'object') ? { ...state.selectedTile.params } : {};
+  params.uvScale = Number(next.uvScale.toFixed(4));
+  for (const schema of ADMIN_VISUAL_CALIBRATION_SCHEMA) {
+    params[schema.key] = Number(next[schema.key].toFixed(4));
+  }
+  state.selectedTile.params = params;
+  return next;
+}
+
+function applySelectedTileAdminCalibrationLive(snapshot = null) {
+  const next = (snapshot && typeof snapshot === 'object') ? snapshot : getAdminCalibrationSnapshot();
   const mat = tileMaterial;
   const fill = fillMesh;
   const preview = previewPlane;
   const size = (state.selectedTile && state.selectedTile.tileSizeM) ? state.selectedTile.tileSizeM : { w: 0.2, h: 0.2 };
-  const repeatX = (3 / Math.max(0.001, Number(size.w) || 0.2)) * safe;
-  const repeatY = (3 / Math.max(0.001, Number(size.h) || 0.2)) * safe;
+  const uvScale = clamp(Number(next.uvScale) || 1, 0.70, 1.50);
+  const repeatX = (3 / Math.max(0.001, Number(size.w) || 0.2)) * uvScale;
+  const repeatY = (3 / Math.max(0.001, Number(size.h) || 0.2)) * uvScale;
+  const exposureMult = clamp(Number(next.exposureMult) || 1, 0.60, 1.60);
+  const contrast = clamp(Number(next.contrast) || 1, 0.70, 1.30);
+  const saturation = clamp(Number(next.saturation) || 1, 0.00, 1.50);
+  const roughnessMult = clamp(Number(next.roughnessMult) || 1, 0.50, 1.60);
+  const specStrength = clamp(Number(next.specStrength) || 1, 0.00, 1.20);
+  const normalScale = clamp(Number(next.normalScale) || 1, 0.00, 2.00);
+  const bumpScale = clamp(Number(next.bumpScale) || 1, 0.00, 2.00);
 
   try {
-    if (mat && mat.uniforms && mat.uniforms.uUvScale) {
-      mat.uniforms.uUvScale.value.set(safe, safe);
+    if (mat && mat.uniforms) {
+      if (mat.uniforms.uUvScale) mat.uniforms.uUvScale.value.set(uvScale, uvScale);
+      if (mat.uniforms.uExposureMult) mat.uniforms.uExposureMult.value = exposureMult;
+      if (mat.uniforms.uContrast) mat.uniforms.uContrast.value = contrast;
+      if (mat.uniforms.uSaturation) mat.uniforms.uSaturation.value = saturation;
+      if (mat.uniforms.uRoughnessMult) mat.uniforms.uRoughnessMult.value = roughnessMult;
+      if (mat.uniforms.uSpecStrength) mat.uniforms.uSpecStrength.value = specStrength;
+      if (mat.uniforms.uNormalScale) mat.uniforms.uNormalScale.value = normalScale;
+      if (mat.uniforms.uBumpScale) mat.uniforms.uBumpScale.value = bumpScale;
       mat.needsUpdate = true;
     }
     if (fill && fill.material) fill.material.needsUpdate = true;
-    if (preview && preview.material && preview.material.map && preview.material.map.repeat) {
-      preview.material.map.repeat.set(repeatX, repeatY);
-      preview.material.needsUpdate = true;
+    if (preview && preview.material) {
+      const pm = preview.material;
+      if (pm.map && pm.map.repeat) pm.map.repeat.set(repeatX, repeatY);
+      if (typeof pm.roughness === 'number') pm.roughness = clamp(roughnessMult, 0.04, 1.0);
+      if (pm.normalScale && typeof pm.normalScale.set === 'function') pm.normalScale.set(normalScale, normalScale);
+      if (typeof pm.bumpScale === 'number') pm.bumpScale = bumpScale;
+      pm.needsUpdate = true;
     }
   } catch (_) {}
-  return safe;
+  return {
+    uvScale,
+    exposureMult,
+    contrast,
+    saturation,
+    roughnessMult,
+    specStrength,
+    normalScale,
+    bumpScale,
+  };
+}
+
+function applySelectedTileUvScaleLive(value) {
+  const snapshot = patchSelectedTileAdminCalibrationParams({ uvScale: value });
+  return applySelectedTileAdminCalibrationLive(snapshot).uvScale;
+}
+
+function applySelectedTileVisualParamLive(key, value) {
+  const schema = ADMIN_VISUAL_CALIBRATION_SCHEMA_BY_KEY.get(String(key || ''));
+  if (!schema) return Number(value) || 1;
+  const patch = {};
+  patch[schema.key] = value;
+  const snapshot = patchSelectedTileAdminCalibrationParams(patch);
+  return applySelectedTileAdminCalibrationLive(snapshot)[schema.key];
 }
 
 async function saveAdminCalibrationNow() {
@@ -2056,6 +2185,9 @@ async function saveAdminCalibrationNow() {
   const tileId = state.selectedTile && state.selectedTile.id ? String(state.selectedTile.id) : '';
   if (!shapeId || !tileId) return false;
 
+  const liveSnapshot = applySelectedTileAdminCalibrationLive(getAdminCalibrationSnapshot());
+  updateCalibrationUiValue(liveSnapshot.uvScale);
+  updateCalibrationVisualUi(liveSnapshot);
   setAdminCalibrationStatus('Сохраняем…', 'progress', true);
   const palette = await fetchAdminPalettePayload(shapeId, token);
   const items = Array.isArray(palette && palette.items) ? palette.items.slice() : [];
@@ -2065,7 +2197,10 @@ async function saveAdminCalibrationNow() {
 
   const nextItem = { ...items[idx] };
   const nextParams = (nextItem.params && typeof nextItem.params === 'object') ? { ...nextItem.params } : {};
-  nextParams.uvScale = Number(state.adminCalibrationScale.toFixed(4));
+  nextParams.uvScale = Number(liveSnapshot.uvScale.toFixed(4));
+  for (const schema of ADMIN_VISUAL_CALIBRATION_SCHEMA) {
+    nextParams[schema.key] = Number(liveSnapshot[schema.key].toFixed(4));
+  }
   nextItem.params = nextParams;
   items[idx] = nextItem;
 
@@ -2092,7 +2227,10 @@ async function saveAdminCalibrationNow() {
     state.currentAllowedTiles = state.currentAllowedTiles.map((tile) => {
       if (!tile || comparableTextureKey(shapeId, tile.id) !== targetKey) return tile;
       const p = (tile.params && typeof tile.params === 'object') ? { ...tile.params } : {};
-      p.uvScale = Number(state.adminCalibrationScale.toFixed(4));
+      p.uvScale = Number(liveSnapshot.uvScale.toFixed(4));
+      for (const schema of ADMIN_VISUAL_CALIBRATION_SCHEMA) {
+        p[schema.key] = Number(liveSnapshot[schema.key].toFixed(4));
+      }
       return { ...tile, params: p };
     });
   }
@@ -2102,14 +2240,26 @@ async function saveAdminCalibrationNow() {
       const tiles = Array.isArray(group.tiles) ? group.tiles.map((tile) => {
         if (!tile || comparableTextureKey(shapeId, tile.id) !== targetKey) return tile;
         const p = (tile.params && typeof tile.params === 'object') ? { ...tile.params } : {};
-        p.uvScale = Number(state.adminCalibrationScale.toFixed(4));
+        p.uvScale = Number(liveSnapshot.uvScale.toFixed(4));
+        for (const schema of ADMIN_VISUAL_CALIBRATION_SCHEMA) {
+          p[schema.key] = Number(liveSnapshot[schema.key].toFixed(4));
+        }
         return { ...tile, params: p };
       }) : group.tiles;
       return { ...group, tiles };
     });
   }
   setAdminCalibrationStatus('Сохранено', 'ok');
-  telemetryTrack('admin_ar_calibration_saved', telemetryCtx({ uvScale: Number(state.adminCalibrationScale.toFixed(4)) }));
+  telemetryTrack('admin_ar_calibration_saved', telemetryCtx({
+    uvScale: Number(liveSnapshot.uvScale.toFixed(4)),
+    exposureMult: Number(liveSnapshot.exposureMult.toFixed(4)),
+    contrast: Number(liveSnapshot.contrast.toFixed(4)),
+    saturation: Number(liveSnapshot.saturation.toFixed(4)),
+    roughnessMult: Number(liveSnapshot.roughnessMult.toFixed(4)),
+    specStrength: Number(liveSnapshot.specStrength.toFixed(4)),
+    normalScale: Number(liveSnapshot.normalScale.toFixed(4)),
+    bumpScale: Number(liveSnapshot.bumpScale.toFixed(4)),
+  }));
   return true;
 }
 
@@ -2127,6 +2277,22 @@ function scheduleAdminCalibrationSave() {
       state.adminCalibrationSavePromise = null;
     });
   }, 700);
+}
+
+function resetAdminCalibrationCurrentTab() {
+  if (state.adminCalibrationTab === 'visual') {
+    const patch = {};
+    for (const schema of ADMIN_VISUAL_CALIBRATION_SCHEMA) patch[schema.key] = schema.defaultValue;
+    const snapshot = patchSelectedTileAdminCalibrationParams(patch);
+    const applied = applySelectedTileAdminCalibrationLive(snapshot);
+    updateCalibrationVisualUi(applied);
+    scheduleAdminCalibrationSave();
+    setAdminCalibrationStatus('Визуальные параметры сброшены', '', false);
+    return;
+  }
+  updateCalibrationUiValue(applySelectedTileUvScaleLive(1.0));
+  scheduleAdminCalibrationSave();
+  setAdminCalibrationStatus('Масштаб сброшен', '', false);
 }
 
 function stepAdminCalibrationScale(delta) {
@@ -2149,7 +2315,10 @@ function syncAdminCalibrationUi() {
   const nextKey = `${state.selectedShape.id}::${state.selectedTile.id}`;
   const changed = state.adminCalibrationTargetKey !== nextKey;
   state.adminCalibrationTargetKey = nextKey;
-  updateCalibrationUiValue(getSelectedTileUvScaleValue());
+  const snapshot = applySelectedTileAdminCalibrationLive(getAdminCalibrationSnapshot());
+  updateCalibrationUiValue(snapshot.uvScale);
+  updateCalibrationVisualUi(snapshot);
+  setAdminCalibrationTab(state.adminCalibrationTab || 'scale');
   if (changed) setAdminCalibrationStatus('Автосохранение включено', '', false);
 }
 
@@ -2158,6 +2327,10 @@ function setCalibrationPanelOpen(open) {
   state.adminCalibrationOpen = next;
   if (next && state.arCurbSheetOpen) setArCurbSheetOpen(false);
   if (UI.calibrationPanel) show(UI.calibrationPanel, next);
+  if (next) {
+    setAdminCalibrationTab(state.adminCalibrationTab || 'scale');
+    updateCalibrationVisualUi(getAdminCalibrationSnapshot());
+  }
   if (UI.btnArCalibrate) {
     UI.btnArCalibrate.classList.toggle('active', next);
     UI.btnArCalibrate.setAttribute('aria-expanded', next ? 'true' : 'false');
@@ -4707,11 +4880,24 @@ function ensureArFinalControlsBound() {
     UI.btnCalibrationScalePlus.__arBound = true;
   }
 
+  if (UI.btnCalibrationTabScale && !UI.btnCalibrationTabScale.__arBound) {
+    UI.btnCalibrationTabScale.addEventListener('click', () => {
+      setAdminCalibrationTab('scale');
+    });
+    UI.btnCalibrationTabScale.__arBound = true;
+  }
+
+  if (UI.btnCalibrationTabVisual && !UI.btnCalibrationTabVisual.__arBound) {
+    UI.btnCalibrationTabVisual.addEventListener('click', () => {
+      setAdminCalibrationTab('visual');
+    });
+    UI.btnCalibrationTabVisual.__arBound = true;
+  }
+
   if (UI.btnCalibrationReset && !UI.btnCalibrationReset.__arBound) {
     UI.btnCalibrationReset.addEventListener('click', () => {
-      telemetryTrack('admin_ar_calibration_reset', telemetryCtx());
-      updateCalibrationUiValue(applySelectedTileUvScaleLive(1.0));
-      scheduleAdminCalibrationSave();
+      telemetryTrack('admin_ar_calibration_reset', telemetryCtx({ tab: String(state.adminCalibrationTab || 'scale') }));
+      resetAdminCalibrationCurrentTab();
     });
     UI.btnCalibrationReset.__arBound = true;
   }
@@ -4719,12 +4905,27 @@ function ensureArFinalControlsBound() {
   if (UI.calibrationScaleSlider && !UI.calibrationScaleSlider.__arBound) {
     UI.calibrationScaleSlider.addEventListener('input', (ev) => {
       const rawValue = ev && ev.target ? ev.target.value : UI.calibrationScaleSlider.value;
-      const applied = updateCalibrationUiValue(applySelectedTileUvScaleLive(rawValue));
+      const applied = applySelectedTileUvScaleLive(rawValue);
+      updateCalibrationUiValue(applied);
       telemetryTrack('admin_ar_calibration_scale_slider_change', telemetryCtx({ value: Number(Number(applied || rawValue).toFixed ? Number(applied || rawValue).toFixed(4) : rawValue) }));
       scheduleAdminCalibrationSave();
     });
     UI.calibrationScaleSlider.__arBound = true;
   }
+
+  ADMIN_VISUAL_CALIBRATION_SCHEMA.forEach((schema) => {
+    const control = getCalibrationVisualControl(schema);
+    if (!control.input || control.input.__arBound) return;
+    control.input.addEventListener('input', (ev) => {
+      const rawValue = ev && ev.target ? ev.target.value : control.input.value;
+      const applied = applySelectedTileVisualParamLive(schema.key, rawValue);
+      control.input.value = Number(applied).toFixed(2);
+      if (control.value) control.value.textContent = Number(applied).toFixed(2);
+      telemetryTrack('admin_visual_param_change', telemetryCtx({ param: String(schema.key || ''), value: Number(Number(applied).toFixed(4)), source: 'ar_calibration' }));
+      scheduleAdminCalibrationSave();
+    });
+    control.input.__arBound = true;
+  });
 
   if (UI.btnShapePicker && !UI.btnShapePicker.__arBound) {
     UI.btnShapePicker.addEventListener('click', () => {

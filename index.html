@@ -376,13 +376,74 @@
             <div class="rotationPanelTitle">Калибровка текстуры</div>
             <button id="btnCalibrationReset" class="rotationResetBtn" type="button">Сброс</button>
           </div>
-          <div class="rotationHint">Админ-режим: масштаб текущей текстуры меняется прямо в AR и сохраняется автоматически.</div>
-          <div class="rotationStepRow calibrationStepRow">
-            <button id="btnCalibrationScaleMinus" class="rotationStepBtn" type="button" aria-label="Уменьшить масштаб текстуры на 5 процентов">−5%</button>
-            <div id="calibrationScaleValue" class="rotationValue" aria-live="polite">1.00x</div>
-            <button id="btnCalibrationScalePlus" class="rotationStepBtn" type="button" aria-label="Увеличить масштаб текстуры на 5 процентов">+5%</button>
+          <div class="rotationHint">Админ-режим: параметры текущей текстуры меняются прямо в AR и сохраняются автоматически.</div>
+          <div class="calibrationTabs" role="tablist" aria-label="Режим калибровки текстуры">
+            <button id="btnCalibrationTabScale" class="calibrationTab is-active" type="button" role="tab" aria-selected="true" aria-controls="calibrationScaleSection">Масштаб</button>
+            <button id="btnCalibrationTabVisual" class="calibrationTab" type="button" role="tab" aria-selected="false" aria-controls="calibrationVisualSection">Визуально</button>
           </div>
-          <input id="calibrationScaleSlider" class="rotationSlider" type="range" min="0.70" max="1.50" step="0.01" value="1.00" aria-label="Масштаб текстуры" />
+          <div id="calibrationScaleSection" class="calibrationSection">
+            <div class="rotationHint">Подстройка размера рисунка плитки без выхода из AR.</div>
+            <div class="rotationStepRow calibrationStepRow">
+              <button id="btnCalibrationScaleMinus" class="rotationStepBtn" type="button" aria-label="Уменьшить масштаб текстуры на 5 процентов">−5%</button>
+              <div id="calibrationScaleValue" class="rotationValue" aria-live="polite">1.00x</div>
+              <button id="btnCalibrationScalePlus" class="rotationStepBtn" type="button" aria-label="Увеличить масштаб текстуры на 5 процентов">+5%</button>
+            </div>
+            <input id="calibrationScaleSlider" class="rotationSlider" type="range" min="0.70" max="1.50" step="0.01" value="1.00" aria-label="Масштаб текстуры" />
+          </div>
+          <div id="calibrationVisualSection" class="calibrationSection" hidden>
+            <div class="rotationHint">Тонкая визуальная калибровка текстуры для текущей палитры в AR: яркость, цвет и рельеф.</div>
+            <div class="calibrationParamList">
+              <label class="calibrationParam" for="calibrationExposureSlider">
+                <div class="calibrationParamTop">
+                  <span class="calibrationParamLabel">Яркость</span>
+                  <span id="calibrationExposureValue" class="calibrationParamValue">1.00</span>
+                </div>
+                <input id="calibrationExposureSlider" class="rotationSlider calibrationParamSlider" type="range" min="0.60" max="1.60" step="0.01" value="1.00" aria-label="Яркость текстуры" data-calibration-param="exposureMult" />
+              </label>
+              <label class="calibrationParam" for="calibrationContrastSlider">
+                <div class="calibrationParamTop">
+                  <span class="calibrationParamLabel">Контраст</span>
+                  <span id="calibrationContrastValue" class="calibrationParamValue">1.00</span>
+                </div>
+                <input id="calibrationContrastSlider" class="rotationSlider calibrationParamSlider" type="range" min="0.70" max="1.30" step="0.01" value="1.00" aria-label="Контраст текстуры" data-calibration-param="contrast" />
+              </label>
+              <label class="calibrationParam" for="calibrationSaturationSlider">
+                <div class="calibrationParamTop">
+                  <span class="calibrationParamLabel">Насыщенность</span>
+                  <span id="calibrationSaturationValue" class="calibrationParamValue">1.00</span>
+                </div>
+                <input id="calibrationSaturationSlider" class="rotationSlider calibrationParamSlider" type="range" min="0.00" max="1.50" step="0.01" value="1.00" aria-label="Насыщенность текстуры" data-calibration-param="saturation" />
+              </label>
+              <label class="calibrationParam" for="calibrationRoughnessSlider">
+                <div class="calibrationParamTop">
+                  <span class="calibrationParamLabel">Матовость</span>
+                  <span id="calibrationRoughnessValue" class="calibrationParamValue">1.00</span>
+                </div>
+                <input id="calibrationRoughnessSlider" class="rotationSlider calibrationParamSlider" type="range" min="0.50" max="1.60" step="0.01" value="1.00" aria-label="Матовость текстуры" data-calibration-param="roughnessMult" />
+              </label>
+              <label class="calibrationParam" for="calibrationSpecSlider">
+                <div class="calibrationParamTop">
+                  <span class="calibrationParamLabel">Сила блика</span>
+                  <span id="calibrationSpecValue" class="calibrationParamValue">1.00</span>
+                </div>
+                <input id="calibrationSpecSlider" class="rotationSlider calibrationParamSlider" type="range" min="0.00" max="1.20" step="0.01" value="1.00" aria-label="Сила блика текстуры" data-calibration-param="specStrength" />
+              </label>
+              <label class="calibrationParam" for="calibrationNormalSlider">
+                <div class="calibrationParamTop">
+                  <span class="calibrationParamLabel">Рельеф normal</span>
+                  <span id="calibrationNormalValue" class="calibrationParamValue">1.00</span>
+                </div>
+                <input id="calibrationNormalSlider" class="rotationSlider calibrationParamSlider" type="range" min="0.00" max="2.00" step="0.01" value="1.00" aria-label="Сила рельефа normal map" data-calibration-param="normalScale" />
+              </label>
+              <label class="calibrationParam" for="calibrationBumpSlider">
+                <div class="calibrationParamTop">
+                  <span class="calibrationParamLabel">Рельеф height</span>
+                  <span id="calibrationBumpValue" class="calibrationParamValue">1.00</span>
+                </div>
+                <input id="calibrationBumpSlider" class="rotationSlider calibrationParamSlider" type="range" min="0.00" max="2.00" step="0.01" value="1.00" aria-label="Сила рельефа height map" data-calibration-param="bumpScale" />
+              </label>
+            </div>
+          </div>
           <div id="calibrationStatus" class="rotationHint" aria-live="polite"></div>
         </div>
         <div id="rotationPanel" class="rotationPanel" hidden>
@@ -448,13 +509,13 @@
     window.setTimeout(hide, 3000);
   })();
 </script>
-<script src="js/runtime-config.js?v=20260420-f24bx"></script>
-<script src="js/site-env.js?v=20260420-f24bx"></script>
-  <script src="js/content-identity.js?v=20260420-f24bx"></script>
-<script src="js/sw-meta.js?v=20260420-f24bx"></script>
-<script src="js/sw-register.js?v=20260420-f24bx"></script>
-  <script src="js/telemetry.js?v=20260420-f24bx"></script>
-  <script type="module" src="js/app.js?v=20260420-f24bx"></script>
+<script src="js/runtime-config.js?v=20260420-f24bz"></script>
+<script src="js/site-env.js?v=20260420-f24bz"></script>
+  <script src="js/content-identity.js?v=20260420-f24bz"></script>
+<script src="js/sw-meta.js?v=20260420-f24bz"></script>
+<script src="js/sw-register.js?v=20260420-f24bz"></script>
+  <script src="js/telemetry.js?v=20260420-f24bz"></script>
+  <script type="module" src="js/app.js?v=20260420-f24bz"></script>
 
 
 </body>

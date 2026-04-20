@@ -67,6 +67,8 @@ const TILE_FRAGMENT_SHADER = `
   uniform float uAlbedoGain;
   uniform float uRoughnessMult;
   uniform float uSpecStrength;
+  uniform float uContrast;
+  uniform float uSaturation;
   uniform vec3 uColorBalance;
   uniform vec3 uLightDir;
   uniform vec3 uFillLightDir;
@@ -118,6 +120,10 @@ const TILE_FRAGMENT_SHADER = `
 
     albedo *= uAlbedoGain;
     albedo *= uColorBalance;
+    albedo = (albedo - vec3(0.5)) * uContrast + vec3(0.5);
+    float luma = dot(albedo, vec3(0.2126, 0.7152, 0.0722));
+    albedo = vec3(luma) + (albedo - vec3(luma)) * uSaturation;
+    albedo = clamp(albedo, vec3(0.0), vec3(2.0));
     float ao = 1.0;
     if (uHasAo == 1) {
       ao = texture2D(uAoTex, uv).r;
@@ -222,6 +228,8 @@ export function makeTileMaterial(arg = {}) {
       uAlbedoGain: { value: 1.0 },
       uRoughnessMult: { value: 1.0 },
       uSpecStrength: { value: 1.0 },
+      uContrast: { value: 1.0 },
+      uSaturation: { value: 1.0 },
       uColorBalance: { value: new THREE.Vector3(0.96, 1.0, 1.02) },
       uExposureMult: { value: 1.0 },
       uAlpha: { value: 1.0 },

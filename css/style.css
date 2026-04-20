@@ -896,15 +896,17 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   align-items:center;
   gap:8px;
 }
-.arChoiceChip.is-active{
-  background:linear-gradient(180deg, rgba(90,167,255,0.98), rgba(61,130,255,0.96));
-  border-color:rgba(120,189,255,1);
+.arChoiceChip.is-active,
+.arChoiceChip[aria-pressed="true"]{
+  background:linear-gradient(180deg, rgba(94,175,255,1), rgba(44,117,255,0.98));
+  border-color:rgba(150,210,255,1);
   color:#fff;
-  box-shadow:0 10px 22px rgba(47,108,255,0.28);
+  box-shadow:0 0 0 2px rgba(122,193,255,0.28), 0 12px 28px rgba(47,108,255,0.34), inset 0 1px 0 rgba(255,255,255,0.32);
 }
-.arChoiceChip.is-active .arChoiceChipSwatch{
-  border-color:rgba(255,255,255,0.82);
-  box-shadow:0 0 0 2px rgba(255,255,255,0.26), inset 0 1px 2px rgba(255,255,255,0.22);
+.arChoiceChip.is-active .arChoiceChipSwatch,
+.arChoiceChip[aria-pressed="true"] .arChoiceChipSwatch{
+  border-color:rgba(255,255,255,0.88);
+  box-shadow:0 0 0 2px rgba(255,255,255,0.28), inset 0 1px 2px rgba(255,255,255,0.24);
 }
 .arChoiceChip--swatch{
   min-width:98px;
@@ -976,10 +978,11 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   font-weight:800;
   text-align:left;
 }
-.arCurbSegmentChip.is-active{
-  background:rgba(90,167,255,0.94);
-  border-color:rgba(90,167,255,0.98);
-  box-shadow:0 8px 18px rgba(47,108,255,0.24);
+.arCurbSegmentChip.is-active,
+.arCurbSegmentChip[aria-pressed="true"]{
+  background:linear-gradient(180deg, rgba(94,175,255,1), rgba(44,117,255,0.98));
+  border-color:rgba(150,210,255,1);
+  box-shadow:0 0 0 2px rgba(122,193,255,0.22), 0 10px 22px rgba(47,108,255,0.3), inset 0 1px 0 rgba(255,255,255,0.28);
 }
 .arCurbSegmentChip:disabled{
   opacity:0.5;
@@ -1095,6 +1098,36 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
 }
 .calibrationPanel{gap:10px;}
 .calibrationStepRow .rotationValue{min-width:72px;}
+.calibrationTabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}
+.calibrationTab{
+  min-height:40px;
+  border-radius:14px;
+  border:1px solid rgba(255,255,255,0.14);
+  background:rgba(255,255,255,0.06);
+  color:rgba(255,255,255,0.84);
+  font-weight:900;
+}
+.calibrationTab.is-active{
+  color:#fff;
+  border-color:rgba(97,168,255,0.78);
+  background:linear-gradient(180deg, rgba(66,129,255,0.34), rgba(43,96,192,0.24));
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,0.10), 0 10px 24px rgba(25,79,180,0.18);
+}
+.calibrationSection{display:flex;flex-direction:column;gap:10px;}
+.calibrationParamList{display:flex;flex-direction:column;gap:10px;}
+.calibrationParam{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  padding:10px 12px;
+  border-radius:16px;
+  background:rgba(255,255,255,0.05);
+  border:1px solid rgba(255,255,255,0.08);
+}
+.calibrationParamTop{display:flex;align-items:center;justify-content:space-between;gap:12px;}
+.calibrationParamLabel{color:#fff;font-size:13px;font-weight:900;line-height:1.2;}
+.calibrationParamValue{color:rgba(255,255,255,0.92);font-size:12px;font-weight:1000;letter-spacing:0.01em;}
+.calibrationParamSlider{margin:0;}
 @media (max-width: 640px){
   .arZoneCompact{padding:8px 10px;}
   .arZoneCompactTitle{font-size:12px;}

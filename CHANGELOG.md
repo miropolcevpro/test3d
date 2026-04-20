@@ -1,3 +1,16 @@
+## 20260420-f24bz — ar admin visual calibration mode
+- Release token: `20260420-f24bz`
+- Extended the admin-only AR calibration panel with a second visual calibration mode, so texture adjustments can now be tuned directly in AR for brightness, contrast, saturation, roughness, specular strength, normal relief, and height relief in addition to the existing scale control.
+- Reused the existing admin AR save pipeline: the current texture now updates live in AR, auto-saves into the palette item params, and refreshes in-memory palette caches without changing the public AR entry flow.
+- Added shader/runtime support for `contrast` and `saturation` so saved visual calibration parameters are applied consistently when textures are selected later.
+- Kept AR geometry, multizone logic, curb flow, backend packaging, telemetry backend, and admin dashboard structure unchanged.
+
+## 20260420-f24by — ar curb sheet active selection highlight fix
+- Release token: `20260420-f24by`
+- Fixed curb sheet active-state syncing for mode, preset, and material chips by matching hyphenated `data-*` attributes correctly instead of querying camelCase attribute names.
+- Strengthened active highlighting for curb chips and segment chips with a clearer selected-state style and an `aria-pressed="true"` visual fallback so chosen parameters are immediately visible in the curb menu.
+- Kept AR geometry, multizone flow, curb generation logic, admin behavior, telemetry, and backend packaging unchanged.
+
 ## 20260420-f24bx — homepage quick ar cta and rail priority order
 - Release token: `20260420-f24bx`
 - Added a safe homepage CTA button directly under the quick AR rail; it launches visualization through the existing quick-launch pipeline instead of introducing a separate AR entry flow.

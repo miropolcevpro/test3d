@@ -364,6 +364,8 @@ export function createSelectionHelpers(ctx) {
     const ag = (params && typeof params.albedoGain === 'number') ? params.albedoGain : 1.0;
     const rm = (params && typeof params.roughnessMult === 'number') ? params.roughnessMult : 1.0;
     const ss = (params && typeof params.specStrength === 'number') ? params.specStrength : 1.0;
+    const ct = (params && typeof params.contrast === 'number') ? params.contrast : 1.0;
+    const st = (params && typeof params.saturation === 'number') ? params.saturation : 1.0;
     const em = (params && typeof params.exposureMult === 'number')
       ? params.exposureMult
       : ctx.computeAutoExposureMultFromTexture(albedoTex);
@@ -429,6 +431,8 @@ export function createSelectionHelpers(ctx) {
     if (mat.uniforms.uAlbedoGain) mat.uniforms.uAlbedoGain.value = ag;
     if (mat.uniforms.uRoughnessMult) mat.uniforms.uRoughnessMult.value = rm;
     if (mat.uniforms.uSpecStrength) mat.uniforms.uSpecStrength.value = ss;
+    if (mat.uniforms.uContrast) mat.uniforms.uContrast.value = ct;
+    if (mat.uniforms.uSaturation) mat.uniforms.uSaturation.value = st;
     if (mat.uniforms.uExposureMult) mat.uniforms.uExposureMult.value = em;
 
     ctx.applyMapToTileMaterial(mat, 'roughness', roughTex);
