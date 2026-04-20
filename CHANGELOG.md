@@ -1,3 +1,8 @@
+## 20260420-f24cb — ar admin calibration drawer width comfort tweak
+- Release token: `20260420-f24cb`
+- Slightly widened the admin-only AR calibration side drawer for more comfortable slider use while keeping the camera view visible.
+- Increased the mobile drawer width a bit more than desktop so phones remain easier to tune without restoring the old full-screen overlay behavior.
+
 ## 20260420-f24ca — ar admin calibration side drawer and action rail scroll
 - Release token: `20260420-f24ca`
 - Converted the admin-only AR calibration panel from a full-width bottom block into a compact right-side drawer so texture changes stay visible while sliders are adjusted in AR.

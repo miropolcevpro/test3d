@@ -1110,8 +1110,8 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   right:10px;
   bottom:calc(100% + 10px);
   z-index:26;
-  width:min(35vw, 320px);
-  max-width:min(35vw, 320px);
+  width:min(36vw, 336px);
+  max-width:min(36vw, 336px);
   max-height:min(72vh, 640px);
   overflow:auto;
   overscroll-behavior:contain;
@@ -1160,11 +1160,11 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
 .calibrationParamSlider{margin:0;}
 @media (max-width: 640px){
   .calibrationPanel{
-    width:min(35vw, 220px);
-    max-width:min(35vw, 220px);
+    width:min(42vw, 248px);
+    max-width:min(42vw, 248px);
     right:8px;
     bottom:calc(100% + 8px);
-    padding:10px;
+    padding:10px 11px;
     border-radius:16px;
   }
   .calibrationPanel .rotationPanelTitle{font-size:14px;line-height:1.2;}
