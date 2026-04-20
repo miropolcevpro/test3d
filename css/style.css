@@ -1131,12 +1131,13 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   flex-direction:column;
   gap:10px;
   min-height:0;
+  overflow:hidden;
 }
 .calibrationPanelHeader{align-items:flex-start;}
 .calibrationPanelHeaderActions{display:flex;align-items:center;gap:8px;flex:0 0 auto;}
 .calibrationCollapseBtn{background:rgba(255,255,255,0.10);}
 .calibrationStepRow .rotationValue{min-width:72px;}
-.calibrationTabs{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;flex:0 0 auto;}
+.calibrationTabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;flex:0 0 auto;}
 .calibrationTab{
   min-height:40px;
   border-radius:14px;

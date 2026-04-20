@@ -4461,26 +4461,26 @@ UI.overlay?.addEventListener('pointerdown', (e) => {
   state.lastUiTapTs = performance.now();
 }, true);
 
-if (!document.__adminCalibrationDismissBound) {
-  document.addEventListener('pointerdown', (event) => {
-    if (!state.xrSession || !state.adminCalibrationOpen) return;
-    const path = (event && typeof event.composedPath === 'function') ? event.composedPath() : [];
-    if ((UI.calibrationPanel && path.includes(UI.calibrationPanel)) || (UI.btnArCalibrate && path.includes(UI.btnArCalibrate))) return;
-    setCalibrationPanelOpen(false);
-  }, true);
-  document.__adminCalibrationDismissBound = true;
+function eventTargetsNode(event, node) {
+  if (!event || !node) return false;
+  const target = event.target;
+  if (target && typeof node.contains === 'function' && node.contains(target)) return true;
+  if (typeof event.composedPath === 'function') {
+    const path = event.composedPath();
+    if (Array.isArray(path) && path.includes(node)) return true;
+  }
+  return false;
 }
 
-if (UI.calibrationPanel && !UI.calibrationPanel.__touchGuardBound) {
-  const stopInside = (event) => {
-    if (!state.adminCalibrationOpen || !event) return;
-    event.stopPropagation();
+if (!document.__adminCalibrationDismissBound) {
+  const dismissCalibrationOnOutsideTap = (event) => {
+    if (!state.xrSession || !state.adminCalibrationOpen) return;
+    if (eventTargetsNode(event, UI.calibrationPanel) || eventTargetsNode(event, UI.btnArCalibrate)) return;
+    setCalibrationPanelOpen(false);
   };
-  UI.calibrationPanel.addEventListener('pointerdown', stopInside, true);
-  UI.calibrationPanel.addEventListener('click', stopInside, true);
-  UI.calibrationPanel.addEventListener('touchstart', stopInside, { capture: true, passive: true });
-  UI.calibrationPanel.addEventListener('touchmove', stopInside, { capture: true, passive: true });
-  UI.calibrationPanel.__touchGuardBound = true;
+  document.addEventListener('click', dismissCalibrationOnOutsideTap, true);
+  document.addEventListener('touchend', dismissCalibrationOnOutsideTap, { capture: true, passive: true });
+  document.__adminCalibrationDismissBound = true;
 }
 
 ensureArFinalControlsBound();
