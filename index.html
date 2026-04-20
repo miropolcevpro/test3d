@@ -372,9 +372,12 @@
           </div>
         </div>
         <div id="calibrationPanel" class="rotationPanel calibrationPanel" hidden>
-          <div class="rotationPanelHeader">
+          <div class="rotationPanelHeader calibrationPanelHeader">
             <div class="rotationPanelTitle">Калибровка текстуры</div>
-            <button id="btnCalibrationReset" class="rotationResetBtn" type="button">Сброс</button>
+            <div class="calibrationPanelHeaderActions">
+              <button id="btnCalibrationCollapse" class="rotationResetBtn calibrationCollapseBtn" type="button" aria-label="Свернуть панель калибровки">Свернуть</button>
+              <button id="btnCalibrationReset" class="rotationResetBtn" type="button">Сброс</button>
+            </div>
           </div>
           <div class="rotationHint">Админ-режим: параметры текущей текстуры меняются прямо в AR и сохраняются автоматически.</div>
           <div class="calibrationTabs" role="tablist" aria-label="Режим калибровки текстуры">
@@ -509,13 +512,13 @@
     window.setTimeout(hide, 3000);
   })();
 </script>
-<script src="js/runtime-config.js?v=20260420-f24bz"></script>
-<script src="js/site-env.js?v=20260420-f24bz"></script>
-  <script src="js/content-identity.js?v=20260420-f24bz"></script>
-<script src="js/sw-meta.js?v=20260420-f24bz"></script>
-<script src="js/sw-register.js?v=20260420-f24bz"></script>
-  <script src="js/telemetry.js?v=20260420-f24bz"></script>
-  <script type="module" src="js/app.js?v=20260420-f24bz"></script>
+<script src="js/runtime-config.js?v=20260420-f24ca"></script>
+<script src="js/site-env.js?v=20260420-f24ca"></script>
+  <script src="js/content-identity.js?v=20260420-f24ca"></script>
+<script src="js/sw-meta.js?v=20260420-f24ca"></script>
+<script src="js/sw-register.js?v=20260420-f24ca"></script>
+  <script src="js/telemetry.js?v=20260420-f24ca"></script>
+  <script type="module" src="js/app.js?v=20260420-f24ca"></script>
 
 
 </body>

@@ -280,6 +280,7 @@ const UI = {
   btnArCalibrate: document.getElementById('btnArCalibrate'),
   calibrationPanel: document.getElementById('calibrationPanel'),
   btnCalibrationReset: document.getElementById('btnCalibrationReset'),
+  btnCalibrationCollapse: document.getElementById('btnCalibrationCollapse'),
   btnCalibrationScaleMinus: document.getElementById('btnCalibrationScaleMinus'),
   btnCalibrationScalePlus: document.getElementById('btnCalibrationScalePlus'),
   calibrationScaleValue: document.getElementById('calibrationScaleValue'),
@@ -2326,7 +2327,11 @@ function setCalibrationPanelOpen(open) {
   const next = !!open && state.phase === 'ar_final' && state.adminArEnabled && !!state.selectedTile;
   state.adminCalibrationOpen = next;
   if (next && state.arCurbSheetOpen) setArCurbSheetOpen(false);
-  if (UI.calibrationPanel) show(UI.calibrationPanel, next);
+  if (UI.calibrationPanel) {
+    show(UI.calibrationPanel, next);
+    UI.calibrationPanel.classList.toggle('is-open', next);
+    UI.calibrationPanel.setAttribute('aria-hidden', next ? 'false' : 'true');
+  }
   if (next) {
     setAdminCalibrationTab(state.adminCalibrationTab || 'scale');
     updateCalibrationVisualUi(getAdminCalibrationSnapshot());
@@ -4456,6 +4461,16 @@ UI.overlay?.addEventListener('pointerdown', (e) => {
   state.lastUiTapTs = performance.now();
 }, true);
 
+if (!document.__adminCalibrationDismissBound) {
+  document.addEventListener('pointerdown', (event) => {
+    if (!state.xrSession || !state.adminCalibrationOpen) return;
+    const path = (event && typeof event.composedPath === 'function') ? event.composedPath() : [];
+    if ((UI.calibrationPanel && path.includes(UI.calibrationPanel)) || (UI.btnArCalibrate && path.includes(UI.btnArCalibrate))) return;
+    setCalibrationPanelOpen(false);
+  }, true);
+  document.__adminCalibrationDismissBound = true;
+}
+
 ensureArFinalControlsBound();
 
 UI.btnQuickArToggle?.addEventListener('click', () => {
@@ -4900,6 +4915,14 @@ function ensureArFinalControlsBound() {
       resetAdminCalibrationCurrentTab();
     });
     UI.btnCalibrationReset.__arBound = true;
+  }
+
+  if (UI.btnCalibrationCollapse && !UI.btnCalibrationCollapse.__arBound) {
+    UI.btnCalibrationCollapse.addEventListener('click', () => {
+      telemetryTrack('admin_ar_calibration_toggle', telemetryCtx({ open: false, source: 'collapse_button' }));
+      setCalibrationPanelOpen(false);
+    });
+    UI.btnCalibrationCollapse.__arBound = true;
   }
 
   if (UI.calibrationScaleSlider && !UI.calibrationScaleSlider.__arBound) {

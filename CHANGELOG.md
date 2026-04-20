@@ -1,3 +1,10 @@
+## 20260420-f24ca — ar admin calibration side drawer and action rail scroll
+- Release token: `20260420-f24ca`
+- Converted the admin-only AR calibration panel from a full-width bottom block into a compact right-side drawer so texture changes stay visible while sliders are adjusted in AR.
+- Added two safe close paths for the calibration drawer: a dedicated `Свернуть` button and tap-outside dismissal anywhere on the AR screen.
+- Changed the final AR action row into a horizontal scroll rail, which keeps the calibration entry reachable on small screens without changing the existing action order or AR behavior.
+- Kept the calibration save pipeline, texture parameter logic, AR geometry, multizone flow, curb logic, backend packaging, and telemetry backend unchanged.
+
 ## 20260420-f24bz — ar admin visual calibration mode
 - Release token: `20260420-f24bz`
 - Extended the admin-only AR calibration panel with a second visual calibration mode, so texture adjustments can now be tuned directly in AR for brightness, contrast, saturation, roughness, specular strength, normal relief, and height relief in addition to the existing scale control.
