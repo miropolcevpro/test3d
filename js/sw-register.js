@@ -172,6 +172,79 @@
     }
   }
 
+  function isLikelyAdminPage() {
+    try {
+      var path = String((window.location && window.location.pathname) || '');
+      return /(^|\/)admin(\/|$)/.test(path);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function isEditableControl(el) {
+    if (!el || el.disabled) return false;
+    if (el.readOnly) return false;
+    var tag = String(el.tagName || '').toUpperCase();
+    if (tag === 'TEXTAREA' || tag === 'SELECT') return true;
+    if (tag === 'INPUT') {
+      var type = String(el.type || '').toLowerCase();
+      return !(/^(button|submit|reset|checkbox|radio|range|file|image|hidden)$/).test(type);
+    }
+    try {
+      return !!el.isContentEditable;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function hasVisibleDialogLikeUi() {
+    try {
+      var selectors = [
+        '#arHelpModal',
+        '#telemetryModal',
+        '#telemetryErrorReportModal',
+        '#confirmModal',
+        '#texModal',
+        '#bulkModal',
+        '#mapModal',
+        '[role="dialog"]',
+        '.modal'
+      ];
+      for (var i = 0; i < selectors.length; i += 1) {
+        var list = document.querySelectorAll(selectors[i]);
+        for (var j = 0; j < list.length; j += 1) {
+          if (isElementVisible(list[j])) return true;
+        }
+      }
+    } catch (e) {}
+    return false;
+  }
+
+  function hasExplicitPageHold() {
+    try {
+      var state = window.__SW_UPDATE_STATE__;
+      if (state && state.blocked) return true;
+    } catch (e) {}
+    try {
+      return document.documentElement && document.documentElement.getAttribute('data-sw-update-hold') === '1';
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function hasActiveEditableContext() {
+    try {
+      var active = document.activeElement;
+      if (!active || active === document.body) return false;
+      if (!isEditableControl(active)) return false;
+      if (!isElementVisible(active)) return false;
+      if (!isLikelyAdminPage()) return false;
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   function isFatalUiVisible() {
     try {
       return isElementVisible(document.getElementById('appFatalState'));
@@ -189,6 +262,9 @@
     if (document.fullscreenElement || document.webkitFullscreenElement) return true;
     if (document.body && document.body.classList && document.body.classList.contains('splash-active')) return true;
     if (isArScreenActive()) return true;
+    if (hasVisibleDialogLikeUi()) return true;
+    if (hasExplicitPageHold()) return true;
+    if (hasActiveEditableContext()) return true;
     if (hasRecentInteraction() && !isFatalUiVisible()) return true;
     return false;
   }
@@ -296,7 +372,9 @@
     if (!host) return;
     var message = isArScreenActive()
       ? 'Новая версия готова. Обновление будет применено после выхода из режима визуализации или по кнопке ниже.'
-      : 'Новая версия готова. Мы не перезагружаем страницу во время активного действия. Можно обновить сейчас или чуть позже.';
+      : (hasExplicitPageHold() || hasActiveEditableContext() || hasVisibleDialogLikeUi())
+        ? 'Новая версия готова. Мы дождёмся, пока вы закроете модальные окна и завершите текущее редактирование.'
+        : 'Новая версия готова. Мы не перезагружаем страницу во время активного действия. Можно обновить сейчас или чуть позже.';
     if (updatePromptText) updatePromptText.textContent = message;
     if (updatePromptUpdateBtn) updatePromptUpdateBtn.disabled = false;
     if (updatePromptLaterBtn) updatePromptLaterBtn.disabled = false;
@@ -428,6 +506,15 @@
     if (document.visibilityState === 'visible') {
       schedulePendingReloadCheck(600);
     }
+  });
+  document.addEventListener('focusin', function() {
+    schedulePendingReloadCheck(900);
+  }, true);
+  document.addEventListener('focusout', function() {
+    schedulePendingReloadCheck(900);
+  }, true);
+  window.addEventListener('sw-update-statechange', function() {
+    schedulePendingReloadCheck(900);
   });
   window.addEventListener('pageshow', function() {
     schedulePendingReloadCheck(600);

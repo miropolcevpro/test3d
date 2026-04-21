@@ -1,5 +1,5 @@
 // BUILD: v28 2026-01-16f (runtime-config)
-const __BUILD_ID__ = "20260421-f24cx";
+const __BUILD_ID__ = "20260421-f24db";
 console.log("[Admin] build", __BUILD_ID__);
 /* Admin (Step 3 start) — shapes list + shape details (read-only palette), router scaffold */
 (async () => {
@@ -415,6 +415,53 @@ function setAdminSafeImageSource(img, value, options = {}) {
     return false;
   }
   return true;
+}
+
+
+function createAdminNode(tag, options = {}) {
+  const el = document.createElement(tag);
+  if (options.className) el.className = options.className;
+  if (options.text != null) el.textContent = String(options.text);
+  if (options.title != null) el.title = String(options.title);
+  if (options.hidden === true) el.hidden = true;
+  if (options.attrs && typeof options.attrs === 'object') {
+    Object.entries(options.attrs).forEach(([key, value]) => {
+      if (value == null) return;
+      el.setAttribute(key, String(value));
+    });
+  }
+  if (options.dataset && typeof options.dataset === 'object') {
+    Object.entries(options.dataset).forEach(([key, value]) => {
+      if (value == null) return;
+      el.dataset[key] = String(value);
+    });
+  }
+  return el;
+}
+
+function appendAdminChildren(target, ...children) {
+  children.flat(Infinity).forEach((child) => {
+    if (child == null) return;
+    if (typeof child === 'string' || typeof child === 'number') target.append(document.createTextNode(String(child)));
+    else target.appendChild(child);
+  });
+  return target;
+}
+
+function createAdminPanelItem(label, value) {
+  const row = createAdminNode('div', { className: 'telemetryPanel__item' });
+  const labelEl = createAdminNode('span', { text: label == null ? '—' : label });
+  const valueEl = createAdminNode('b', { text: value == null ? '—' : value });
+  appendAdminChildren(row, labelEl, valueEl);
+  return row;
+}
+
+function createAdminHint(className, text) {
+  return createAdminNode('div', { className, text });
+}
+
+function createTelemetryBadge(className, text) {
+  return createAdminNode('span', { className, text });
 }
 
 function pickMediaUrl(candidates, opts) {
@@ -1063,6 +1110,7 @@ function normalizeTextureId(v, shapeId) {
       const close = () => {
         elMapModal.hidden = true;
         document.body.style.overflow = '';
+        syncAdminModalBodyState();
       };
 
       const onCancel = () => {
@@ -1121,6 +1169,7 @@ function normalizeTextureId(v, shapeId) {
 
       elMapModal.hidden = false;
       document.body.style.overflow = 'hidden';
+      syncAdminModalBodyState();
     });
   }
 
@@ -1299,45 +1348,55 @@ function setTelemetryStatus(message, kind) {
     const localFlushFail = formatTelemetryDateTime(local.lastFlushFailedAt || '');
     const localResult = local.lastFlushResult ? String(local.lastFlushResult) : '—';
     const pending = Number(local.pending || 0) || 0;
-    const syncBadge = pending > 0
-      ? '<span class="telemetryKpi__badge telemetryKpi__badge--warn">Есть данные этого устройства, которые ещё не попали в общую сводку</span>'
-      : '<span class="telemetryKpi__badge telemetryKpi__badge--good">Данные этого устройства уже переданы в общую сводку</span>';
-    const remoteBadge = remoteReady
-      ? '<span class="telemetryKpi__badge telemetryKpi__badge--good">Сводная аналитика со всех устройств доступна</span>'
-      : '<span class="telemetryKpi__badge telemetryKpi__badge--warn">Сводная аналитика со всех устройств временно недоступна</span>';
-    return `
-      <div class="telemetryPanel">
-        <div class="telemetryKpi__head">
-          <div class="telemetryPanel__label">Данные этого устройства</div>
-          ${syncBadge}
-        </div>
-        <div class="telemetryPanel__sub">Источник: текущий браузер и устройство. Кнопка «Синхронизировать это устройство» передаёт на сервер только данные этого браузера.</div>
-        <div class="telemetryPanel__list">
-          <div class="telemetryPanel__item"><span>Событий на этом устройстве</span><b>${escapeHtml(String(local.totalLocal || 0))}</b></div>
-          <div class="telemetryPanel__item"><span>Ещё не передано на сервер</span><b>${escapeHtml(String(pending))}</b></div>
-          <div class="telemetryPanel__item"><span>Последнее действие на этом устройстве</span><b>${escapeHtml(localLast)}</b></div>
-          <div class="telemetryPanel__item"><span>Последнее ожидающее действие</span><b>${escapeHtml(localPendingLast)}</b></div>
-          <div class="telemetryPanel__item"><span>Последняя передача данных на сервер</span><b>${escapeHtml(localFlushOk)}</b></div>
-          <div class="telemetryPanel__item"><span>Последняя ошибка передачи</span><b>${escapeHtml(localFlushFail)}</b></div>
-          <div class="telemetryPanel__item"><span>Состояние синхронизации</span><b>${escapeHtml(localResult)}</b></div>
-        </div>
-      </div>
-      <div class="telemetryPanel">
-        <div class="telemetryKpi__head">
-          <div class="telemetryPanel__label">Сводная аналитика со всех устройств</div>
-          ${remoteBadge}
-        </div>
-        <div class="telemetryPanel__sub">${escapeHtml(sourceLabel)}. Эти данные собираются со всех устройств. Они появляются после автоматической синхронизации с сайта или ручной синхронизации данных этого браузера.</div>
-        <div class="telemetryPanel__list">
-          <div class="telemetryPanel__item"><span>Событий в общей сводке</span><b>${escapeHtml(String(remote && remote.totals ? (remote.totals.events || 0) : 0))}</b></div>
-          <div class="telemetryPanel__item"><span>Сессий в общей сводке</span><b>${escapeHtml(String(remote && remote.totals ? (remote.totals.sessions || 0) : 0))}</b></div>
-          <div class="telemetryPanel__item"><span>Пакетов данных в хранилище</span><b>${escapeHtml(String(remote && remote.totals ? (remote.totals.batches || 0) : 0))}</b></div>
-          <div class="telemetryPanel__item"><span>Последнее полученное действие</span><b>${escapeHtml(remoteLatestEventAt)}</b></div>
-          <div class="telemetryPanel__item"><span>Последнее обновление общей сводки</span><b>${escapeHtml(remoteGeneratedAt)}</b></div>
-          <div class="telemetryPanel__item"><span>Статус серверной аналитики</span><b>${escapeHtml(remoteReady ? 'Подключён' : 'Нет ответа')}</b></div>
-        </div>
-      </div>
-    `;
+    const syncBadge = createTelemetryBadge(
+      pending > 0 ? 'telemetryKpi__badge telemetryKpi__badge--warn' : 'telemetryKpi__badge telemetryKpi__badge--good',
+      pending > 0 ? 'Есть данные этого устройства, которые ещё не попали в общую сводку' : 'Данные этого устройства уже переданы в общую сводку'
+    );
+    const remoteBadge = createTelemetryBadge(
+      remoteReady ? 'telemetryKpi__badge telemetryKpi__badge--good' : 'telemetryKpi__badge telemetryKpi__badge--warn',
+      remoteReady ? 'Сводная аналитика со всех устройств доступна' : 'Сводная аналитика со всех устройств временно недоступна'
+    );
+
+    const localPanel = createAdminNode('div', { className: 'telemetryPanel' });
+    const localHead = createAdminNode('div', { className: 'telemetryKpi__head' });
+    appendAdminChildren(localHead, createAdminNode('div', { className: 'telemetryPanel__label', text: 'Данные этого устройства' }), syncBadge);
+    const localList = createAdminNode('div', { className: 'telemetryPanel__list' });
+    [
+      ['Событий на этом устройстве', local.totalLocal || 0],
+      ['Ещё не передано на сервер', pending],
+      ['Последнее действие на этом устройстве', localLast],
+      ['Последнее ожидающее действие', localPendingLast],
+      ['Последняя передача данных на сервер', localFlushOk],
+      ['Последняя ошибка передачи', localFlushFail],
+      ['Состояние синхронизации', localResult],
+    ].forEach(([label, value]) => localList.appendChild(createAdminPanelItem(label, value)));
+    appendAdminChildren(
+      localPanel,
+      localHead,
+      createAdminNode('div', { className: 'telemetryPanel__sub', text: 'Источник: текущий браузер и устройство. Кнопка «Синхронизировать это устройство» передаёт на сервер только данные этого браузера.' }),
+      localList
+    );
+
+    const remotePanel = createAdminNode('div', { className: 'telemetryPanel' });
+    const remoteHead = createAdminNode('div', { className: 'telemetryKpi__head' });
+    appendAdminChildren(remoteHead, createAdminNode('div', { className: 'telemetryPanel__label', text: 'Сводная аналитика со всех устройств' }), remoteBadge);
+    const remoteList = createAdminNode('div', { className: 'telemetryPanel__list' });
+    [
+      ['Событий в общей сводке', remote && remote.totals ? (remote.totals.events || 0) : 0],
+      ['Сессий в общей сводке', remote && remote.totals ? (remote.totals.sessions || 0) : 0],
+      ['Пакетов данных в хранилище', remote && remote.totals ? (remote.totals.batches || 0) : 0],
+      ['Последнее полученное действие', remoteLatestEventAt],
+      ['Последнее обновление общей сводки', remoteGeneratedAt],
+      ['Статус серверной аналитики', remoteReady ? 'Подключён' : 'Нет ответа'],
+    ].forEach(([label, value]) => remoteList.appendChild(createAdminPanelItem(label, value)));
+    appendAdminChildren(
+      remotePanel,
+      remoteHead,
+      createAdminNode('div', { className: 'telemetryPanel__sub', text: `${sourceLabel}. Эти данные собираются со всех устройств. Они появляются после автоматической синхронизации с сайта или ручной синхронизации данных этого браузера.` }),
+      remoteList
+    );
+
+    return [localPanel, remotePanel];
   }
 
 
@@ -1672,103 +1731,125 @@ function setTelemetryStatus(message, kind) {
     if (state && state.sourceMode === 'remote') scopeBits.push('сводка со всех устройств');
     else if (state && state.sourceMode === 'local') scopeBits.push('только данные этого браузера');
     else if (state && state.sourceMode === 'remote_failed') scopeBits.push('детальный серверный отчёт временно недоступен');
-    const scopeHint = escapeHtml(scopeBits.filter(Boolean).join(' · '));
+    const scopeHint = scopeBits.filter(Boolean).join(' · ');
     const shownHint = overall && totalCount > visibleItems.length
-      ? `В списке показано ${escapeHtml(String(visibleItems.length))} из ${escapeHtml(String(totalCount))} последних записей.`
-      : `В списке показано ${escapeHtml(String(visibleItems.length))} записей.`;
+      ? `В списке показано ${visibleItems.length} из ${totalCount} последних записей.`
+      : `В списке показано ${visibleItems.length} записей.`;
     const cards = [
-      ['Всего ошибок', totalCount, shownHint + ' ' + scopeHint],
+      ['Всего ошибок', totalCount, `${shownHint} ${scopeHint}`.trim()],
       [telemetryErrorSeverityLabel('critical'), severityCounts.critical || 0, TELEMETRY_ERROR_SEVERITY_META.critical.hint],
       [telemetryErrorSeverityLabel('medium'), severityCounts.medium || 0, TELEMETRY_ERROR_SEVERITY_META.medium.hint],
       [telemetryErrorSeverityLabel('low'), severityCounts.low || 0, TELEMETRY_ERROR_SEVERITY_META.low.hint],
       [telemetryErrorSeverityLabel('diagnostic'), severityCounts.diagnostic || 0, TELEMETRY_ERROR_SEVERITY_META.diagnostic.hint]
     ];
-    return cards.map(([label, value, hint]) => `
-      <div class="telemetryStat">
-        <div class="telemetryStat__label">${escapeHtml(String(label))}</div>
-        <div class="telemetryStat__value">${escapeHtml(String(value))}</div>
-        <div class="telemetryStat__sub">${escapeHtml(String(hint || ''))}</div>
-      </div>
-    `).join('');
+    return cards.map(([label, value, hint]) => {
+      const card = createAdminNode('div', { className: 'telemetryStat' });
+      appendAdminChildren(
+        card,
+        createAdminNode('div', { className: 'telemetryStat__label', text: label }),
+        createAdminNode('div', { className: 'telemetryStat__value', text: value }),
+        createAdminNode('div', { className: 'telemetryStat__sub', text: hint || '' })
+      );
+      return card;
+    });
   }
 
   function renderTelemetryErrorReportGroups(items) {
     const arr = Array.isArray(items) ? items : [];
     if (!arr.length) {
-      return '<div class="muted">По выбранным фильтрам ошибок не найдено.</div>';
+      return [createAdminNode('div', { className: 'muted', text: 'По выбранным фильтрам ошибок не найдено.' })];
     }
-    return TELEMETRY_ERROR_CATEGORY_ORDER.map((categoryKey) => {
+    return TELEMETRY_ERROR_CATEGORY_ORDER.flatMap((categoryKey) => {
       const groupItems = arr.filter((item) => item.category === categoryKey);
-      if (!groupItems.length) return '';
+      if (!groupItems.length) return [];
       const meta = TELEMETRY_ERROR_CATEGORY_META[categoryKey] || { label: categoryKey, hint: '' };
-      return `
-        <details class="errorReportGroup" open>
-          <summary class="errorReportGroup__summary">
-            <span>${escapeHtml(meta.label)}</span>
-            <span class="errorReportGroup__count">${escapeHtml(String(groupItems.length))}</span>
-          </summary>
-          <div class="errorReportGroup__hint">${escapeHtml(String(meta.hint || ''))}</div>
-          <div class="errorReportGroup__body">${groupItems.map((item) => {
-            const metaParts = [];
-            if (item.iso) metaParts.push(formatTelemetryDateTime(item.iso));
-            if (item.deviceLabel) metaParts.push(item.deviceLabel);
-            if (item.sourceLabel) metaParts.push(item.sourceLabel);
-            if (item.shapeId) metaParts.push('Форма: ' + item.shapeId);
-            if (item.textureId) metaParts.push('Текстура: ' + item.textureId);
-            if (item.path) metaParts.push(item.path);
-            const detailsPayload = {
-              technicalKey: item.technicalKey,
-              severity: item.severity,
-              category: item.category,
-              source: item.source,
-              sessionId: item.sessionId,
-              visitorId: item.visitorId,
-              version: item.version,
-              path: item.path,
-              deviceType: item.deviceType,
-              shapeId: item.shapeId,
-              textureId: item.textureId,
-              props: item.details || {}
-            };
-            return `
-              <article class="errorReportEntry errorReportEntry--${escapeHtml(item.severity)}">
-                <div class="errorReportEntry__head">
-                  <div class="errorReportEntry__titleWrap">
-                    <div class="errorReportEntry__title">${escapeHtml(item.title)}</div>
-                    <div class="errorReportEntry__meta">${escapeHtml(metaParts.join(' · '))}</div>
-                  </div>
-                  <div class="errorReportEntry__badges">
-                    <span class="telemetryKpi__badge errorBadge errorBadge--${escapeHtml(item.severity)}">${escapeHtml(item.severityLabel)}</span>
-                    <span class="telemetryKpi__badge errorBadge errorBadge--category">${escapeHtml(item.categoryLabel)}</span>
-                  </div>
-                </div>
-                <div class="errorReportEntry__summary">${escapeHtml(item.summary)}</div>
-                <div class="errorReportEntry__tech">technical key: <code>${escapeHtml(item.technicalKey)}</code></div>
-                <details class="errorReportEntry__details">
-                  <summary>Технические детали</summary>
-                  <div class="telemetryItem__body">${escapeHtml(JSON.stringify(detailsPayload, null, 2))}</div>
-                </details>
-              </article>
-            `;
-          }).join('')}</div>
-        </details>
-      `;
-    }).join('');
+      const details = createAdminNode('details', { className: 'errorReportGroup', attrs: { open: '' } });
+      const summary = createAdminNode('summary', { className: 'errorReportGroup__summary' });
+      appendAdminChildren(summary,
+        createAdminNode('span', { text: meta.label }),
+        createAdminNode('span', { className: 'errorReportGroup__count', text: groupItems.length })
+      );
+      details.appendChild(summary);
+      details.appendChild(createAdminNode('div', { className: 'errorReportGroup__hint', text: String(meta.hint || '') }));
+      const body = createAdminNode('div', { className: 'errorReportGroup__body' });
+      groupItems.forEach((item) => {
+        const metaParts = [];
+        if (item.iso) metaParts.push(formatTelemetryDateTime(item.iso));
+        if (item.deviceLabel) metaParts.push(item.deviceLabel);
+        if (item.sourceLabel) metaParts.push(item.sourceLabel);
+        if (item.shapeId) metaParts.push('Форма: ' + item.shapeId);
+        if (item.textureId) metaParts.push('Текстура: ' + item.textureId);
+        if (item.path) metaParts.push(item.path);
+        const detailsPayload = {
+          technicalKey: item.technicalKey,
+          severity: item.severity,
+          category: item.category,
+          source: item.source,
+          sessionId: item.sessionId,
+          visitorId: item.visitorId,
+          version: item.version,
+          path: item.path,
+          deviceType: item.deviceType,
+          shapeId: item.shapeId,
+          textureId: item.textureId,
+          props: item.details || {}
+        };
+
+        const article = createAdminNode('article', { className: `errorReportEntry errorReportEntry--${item.severity || 'low'}` });
+        const head = createAdminNode('div', { className: 'errorReportEntry__head' });
+        const titleWrap = createAdminNode('div', { className: 'errorReportEntry__titleWrap' });
+        appendAdminChildren(
+          titleWrap,
+          createAdminNode('div', { className: 'errorReportEntry__title', text: item.title }),
+          createAdminNode('div', { className: 'errorReportEntry__meta', text: metaParts.join(' · ') })
+        );
+        const badges = createAdminNode('div', { className: 'errorReportEntry__badges' });
+        appendAdminChildren(
+          badges,
+          createTelemetryBadge(`telemetryKpi__badge errorBadge errorBadge--${item.severity || 'low'}`, item.severityLabel),
+          createTelemetryBadge('telemetryKpi__badge errorBadge errorBadge--category', item.categoryLabel)
+        );
+        appendAdminChildren(head, titleWrap, badges);
+
+        const tech = createAdminNode('div', { className: 'errorReportEntry__tech' });
+        tech.append('technical key: ');
+        tech.appendChild(createAdminNode('code', { text: item.technicalKey || '' }));
+
+        const techDetails = createAdminNode('details', { className: 'errorReportEntry__details' });
+        techDetails.appendChild(createAdminNode('summary', { text: 'Технические детали' }));
+        techDetails.appendChild(createAdminNode('div', {
+          className: 'telemetryItem__body',
+          text: JSON.stringify(detailsPayload, null, 2)
+        }));
+
+        appendAdminChildren(
+          article,
+          head,
+          createAdminNode('div', { className: 'errorReportEntry__summary', text: item.summary }),
+          tech,
+          techDetails
+        );
+        body.appendChild(article);
+      });
+      details.appendChild(body);
+      return [details];
+    });
   }
 
   function renderTelemetryErrorReport() {
     if (!elTelemetryErrorReportCard) return;
     const state = telemetryErrorReportState || { sourceLabel: '', sourceMode: 'local', baseFilters: getTelemetryFilters(), items: [], visibleItems: [], truncated: false, generatedAt: '' };
     if (elTelemetryErrorReportSummary) {
-      elTelemetryErrorReportSummary.innerHTML = buildTelemetryErrorSummaryCards(state);
+      elTelemetryErrorReportSummary.replaceChildren(...buildTelemetryErrorSummaryCards(state));
     }
     updateTelemetryErrorReportActionState(state);
     if (elTelemetryErrorReportList) {
-      const header = [];
-      if (state.truncated) header.push('<div class="hint mtSm">Показана ограниченная выборка последних ошибок. Для стабильности интерфейс показывает последние записи, а итоговые счётчики строятся по полному серверному скану выбранного периода.</div>');
-      if (state.generatedAt) header.push(`<div class="hint mtSm">Последняя серверная генерация отчёта: ${escapeHtml(formatTelemetryDateTime(state.generatedAt))}</div>`);
-      if (state.remoteFailureMessage) header.push(`<div class="status err mtSm">${escapeHtml(state.remoteFailureMessage)}</div>`);
-      elTelemetryErrorReportList.innerHTML = header.join('') + renderTelemetryErrorReportGroups(state.visibleItems);
+      const nodes = [];
+      if (state.truncated) nodes.push(createAdminNode('div', { className: 'hint mtSm', text: 'Показана ограниченная выборка последних ошибок. Для стабильности интерфейс показывает последние записи, а итоговые счётчики строятся по полному серверному скану выбранного периода.' }));
+      if (state.generatedAt) nodes.push(createAdminNode('div', { className: 'hint mtSm', text: `Последняя серверная генерация отчёта: ${formatTelemetryDateTime(state.generatedAt)}` }));
+      if (state.remoteFailureMessage) nodes.push(createAdminNode('div', { className: 'status err mtSm', text: state.remoteFailureMessage }));
+      nodes.push(...renderTelemetryErrorReportGroups(state.visibleItems));
+      elTelemetryErrorReportList.replaceChildren(...nodes);
     }
     const filterBits = [];
     if (state.uiFilters && state.uiFilters.severity !== 'all') filterBits.push(telemetryErrorSeverityLabel(state.uiFilters.severity));
@@ -2025,13 +2106,64 @@ function setTelemetryStatus(message, kind) {
     setTelemetryErrorReportStatus('Очистка для текущего источника данных не поддерживается.', 'warn');
   }
 
+  function isAdminModalVisible(el) {
+    return !!(el && !el.hidden);
+  }
+
+  function isAdminEditableElement(el) {
+    if (!el || el.disabled) return false;
+    if (el.readOnly) return false;
+    const tag = String(el.tagName || '').toUpperCase();
+    if (tag === 'TEXTAREA' || tag === 'SELECT') return true;
+    if (tag === 'INPUT') {
+      const type = String(el.type || '').toLowerCase();
+      return !/^(button|submit|reset|checkbox|radio|range|file|image|hidden)$/i.test(type);
+    }
+    return !!el.isContentEditable;
+  }
+
+  function syncAdminSwUpdateState() {
+    const modalOpen = !!(
+      isAdminModalVisible(elTelemetryModal) ||
+      isAdminModalVisible(elTelemetryErrorReportModal) ||
+      isAdminModalVisible(elConfirmModal) ||
+      isAdminModalVisible(elTexModal) ||
+      isAdminModalVisible(elBulkModal) ||
+      isAdminModalVisible(elMapModal)
+    );
+    const active = document.activeElement;
+    const editing = !!(active && active !== document.body && isAdminEditableElement(active));
+    const blocked = modalOpen || editing;
+    const reason = modalOpen ? 'admin-modal-open' : (editing ? 'admin-editing-focus' : '');
+    window.__SW_UPDATE_STATE__ = {
+      blocked,
+      reason,
+      source: 'admin',
+      updatedAt: Date.now()
+    };
+    if (document && document.documentElement) {
+      document.documentElement.setAttribute('data-sw-update-hold', blocked ? '1' : '0');
+      if (reason) document.documentElement.setAttribute('data-sw-update-reason', reason);
+      else document.documentElement.removeAttribute('data-sw-update-reason');
+    }
+    try {
+      window.dispatchEvent(new CustomEvent('sw-update-statechange', {
+        detail: { blocked, reason, source: 'admin' }
+      }));
+    } catch (_) {}
+  }
+
   function syncAdminModalBodyState() {
     const isOpen = !!(
-      (elTelemetryModal && !elTelemetryModal.hidden) ||
-      (elTelemetryErrorReportModal && !elTelemetryErrorReportModal.hidden) ||
-      (elConfirmModal && !elConfirmModal.hidden)
+      isAdminModalVisible(elTelemetryModal) ||
+      isAdminModalVisible(elTelemetryErrorReportModal) ||
+      isAdminModalVisible(elConfirmModal) ||
+      isAdminModalVisible(elTexModal) ||
+      isAdminModalVisible(elBulkModal) ||
+      isAdminModalVisible(elMapModal)
     );
     document.body.classList.toggle('modal-open', isOpen);
+    syncAdminSwUpdateState();
   }
 
   function closeConfirmModal(result = false) {
@@ -2102,6 +2234,19 @@ function setTelemetryStatus(message, kind) {
     });
   }
 
+  document.addEventListener('focusin', () => {
+    syncAdminSwUpdateState();
+  }, true);
+  document.addEventListener('focusout', () => {
+    window.setTimeout(syncAdminSwUpdateState, 0);
+  }, true);
+  document.addEventListener('input', () => {
+    syncAdminSwUpdateState();
+  }, true);
+  document.addEventListener('change', () => {
+    syncAdminSwUpdateState();
+  }, true);
+
   const TELEMETRY_KPI_STANDARDS = {
     arStartRate: { direction: 'higher', good: 0.70, warn: 0.50, target: 'Цель ≥ 70%, внимание < 50%' },
     arCompletionRate: { direction: 'higher', good: 0.35, warn: 0.20, target: 'Цель ≥ 35%, внимание < 20%' },
@@ -2129,94 +2274,106 @@ function setTelemetryStatus(message, kind) {
 
   function renderTelemetryKpiCard(key, label, valueText, subText, basisCount, rawValue) {
     const verdict = evaluateTelemetryKpi(key, rawValue, basisCount);
-    return `
-      <div class="telemetryKpi telemetryKpi--${escapeHtml(verdict.status)}">
-        <div class="telemetryKpi__head">
-          <div class="telemetryKpi__label">${escapeHtml(label)}</div>
-          <span class="telemetryKpi__badge telemetryKpi__badge--${escapeHtml(verdict.status)}">${escapeHtml(verdict.label)}</span>
-        </div>
-        <div class="telemetryKpi__value">${escapeHtml(String(valueText || '—'))}</div>
-        <div class="telemetryKpi__sub">${escapeHtml(subText || '')}</div>
-        <div class="telemetryKpi__target">${escapeHtml(verdict.target || '')}</div>
-      </div>
-    `;
+    const card = createAdminNode('div', { className: `telemetryKpi telemetryKpi--${verdict.status}` });
+    const head = createAdminNode('div', { className: 'telemetryKpi__head' });
+    appendAdminChildren(
+      head,
+      createAdminNode('div', { className: 'telemetryKpi__label', text: label }),
+      createTelemetryBadge(`telemetryKpi__badge telemetryKpi__badge--${verdict.status}`, verdict.label)
+    );
+    appendAdminChildren(
+      card,
+      head,
+      createAdminNode('div', { className: 'telemetryKpi__value', text: String(valueText || '—') }),
+      createAdminNode('div', { className: 'telemetryKpi__sub', text: subText || '' }),
+      createAdminNode('div', { className: 'telemetryKpi__target', text: verdict.target || '' })
+    );
+    return card;
   }
 
   function formatTelemetryTopList(items, emptyLabel, opts) {
     const arr = Array.isArray(items) ? items : [];
     const mode = opts && opts.mode ? String(opts.mode) : 'default';
-    if (!arr.length) return `<div class="muted">${escapeHtml(emptyLabel || '—')}</div>`;
+    if (!arr.length) return [createAdminNode('div', { className: 'muted', text: emptyLabel || '—' })];
     return arr.map((item) => {
       const label = mode === 'events' ? telemetryEventLabel(String(item.name || item.id || '')) : String(item.name || item.id || '—');
-      return `
-        <div class="telemetryPanel__item">
-          <span>${escapeHtml(label)}</span>
-          <b>${escapeHtml(String(item.sessions || item.count || 0))}</b>
-        </div>
-      `;
-    }).join('');
+      return createAdminPanelItem(label, item.sessions || item.count || 0);
+    });
   }
 
   function renderTelemetryFunnel(funnel, sourceLabel) {
     const data = funnel && Array.isArray(funnel.steps) ? funnel.steps : [];
+    const panel = createAdminNode('div', { className: 'telemetryPanel' });
+    appendAdminChildren(panel, createAdminNode('div', { className: 'telemetryPanel__label', text: `Воронка AR (${sourceLabel})` }));
     if (!data.length) {
-      return `
-        <div class="telemetryPanel">
-          <div class="telemetryPanel__label">Воронка AR (${escapeHtml(sourceLabel)})</div>
-          <div class="muted">Пока нет данных по воронке AR</div>
-        </div>
-      `;
+      panel.appendChild(createAdminNode('div', { className: 'muted', text: 'Пока нет данных по воронке AR' }));
+      return panel;
     }
+    panel.appendChild(createAdminNode('div', { className: 'telemetryPanel__sub', text: 'Показывает путь от клика по запуску AR до готовой визуализации' }));
+    const list = createAdminNode('div', { className: 'telemetryPanel__list' });
     const maxValue = Math.max(...data.map((step) => Number(step.sessions || 0)), 1);
-    return `
-      <div class="telemetryPanel">
-        <div class="telemetryPanel__label">Воронка AR (${escapeHtml(sourceLabel)})</div>
-        <div class="telemetryPanel__sub">Показывает путь от клика по запуску AR до готовой визуализации</div>
-        <div class="telemetryPanel__list">${data.map((step) => {
-          const width = Math.max(6, Math.round((Number(step.sessions || 0) / maxValue) * 100));
-          const conv = formatTelemetryPercent(step.conversionFromLaunch);
-          const stepConv = formatTelemetryPercent(step.conversionFromPrev);
-          return `
-            <div class="telemetryFunnelStep">
-              <div class="telemetryFunnelStep__label">${escapeHtml(String(step.label || '—'))}</div>
-              <div class="telemetryFunnelStep__bar"><div class="telemetryFunnelStep__fill" style="width:${width}%"></div></div>
-              <div class="telemetryFunnelStep__meta"><b>${escapeHtml(String(step.sessions || 0))}</b><br /><span class="muted">от запуска ${conv} · шаг ${stepConv}</span></div>
-            </div>
-          `;
-        }).join('')}</div>
-      </div>
-    `;
+    data.forEach((step) => {
+      const width = Math.max(6, Math.round((Number(step.sessions || 0) / maxValue) * 100));
+      const conv = formatTelemetryPercent(step.conversionFromLaunch);
+      const stepConv = formatTelemetryPercent(step.conversionFromPrev);
+      const row = createAdminNode('div', { className: 'telemetryFunnelStep' });
+      const bar = createAdminNode('div', { className: 'telemetryFunnelStep__bar' });
+      const fill = createAdminNode('div', { className: 'telemetryFunnelStep__fill' });
+      fill.style.width = `${width}%`;
+      bar.appendChild(fill);
+      const meta = createAdminNode('div', { className: 'telemetryFunnelStep__meta' });
+      meta.appendChild(createAdminNode('b', { text: step.sessions || 0 }));
+      meta.appendChild(createAdminNode('br'));
+      meta.appendChild(createAdminNode('span', { className: 'muted', text: `от запуска ${conv} · шаг ${stepConv}` }));
+      appendAdminChildren(
+        row,
+        createAdminNode('div', { className: 'telemetryFunnelStep__label', text: step.label || '—' }),
+        bar,
+        meta
+      );
+      list.appendChild(row);
+    });
+    panel.appendChild(list);
+    return panel;
   }
 
   function renderTelemetryDevices(devices, sourceLabel) {
     const arr = Array.isArray(devices) ? devices : [];
+    const panel = createAdminNode('div', { className: 'telemetryPanel' });
+    appendAdminChildren(panel, createAdminNode('div', { className: 'telemetryPanel__label', text: `Сегментация по устройствам (${sourceLabel})` }));
     if (!arr.length) {
-      return `
-        <div class="telemetryPanel">
-          <div class="telemetryPanel__label">Сегментация по устройствам (${escapeHtml(sourceLabel)})</div>
-          <div class="muted">Пока нет данных по устройствам</div>
-        </div>
-      `;
+      panel.appendChild(createAdminNode('div', { className: 'muted', text: 'Пока нет данных по устройствам' }));
+      return panel;
     }
-    return `
-      <div class="telemetryPanel">
-        <div class="telemetryPanel__label">Сегментация по устройствам (${escapeHtml(sourceLabel)})</div>
-        <div class="telemetryPanel__sub">Сессии, запуск AR, завершение визуализации и ошибки по типу устройства</div>
-        <div class="telemetryDeviceGrid">${arr.map((item) => `
-          <div class="telemetryDeviceCard">
-            <div class="telemetryDeviceCard__head"><span class="telemetryDeviceCard__name">${escapeHtml(telemetryDeviceLabel(item.deviceType))}</span><span class="muted">${escapeHtml(String(item.shareLabel || ''))}</span></div>
-            <div class="telemetryDeviceCard__meta">
-              <div>Сессий<b>${escapeHtml(String(item.sessions || 0))}</b></div>
-              <div>Запустили AR<b>${escapeHtml(String(item.arLaunchSessions || 0))}</b></div>
-              <div>Вошли в AR<b>${escapeHtml(String(item.arStartedSessions || 0))}</b></div>
-              <div>Дошли до заливки<b>${escapeHtml(String(item.arCompletedSessions || 0))}</b></div>
-              <div>Конверсия в заливку<b>${formatTelemetryPercent(item.arCompletionRate)}</b></div>
-              <div>Ошибок на сессию<b>${formatTelemetryFloat(item.errorRatePerSession)}</b></div>
-            </div>
-          </div>
-        `).join('')}</div>
-      </div>
-    `;
+    panel.appendChild(createAdminNode('div', { className: 'telemetryPanel__sub', text: 'Сессии, запуск AR, завершение визуализации и ошибки по типу устройства' }));
+    const grid = createAdminNode('div', { className: 'telemetryDeviceGrid' });
+    arr.forEach((item) => {
+      const card = createAdminNode('div', { className: 'telemetryDeviceCard' });
+      const head = createAdminNode('div', { className: 'telemetryDeviceCard__head' });
+      appendAdminChildren(
+        head,
+        createAdminNode('span', { className: 'telemetryDeviceCard__name', text: telemetryDeviceLabel(item.deviceType) }),
+        createAdminNode('span', { className: 'muted', text: String(item.shareLabel || '') })
+      );
+      const meta = createAdminNode('div', { className: 'telemetryDeviceCard__meta' });
+      [
+        ['Сессий', item.sessions || 0],
+        ['Запустили AR', item.arLaunchSessions || 0],
+        ['Вошли в AR', item.arStartedSessions || 0],
+        ['Дошли до заливки', item.arCompletedSessions || 0],
+        ['Конверсия в заливку', formatTelemetryPercent(item.arCompletionRate)],
+        ['Ошибок на сессию', formatTelemetryFloat(item.errorRatePerSession)],
+      ].forEach(([label, value]) => {
+        const line = createAdminNode('div');
+        line.append(label);
+        line.appendChild(createAdminNode('b', { text: value }));
+        meta.appendChild(line);
+      });
+      appendAdminChildren(card, head, meta);
+      grid.appendChild(card);
+    });
+    panel.appendChild(grid);
+    return panel;
   }
 
   function renderTelemetryAudience(audience, sourceLabel) {
@@ -2228,19 +2385,25 @@ function setTelemetryStatus(message, kind) {
       ['Возвращающиеся устройства', data.returningVisitors || 0, `${formatTelemetryPercent(data.repeatVisitorRate)} от всех уникальных устройств`],
       ['Сессий на устройство', formatTelemetryFloat(data.avgSessionsPerVisitor), 'Среднее число сессий на 1 устройство']
     ];
-    return `
-      <div class="telemetryPanel telemetryPanel--hero">
-        <div class="telemetryPanel__label">Аудитория и посещаемость (${escapeHtml(sourceLabel)})</div>
-        <div class="telemetryPanel__sub">В метрика-подобной сводке: уникальные устройства, сессии и повторные визиты</div>
-        <div class="telemetryAudienceGrid">${cards.map(([label, value, hint]) => `
-          <div class="telemetryHeroStat">
-            <div class="telemetryHeroStat__label">${escapeHtml(String(label))}</div>
-            <div class="telemetryHeroStat__value">${escapeHtml(String(value))}</div>
-            <div class="telemetryHeroStat__hint">${escapeHtml(String(hint || ''))}</div>
-          </div>
-        `).join('')}</div>
-      </div>
-    `;
+    const panel = createAdminNode('div', { className: 'telemetryPanel telemetryPanel--hero' });
+    appendAdminChildren(
+      panel,
+      createAdminNode('div', { className: 'telemetryPanel__label', text: `Аудитория и посещаемость (${sourceLabel})` }),
+      createAdminNode('div', { className: 'telemetryPanel__sub', text: 'В метрика-подобной сводке: уникальные устройства, сессии и повторные визиты' })
+    );
+    const grid = createAdminNode('div', { className: 'telemetryAudienceGrid' });
+    cards.forEach(([label, value, hint]) => {
+      const card = createAdminNode('div', { className: 'telemetryHeroStat' });
+      appendAdminChildren(
+        card,
+        createAdminNode('div', { className: 'telemetryHeroStat__label', text: String(label) }),
+        createAdminNode('div', { className: 'telemetryHeroStat__value', text: String(value) }),
+        createAdminNode('div', { className: 'telemetryHeroStat__hint', text: String(hint || '') })
+      );
+      grid.appendChild(card);
+    });
+    panel.appendChild(grid);
+    return panel;
   }
 
   function pickTelemetrySeries(timeSeries, days) {
@@ -2254,35 +2417,43 @@ function setTelemetryStatus(message, kind) {
   function renderTelemetryDynamics(timeSeries, days, sourceLabel) {
     const picked = pickTelemetrySeries(timeSeries, days);
     const arr = Array.isArray(picked.items) ? picked.items : [];
+    const panel = createAdminNode('div', { className: 'telemetryPanel' });
+    appendAdminChildren(panel, createAdminNode('div', { className: 'telemetryPanel__label', text: `Динамика (${sourceLabel})` }));
     if (!arr.length) {
-      return `
-        <div class="telemetryPanel">
-          <div class="telemetryPanel__label">Динамика (${escapeHtml(sourceLabel)})</div>
-          <div class="muted">Пока нет данных по выбранному периоду</div>
-        </div>
-      `;
+      panel.appendChild(createAdminNode('div', { className: 'muted', text: 'Пока нет данных по выбранному периоду' }));
+      return panel;
     }
+    panel.appendChild(createAdminNode('div', { className: 'telemetryPanel__sub', text: `Сессии, уникальные посетители и ошибки по шкале «${picked.label}»` }));
+    const list = createAdminNode('div', { className: 'telemetryTrendList' });
     const maxSessions = Math.max(...arr.map((item) => Number(item.sessions || 0)), 1);
-    return `
-      <div class="telemetryPanel">
-        <div class="telemetryPanel__label">Динамика (${escapeHtml(sourceLabel)})</div>
-        <div class="telemetryPanel__sub">Сессии, уникальные посетители и ошибки по шкале «${escapeHtml(picked.label)}»</div>
-        <div class="telemetryTrendList">${arr.map((item) => {
-          const width = Math.max(6, Math.round((Number(item.sessions || 0) / maxSessions) * 100));
-          return `
-            <div class="telemetryTrendRow">
-              <div class="telemetryTrendRow__label">${escapeHtml(String(item.label || item.key || '—'))}</div>
-              <div class="telemetryTrendRow__bar"><div class="telemetryTrendRow__fill" style="width:${width}%"></div></div>
-              <div class="telemetryTrendRow__meta">
-                <div>Сессии <b>${escapeHtml(String(item.sessions || 0))}</b></div>
-                <div>Уникальные <b>${escapeHtml(String(item.uniqueVisitors || 0))}</b></div>
-                <div>Ошибки <b>${escapeHtml(String(item.errors || 0))}</b></div>
-              </div>
-            </div>
-          `;
-        }).join('')}</div>
-      </div>
-    `;
+    arr.forEach((item) => {
+      const width = Math.max(6, Math.round((Number(item.sessions || 0) / maxSessions) * 100));
+      const row = createAdminNode('div', { className: 'telemetryTrendRow' });
+      const bar = createAdminNode('div', { className: 'telemetryTrendRow__bar' });
+      const fill = createAdminNode('div', { className: 'telemetryTrendRow__fill' });
+      fill.style.width = `${width}%`;
+      bar.appendChild(fill);
+      const meta = createAdminNode('div', { className: 'telemetryTrendRow__meta' });
+      [
+        ['Сессии', item.sessions || 0],
+        ['Уникальные', item.uniqueVisitors || 0],
+        ['Ошибки', item.errors || 0],
+      ].forEach(([label, value]) => {
+        const line = createAdminNode('div');
+        line.append(label + ' ');
+        line.appendChild(createAdminNode('b', { text: value }));
+        meta.appendChild(line);
+      });
+      appendAdminChildren(
+        row,
+        createAdminNode('div', { className: 'telemetryTrendRow__label', text: String(item.label || item.key || '—') }),
+        bar,
+        meta
+      );
+      list.appendChild(row);
+    });
+    panel.appendChild(list);
+    return panel;
   }
 
 
@@ -2320,7 +2491,7 @@ function setTelemetryStatus(message, kind) {
     const localSync = telemetry && telemetry.getSyncStatus ? telemetry.getSyncStatus() : { pending: summary.pending || 0, totalLocal: summary.total || 0 };
 
     if (elTelemetrySources) {
-      elTelemetrySources.innerHTML = renderTelemetrySources(localSync, remote, sourceLabel);
+      elTelemetrySources.replaceChildren(...renderTelemetrySources(localSync, remote, sourceLabel));
     }
 
     if (elTelemetryStats) {
@@ -2336,53 +2507,69 @@ function setTelemetryStatus(message, kind) {
         { label: 'Ошибок', value: remote ? remoteErrorCount : (metrics.errors || summary.errors || 0), interactive: true, sub: 'Нажмите, чтобы открыть подробный отчёт по ошибкам' },
         { label: 'Не передано с этого устройства', value: summary.pending || 0 },
       ];
-      elTelemetryStats.innerHTML = stats.map((item) => `
-        <div class="telemetryStat${item.interactive ? ' telemetryStat--interactive' : ''}"${item.interactive ? ' role="button" tabindex="0" data-error-report="1"' : ''}>
-          <div class="telemetryStat__label">${escapeHtml(String(item.label))}</div>
-          <div class="telemetryStat__value">${escapeHtml(String(item.value))}</div>
-          ${item.interactive ? '<div class="telemetryStat__sub">' + escapeHtml(String(item.sub || '')) + '</div><button class="telemetryStat__cta" type="button" data-action="open-error-report">Подробнее</button>' : ''}
-        </div>
-      `).join('');
+      const statNodes = stats.map((item) => {
+        const card = createAdminNode('div', {
+          className: `telemetryStat${item.interactive ? ' telemetryStat--interactive' : ''}`,
+          attrs: item.interactive ? { role: 'button', tabindex: '0', 'data-error-report': '1' } : {}
+        });
+        appendAdminChildren(
+          card,
+          createAdminNode('div', { className: 'telemetryStat__label', text: item.label }),
+          createAdminNode('div', { className: 'telemetryStat__value', text: item.value })
+        );
+        if (item.interactive) {
+          appendAdminChildren(
+            card,
+            createAdminNode('div', { className: 'telemetryStat__sub', text: item.sub || '' }),
+            createAdminNode('button', { className: 'telemetryStat__cta', text: 'Подробнее', attrs: { type: 'button', 'data-action': 'open-error-report' } })
+          );
+        }
+        return card;
+      });
+      elTelemetryStats.replaceChildren(...statNodes);
     }
 
     if (elTelemetryAudience) {
-      elTelemetryAudience.innerHTML = renderTelemetryAudience(audience, sourceLabel);
+      elTelemetryAudience.replaceChildren(renderTelemetryAudience(audience, sourceLabel));
     }
 
     if (elTelemetryKpis) {
-      elTelemetryKpis.innerHTML = [
+      elTelemetryKpis.replaceChildren(
         renderTelemetryKpiCard('arStartRate', 'Конверсия запуска AR', formatTelemetryPercent(kpis.arStartRate), `${sessions.arStartedSessions || 0} из ${sessions.arLaunchSessions || 0} сессий с кликом по AR`, sessions.arLaunchSessions || 0, kpis.arStartRate),
         renderTelemetryKpiCard('arCompletionRate', 'Конверсия до заливки', formatTelemetryPercent(kpis.arCompletionRate), `${sessions.arCompletedSessions || 0} из ${sessions.arLaunchSessions || 0} сессий с запуском AR`, sessions.arLaunchSessions || 0, kpis.arCompletionRate),
         renderTelemetryKpiCard('textureInteractionRate', 'Интеракция с текстурами', formatTelemetryPercent(kpis.textureInteractionRate), `${sessions.textureInteractionSessions || 0} из ${sessions.arCompletedSessions || 0} сессий с готовой визуализацией`, sessions.arCompletedSessions || 0, kpis.textureInteractionRate),
         renderTelemetryKpiCard('ctaClickRate', 'CTR «Связь с менеджером»', formatTelemetryPercent(kpis.ctaClickRate), `${sessions.managerCtaSessions || 0} сессий с менеджерским CTA`, sessions.sessions || 0, kpis.ctaClickRate),
         renderTelemetryKpiCard('adminCalibrationUsage', 'Использование AR-калибровки', formatTelemetryPercent(kpis.adminCalibrationUsage), `${sessions.adminCalibrationSessions || 0} админ-сессий с калибровкой`, sessions.adminSessions || 0, kpis.adminCalibrationUsage),
         renderTelemetryKpiCard('errorRatePerSession', 'Ошибок на сессию', formatTelemetryFloat(kpis.errorRatePerSession), `${formatTelemetryPercent(kpis.errorSessionRate)} сессий содержали ошибки`, sessions.sessions || 0, kpis.errorRatePerSession),
-      ].join('');
+      );
     }
 
     if (elTelemetryDynamics) {
-      elTelemetryDynamics.innerHTML = renderTelemetryDynamics(dashboard && dashboard.timeSeries, filters.days, sourceLabel);
+      elTelemetryDynamics.replaceChildren(renderTelemetryDynamics(dashboard && dashboard.timeSeries, filters.days, sourceLabel));
     }
 
     if (elTelemetryBreakdown) {
-      elTelemetryBreakdown.innerHTML = `
-        <div class="telemetryPanel">
-          <div class="telemetryPanel__label">Топ форм по взаимодействиям (${escapeHtml(sourceLabel)})</div>
-          <div class="telemetryPanel__list">${formatTelemetryTopList(dashboard && dashboard.topShapes, 'Пока нет данных по формам')}</div>
-        </div>
-        <div class="telemetryPanel">
-          <div class="telemetryPanel__label">Топ текстур по взаимодействиям (${escapeHtml(sourceLabel)})</div>
-          <div class="telemetryPanel__list">${formatTelemetryTopList(dashboard && dashboard.topTextures, 'Пока нет данных по текстурам')}</div>
-        </div>
-      `;
+      const shapePanel = createAdminNode('div', { className: 'telemetryPanel' });
+      appendAdminChildren(
+        shapePanel,
+        createAdminNode('div', { className: 'telemetryPanel__label', text: `Топ форм по взаимодействиям (${sourceLabel})` }),
+        appendAdminChildren(createAdminNode('div', { className: 'telemetryPanel__list' }), ...formatTelemetryTopList(dashboard && dashboard.topShapes, 'Пока нет данных по формам'))
+      );
+      const texturePanel = createAdminNode('div', { className: 'telemetryPanel' });
+      appendAdminChildren(
+        texturePanel,
+        createAdminNode('div', { className: 'telemetryPanel__label', text: `Топ текстур по взаимодействиям (${sourceLabel})` }),
+        appendAdminChildren(createAdminNode('div', { className: 'telemetryPanel__list' }), ...formatTelemetryTopList(dashboard && dashboard.topTextures, 'Пока нет данных по текстурам'))
+      );
+      elTelemetryBreakdown.replaceChildren(shapePanel, texturePanel);
     }
 
     if (elTelemetryFunnel) {
-      elTelemetryFunnel.innerHTML = renderTelemetryFunnel(dashboard && dashboard.funnel, sourceLabel);
+      elTelemetryFunnel.replaceChildren(renderTelemetryFunnel(dashboard && dashboard.funnel, sourceLabel));
     }
 
     if (elTelemetryDevices) {
-      elTelemetryDevices.innerHTML = renderTelemetryDevices(dashboard && dashboard.deviceSegments, sourceLabel);
+      elTelemetryDevices.replaceChildren(renderTelemetryDevices(dashboard && dashboard.deviceSegments, sourceLabel));
     }
 
     setTelemetryStatus(`Сейчас показаны данные: ${sourceLabel}. Не передано с этого устройства: ${summary.pending || 0}. Последнее обновление общей сводки: ${remote && remote.generatedAt ? formatTelemetryDateTime(remote.generatedAt) : 'нет данных'}.`, (summary.pending || 0) > 0 ? 'warn' : '');
@@ -2391,18 +2578,20 @@ function setTelemetryStatus(message, kind) {
       const parts = [];
       if (remote) {
         const topErrors = Array.isArray(remote.topErrors) ? remote.topErrors.slice(0, 5) : [];
-        parts.push(`
-          <div class="hint mtSm">
-            <b>Сводка с сервера</b><br />
-            Пакеты данных: ${escapeHtml(String(remoteBatchCount || 0))}<br />
-            Главные события: ${escapeHtml(remoteTop || '—')}<br />
-            Частые ошибки: ${escapeHtml(topErrors.map((entry) => `${telemetryEventLabel(entry.name)} × ${entry.count}`).join(' · ') || '—')}<br />
-            Главные события этого браузера: ${escapeHtml(topNames || '—')}
-          </div>
-        `);
+        const hint = createAdminNode('div', { className: 'hint mtSm' });
+        hint.appendChild(createAdminNode('b', { text: 'Сводка с сервера' }));
+        hint.appendChild(createAdminNode('br'));
+        hint.append(`Пакеты данных: ${remoteBatchCount || 0}`);
+        hint.appendChild(createAdminNode('br'));
+        hint.append(`Главные события: ${remoteTop || '—'}`);
+        hint.appendChild(createAdminNode('br'));
+        hint.append(`Частые ошибки: ${topErrors.map((entry) => `${telemetryEventLabel(entry.name)} × ${entry.count}`).join(' · ') || '—'}`);
+        hint.appendChild(createAdminNode('br'));
+        hint.append(`Главные события этого браузера: ${topNames || '—'}`);
+        parts.push(hint);
       }
       if (!recent.length) {
-        parts.push('<div class="muted">Событий на этом устройстве по выбранным фильтрам пока нет.</div>');
+        parts.push(createAdminNode('div', { className: 'muted', text: 'Событий на этом устройстве по выбранным фильтрам пока нет.' }));
       } else {
         recent.slice().reverse().forEach((item) => {
           const kind = item.kind === 'error' ? 'telemetryItem telemetryItem--error' : 'telemetryItem';
@@ -2410,18 +2599,22 @@ function setTelemetryStatus(message, kind) {
           if (item.iso) meta.push(item.iso.replace('T', ' ').replace('Z', ''));
           if (item.sessionId) meta.push(item.sessionId);
           if (item.props && item.props.deviceType) meta.push(telemetryDeviceLabel(item.props.deviceType));
-          parts.push(`
-            <div class="${kind}">
-              <div class="telemetryItem__head">
-                <div class="telemetryItem__name">${escapeHtml(telemetryEventLabel(item.name))}</div>
-                <div class="telemetryItem__meta">${escapeHtml(meta.join(' · '))}</div>
-              </div>
-              <div class="telemetryItem__body">${escapeHtml(JSON.stringify(item.props || {}, null, 2))}</div>
-            </div>
-          `);
+          const wrapper = createAdminNode('div', { className: kind });
+          const head = createAdminNode('div', { className: 'telemetryItem__head' });
+          appendAdminChildren(
+            head,
+            createAdminNode('div', { className: 'telemetryItem__name', text: telemetryEventLabel(item.name) }),
+            createAdminNode('div', { className: 'telemetryItem__meta', text: meta.join(' · ') })
+          );
+          appendAdminChildren(
+            wrapper,
+            head,
+            createAdminNode('div', { className: 'telemetryItem__body', text: JSON.stringify(item.props || {}, null, 2) })
+          );
+          parts.push(wrapper);
         });
       }
-      elTelemetryList.innerHTML = parts.join('');
+      elTelemetryList.replaceChildren(...parts);
     }
   }
 
@@ -3280,20 +3473,36 @@ try {
   function renderUploadQueue() {
     if (!elUploadTbody) return;
     const tasks = state.uploadTasks || [];
-    elUploadTbody.innerHTML = '';
+    elUploadTbody.replaceChildren();
     const frag = document.createDocumentFragment();
     for (const t of tasks) {
       const tr = document.createElement('tr');
       const pct = (t.totalBytes > 0) ? Math.round((t.sentBytes / t.totalBytes) * 100) : (t.status === 'done' ? 100 : 0);
       const st = t.status || 'pending';
       const stClass = st === 'done' ? 'uploadOk' : (st === 'error' ? 'uploadErr' : (st === 'uploading' ? 'uploadWarn' : ''));
-      tr.innerHTML = `
-        <td><span class="uploadPill">${escapeHtml((t.textureId ? (t.textureId + ' / ') : '') + (t.mapType || '?'))}</span></td>
-        <td>${escapeHtml(t.fileName || '')}<div class="muted mono">${escapeHtml((t.sizeMB || 0).toFixed ? t.sizeMB.toFixed(2) : '')} MB</div></td>
-        <td class="mono">${escapeHtml(t.key || '')}</td>
-        <td>${escapeHtml(String(pct))}%</td>
-        <td><span class="${stClass}">${escapeHtml(st)}</span>${t.error ? `<div class="muted">${escapeHtml(t.error)}</div>` : ''}</td>
-      `;
+
+      const tdType = createAdminNode('td');
+      const pill = createAdminNode('span', {
+        className: 'uploadPill',
+        text: (t.textureId ? (t.textureId + ' / ') : '') + (t.mapType || '?')
+      });
+      tdType.appendChild(pill);
+
+      const tdFile = createAdminNode('td');
+      appendAdminChildren(tdFile, createAdminNode('span', { text: t.fileName || '' }));
+      const sizeLine = createAdminNode('div', { className: 'muted mono' });
+      const sizeMb = (t.sizeMB || 0).toFixed ? t.sizeMB.toFixed(2) : '';
+      sizeLine.textContent = `${sizeMb} MB`;
+      tdFile.appendChild(sizeLine);
+
+      const tdKey = createAdminNode('td', { className: 'mono', text: t.key || '' });
+      const tdPct = createAdminNode('td', { text: `${pct}%` });
+      const tdStatus = createAdminNode('td');
+      const statusEl = createAdminNode('span', { className: stClass, text: st });
+      tdStatus.appendChild(statusEl);
+      if (t.error) tdStatus.appendChild(createAdminNode('div', { className: 'muted', text: t.error }));
+
+      appendAdminChildren(tr, tdType, tdFile, tdKey, tdPct, tdStatus);
       frag.appendChild(tr);
     }
     elUploadTbody.appendChild(frag);
@@ -3763,6 +3972,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
   function showTexModal(open) {
     if (!elTexModal) return;
     elTexModal.hidden = !open;
+    syncAdminModalBodyState();
   }
 
   function closeTexModal() {
@@ -4151,6 +4361,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
   function showBulkModal(open) {
     if (!elBulkModal) return;
     elBulkModal.hidden = !open;
+    syncAdminModalBodyState();
   }
 
   function closeBulkModal() {
@@ -4167,27 +4378,57 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
     row.dataset.value = String(value);
     row.dataset.apply = '0';
 
-    row.innerHTML = `
-      <div class="paramTop">
-        <div class="paramLabel">
-          <label class="checkbox" title="Применить этот параметр к целевым текстурам">
-            <input type="checkbox" data-action="apply" />
-            <span>Применять</span>
-          </label>
-          <span style="margin-left:10px;">${escapeHtml(schema.label)} <span class="paramHelp" title="${escapeHtml(schema.help)}">i</span></span>
-        </div>
-        <div class="paramMeta">default: ${escapeHtml(defaultValue)}</div>
-      </div>
-      <div class="paramControls">
-        <input type="range" min="${escapeHtml(schema.min)}" max="${escapeHtml(schema.max)}" step="${escapeHtml(schema.step)}" value="${escapeHtml(value)}" />
-        <input type="number" step="${escapeHtml(schema.step)}" min="${escapeHtml(schema.min)}" max="${escapeHtml(schema.max)}" value="${escapeHtml(value)}" />
-      </div>
-      <div class="paramNote">Подсказка: наведите на <b>i</b>. Отметьте «Применять», чтобы параметр применился массово.</div>
-    `;
+    const top = createAdminNode('div', { className: 'paramTop' });
+    const labelWrap = createAdminNode('div', { className: 'paramLabel' });
+    const checkboxLabel = createAdminNode('label', {
+      className: 'checkbox',
+      title: 'Применить этот параметр к целевым текстурам'
+    });
+    const cb = createAdminNode('input', { attrs: { type: 'checkbox', 'data-action': 'apply' } });
+    const cbText = createAdminNode('span', { text: 'Применять' });
+    appendAdminChildren(checkboxLabel, cb, cbText);
 
-    const cb = row.querySelector('input[data-action="apply"]');
-    const range = row.querySelector('input[type="range"]');
-    const numInput = row.querySelector('input[type="number"]');
+    const nameWrap = createAdminNode('span');
+    nameWrap.style.marginLeft = '10px';
+    nameWrap.append(document.createTextNode(String(schema.label || '')));
+    nameWrap.append(document.createTextNode(' '));
+    nameWrap.appendChild(createAdminNode('span', {
+      className: 'paramHelp',
+      title: schema.help || '',
+      text: 'i'
+    }));
+    appendAdminChildren(labelWrap, checkboxLabel, nameWrap);
+
+    const meta = createAdminNode('div', { className: 'paramMeta', text: `default: ${defaultValue}` });
+    appendAdminChildren(top, labelWrap, meta);
+
+    const controls = createAdminNode('div', { className: 'paramControls' });
+    const range = createAdminNode('input', {
+      attrs: {
+        type: 'range',
+        min: String(schema.min),
+        max: String(schema.max),
+        step: String(schema.step),
+        value: String(value)
+      }
+    });
+    const numInput = createAdminNode('input', {
+      attrs: {
+        type: 'number',
+        step: String(schema.step),
+        min: String(schema.min),
+        max: String(schema.max),
+        value: String(value)
+      }
+    });
+    appendAdminChildren(controls, range, numInput);
+
+    const note = createAdminNode('div', { className: 'paramNote' });
+    note.append('Подсказка: наведите на ');
+    note.appendChild(createAdminNode('b', { text: 'i' }));
+    note.append(' . Отметьте «Применять», чтобы параметр применился массово.');
+
+    appendAdminChildren(row, top, controls, note);
 
     const onSync = (v) => {
       const n = Number(v);
@@ -5325,4 +5566,5 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
   }
 
   init();
+  syncAdminSwUpdateState();
 })();

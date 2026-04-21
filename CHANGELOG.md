@@ -1,3 +1,37 @@
+## 2026-04-21 — Patch f24db
+
+- Усилен `scripts/release_check.py` для admin/periphery: добавлены guards для `js/palette-validator.js` и ключевых admin render-зон (`upload queue`, `bulk params`, основные telemetry blocks).
+- Release-check теперь валит релиз, если в `palette-validator.js` появятся unsafe DOM-паттерны или исчезнут критичные safe URL helper-функции.
+- Добавлена проверка, что ключевые admin render-функции остаются без `innerHTML`/`outerHTML`/`insertAdjacentHTML` и продолжают использовать безопасный render-path.
+- `docs/RELEASE.md` синхронизирован с новым покрытием release-check.
+- Release token: `20260421-f24db`
+
+## 2026-04-21 — Patch f24da
+
+- Service Worker update policy стала умнее: reload теперь блокируется не только при недавнем действии, но и при открытых dialog/modal-состояниях и явном page hold state.
+- `sw-register.js` теперь учитывает visible dialog-like UI, explicit `window.__SW_UPDATE_STATE__` / `data-sw-update-hold`, а также активный editable focus в admin-like context.
+- В `admin/admin.js` добавлены явные сигналы dirty-state для SW update flow: открытые modal-окна и активное редактирование помечают страницу как временно небезопасную для reload.
+- Для texture/bulk/map/telemetry/confirm modal состояний dirty-state синхронизируется при open/close и при focus/input/change событиях.
+- Admin по-прежнему не регистрирует SW намеренно; добавленные page-state сигналы делают поведение безопаснее для текущего и будущих shared runtime сценариев.
+- Release token: `20260421-f24da`
+
+## 2026-04-21 — Patch f24cz
+
+- Усилен hardening `palette-validator.js` без вмешательства в основной AR/runtime.
+- Убраны оставшиеся `innerHTML` там, где они были не нужны: summary/results reset, item meta и shape fallback option теперь собираются через DOM API.
+- Добавлен safe URL handling для preview/thumb/open-link в валидаторе: небезопасные или битые URL fail-closed и не попадают напрямую в `img.src`/`href`.
+- Выровнен стиль валидатора с public/admin runtime: безопасная установка preview, аккуратное состояние пустого thumb и disabled-ссылка для невалидного asset URL.
+- Release token: `20260421-f24da`
+
+## 2026-04-21 — Patch f24cy
+
+- Добит admin DOM/render hardening в оставшихся structured/content-driven зонах без затрагивания AR-ядра.
+- `renderUploadQueue()` переведён с `tr.innerHTML` на безопасную DOM-сборку через `createElement`/`textContent`/`appendChild`.
+- `buildBulkParamRow()` переведён с `row.innerHTML` на безопасную DOM-сборку.
+- Основные telemetry render blocks в админке переведены с `innerHTML` на DOM API: summary, error report, sources, stats, KPI, audience, dynamics, breakdown, funnel, devices, recent list.
+- Статусы, бейджи и технические детали telemetry теперь формируются через DOM-ноды, без строковой HTML-сборки данных.
+- Release token: `20260421-f24da`
+
 ## 20260421-f24cu — admin dom/url hardening
 - Release token: `20260421-f24cu`
 - Closed content-driven `innerHTML` usage in admin shape cards, texture cards, bucket cards, and texture settings preview UI by rebuilding those sections with DOM APIs (`createElement`, `textContent`, `appendChild`).

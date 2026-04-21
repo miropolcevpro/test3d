@@ -105,6 +105,40 @@ PUBLIC_RUNTIME_SMOKE_PATTERNS = [
     ('renderQuickLaunchCards uses textContent', r'function\s+renderQuickLaunchCards\s*\([^)]*\)\s*\{[\s\S]*?textContent\s*='),
 ]
 
+PALETTE_VALIDATOR_FILE = 'js/palette-validator.js'
+
+PALETTE_VALIDATOR_CRITICAL_SYMBOLS = [
+    'normalizeValidatorSafeUrl',
+    'setValidatorSafeImageSource',
+    'setValidatorSafeLinkHref',
+    'makeSummary',
+    'buildItemCard',
+    'renderReport',
+]
+
+PALETTE_VALIDATOR_SMOKE_PATTERNS = [
+    ('palette validator buildItemCard uses safe image source', r'function\s+buildItemCard\s*\([^)]*\)\s*\{[\s\S]*?setValidatorSafeImageSource\s*\('),
+    ('palette validator buildItemCard uses safe link href', r'function\s+buildItemCard\s*\([^)]*\)\s*\{[\s\S]*?setValidatorSafeLinkHref\s*\('),
+    ('palette validator makeSummary builds DOM nodes', r'function\s+makeSummary\s*\([^)]*\)\s*\{[\s\S]*?createElement\s*\('),
+    ('palette validator renderReport resets DOM safely', r'function\s+renderReport\s*\([^)]*\)\s*\{[\s\S]*?replaceChildren\s*\('),
+]
+
+ADMIN_PERIPHERY_FILE = 'admin/admin.js'
+
+ADMIN_PERIPHERY_RENDER_GUARDS = [
+    ('renderUploadQueue', ['createElement', 'appendChild']),
+    ('buildBulkParamRow', ['createElement', 'appendChild']),
+    ('renderTelemetrySources', ['appendChild']),
+    ('renderTelemetryErrorReportGroups', ['appendChild']),
+    ('renderTelemetryErrorReport', ['replaceChildren']),
+    ('renderTelemetryKpiCard', ['createAdminNode']),
+    ('renderTelemetryFunnel', ['appendChild']),
+    ('renderTelemetryDevices', ['appendChild']),
+    ('renderTelemetryAudience', ['appendChild']),
+    ('renderTelemetryDynamics', ['appendChild']),
+    ('renderTelemetryPanel', ['replaceChildren']),
+]
+
 
 def rel(path: Path) -> str:
     return path.relative_to(ROOT).as_posix()
@@ -265,6 +299,24 @@ def collect_declared_identifiers(js_text: str) -> set[str]:
     return names
 
 
+def extract_function_block(js_text: str, name: str) -> str | None:
+    match = re.search(rf'(?:async\s+)?function\s+{re.escape(name)}\s*\([^)]*\)\s*\{{', js_text)
+    if not match:
+        return None
+    start = match.start()
+    open_index = match.end() - 1
+    depth = 0
+    for idx in range(open_index, len(js_text)):
+        ch = js_text[idx]
+        if ch == '{':
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0:
+                return js_text[start:idx + 1]
+    return None
+
+
 def check_admin_no_undef() -> None:
     js_text = read_admin_js_text()
     declared = collect_declared_identifiers(js_text)
@@ -323,6 +375,56 @@ def check_public_runtime_flow_smoke() -> None:
     if missing_patterns:
         fail('Public runtime smoke-check failed: ' + '; '.join(missing_patterns))
     ok('Public runtime helper smoke-check passed')
+
+def check_palette_validator_dom_safety() -> None:
+    js_text = (ROOT / PALETTE_VALIDATOR_FILE).read_text(encoding='utf-8')
+    violations: list[str] = []
+    if 'insertAdjacentHTML' in js_text:
+        violations.append('insertAdjacentHTML is forbidden in palette-validator.js')
+    if 'outerHTML' in js_text:
+        violations.append('outerHTML is forbidden in palette-validator.js')
+    for match in re.finditer(r'innerHTML\s*=\s*([^;\n]+)', js_text):
+        expr = match.group(1).strip()
+        if expr in {"''", '""', '``'}:
+            continue
+        line = js_text.count('\n', 0, match.start()) + 1
+        snippet = expr[:80].replace('\n', ' ')
+        violations.append(f'{PALETTE_VALIDATOR_FILE}:{line}: unsafe innerHTML assignment ({snippet})')
+    if violations:
+        fail('Palette validator DOM safety check failed: ' + '; '.join(violations))
+    ok('Palette validator DOM safety guard passed')
+
+
+def check_palette_validator_smoke() -> None:
+    js_text = (ROOT / PALETTE_VALIDATOR_FILE).read_text(encoding='utf-8')
+    declared = collect_declared_identifiers(js_text)
+    missing_symbols = [name for name in PALETTE_VALIDATOR_CRITICAL_SYMBOLS if name not in declared]
+    if missing_symbols:
+        fail('palette-validator.js missing critical symbols: ' + ', '.join(sorted(missing_symbols)))
+    missing_patterns = [label for label, pattern in PALETTE_VALIDATOR_SMOKE_PATTERNS if not re.search(pattern, js_text, re.DOTALL)]
+    if missing_patterns:
+        fail('palette-validator.js smoke-check failed: ' + '; '.join(missing_patterns))
+    ok('Palette validator smoke-check passed')
+
+
+def check_admin_periphery_render_guards() -> None:
+    js_text = read_admin_js_text()
+    problems: list[str] = []
+    for name, required_tokens in ADMIN_PERIPHERY_RENDER_GUARDS:
+        block = extract_function_block(js_text, name)
+        if not block:
+            problems.append(f'missing function {name}')
+            continue
+        for banned in ('innerHTML', 'insertAdjacentHTML', 'outerHTML'):
+            if banned in block:
+                problems.append(f'{name} contains forbidden {banned}')
+        for token in required_tokens:
+            if token not in block:
+                problems.append(f'{name} missing expected safe render token {token}')
+    if problems:
+        fail('admin periphery render guard failed: ' + '; '.join(problems))
+    ok('Admin periphery render guard passed for upload queue, bulk params, and telemetry blocks')
+
 
 def check_js_syntax() -> None:
     node = shutil.which('node')
@@ -400,8 +502,11 @@ def main() -> None:
     check_js_syntax()
     check_admin_no_undef()
     check_admin_flow_smoke()
+    check_admin_periphery_render_guards()
     check_public_runtime_dom_safety()
     check_public_runtime_flow_smoke()
+    check_palette_validator_dom_safety()
+    check_palette_validator_smoke()
     check_sw_import_chain()
     check_release_token_alignment()
     check_modular_docs()

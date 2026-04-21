@@ -159,6 +159,56 @@ function badge(text) {
   return d;
 }
 
+
+
+function normalizeValidatorSafeUrl(input, options = {}) {
+  const allowDataImage = options.allowDataImage === true;
+  const allowBlob = options.allowBlob === true;
+  const raw = String(input ?? '').trim();
+  if (!raw) return '';
+  if (/[\u0000-\u001f\u007f]/.test(raw)) return '';
+
+  if (/^data:/i.test(raw)) {
+    if (!allowDataImage) return '';
+    return /^data:image\//i.test(raw) ? raw : '';
+  }
+  if (/^blob:/i.test(raw)) {
+    return allowBlob ? raw : '';
+  }
+  if (/^javascript:/i.test(raw) || /^vbscript:/i.test(raw) || /^file:/i.test(raw)) return '';
+
+  try {
+    const resolved = new URL(raw, window.location.href);
+    const protocol = String(resolved.protocol || '').toLowerCase();
+    if (protocol === 'http:' || protocol === 'https:') return resolved.toString();
+    return '';
+  } catch {
+    return '';
+  }
+}
+
+function setValidatorSafeImageSource(img, url, options = {}) {
+  if (!img) return '';
+  const safeUrl = normalizeValidatorSafeUrl(url, options);
+  if (safeUrl) {
+    img.src = safeUrl;
+  } else {
+    try { img.removeAttribute('src'); } catch (_) {}
+  }
+  return safeUrl;
+}
+
+function setValidatorSafeLinkHref(link, url, options = {}) {
+  if (!link) return '';
+  const safeUrl = normalizeValidatorSafeUrl(url, options);
+  if (safeUrl) {
+    link.href = safeUrl;
+  } else {
+    try { link.removeAttribute('href'); } catch (_) {}
+  }
+  return safeUrl;
+}
+
 function cacheBust(url) {
   try {
     const u = new URL(url);
@@ -346,7 +396,7 @@ async function getImageDims(url) {
     };
 
     const timer = setTimeout(() => {
-      try { img.src = ''; } catch { /* noop */ }
+      try { img.removeAttribute('src'); } catch { /* noop */ }
       finish(NaN, NaN);
     }, 20000);
 
@@ -358,7 +408,7 @@ async function getImageDims(url) {
       clearTimeout(timer);
       finish(NaN, NaN);
     };
-    img.src = cacheBust(url);
+    setValidatorSafeImageSource(img, cacheBust(url), { allowDataImage: true, allowBlob: true });
   });
 }
 
@@ -395,13 +445,14 @@ function classifySizeAndDims(kind, sizeBytes, dims) {
 }
 
 function makeSummary({ itemsTotal, itemsShown, assetsChecked, ok, warn, err }) {
-  els.summary.innerHTML = '';
-  els.summary.appendChild(pill(`Текстур: ${itemsTotal}`));
-  els.summary.appendChild(pill(`Показано: ${itemsShown}`));
-  els.summary.appendChild(pill(`Файлов проверено: ${assetsChecked}`));
-  els.summary.appendChild(pill(`✅ OK: ${ok}`));
-  els.summary.appendChild(pill(`⚠️ Предупр.: ${warn}`));
-  els.summary.appendChild(pill(`❌ Ошибок: ${err}`));
+  els.summary.replaceChildren(
+    pill(`Текстур: ${itemsTotal}`),
+    pill(`Показано: ${itemsShown}`),
+    pill(`Файлов проверено: ${assetsChecked}`),
+    pill(`✅ OK: ${ok}`),
+    pill(`⚠️ Предупр.: ${warn}`),
+    pill(`❌ Ошибок: ${err}`),
+  );
 }
 
 function buildItemCard(item) {
@@ -425,10 +476,17 @@ function buildItemCard(item) {
 
   const meta = document.createElement('div');
   meta.className = 'pv-meta';
-  meta.innerHTML = `
-    <div>tileSizeM: <code>${Number(item.tileSizeM?.w).toFixed(3)} × ${Number(item.tileSizeM?.h).toFixed(3)}</code></div>
-    <div>uvScale: <code>${item.uvScaleText}</code></div>
-  `;
+  const metaTile = document.createElement('div');
+  metaTile.append('tileSizeM: ');
+  const metaTileCode = document.createElement('code');
+  metaTileCode.textContent = `${Number(item.tileSizeM?.w).toFixed(3)} × ${Number(item.tileSizeM?.h).toFixed(3)}`;
+  metaTile.appendChild(metaTileCode);
+  const metaUv = document.createElement('div');
+  metaUv.append('uvScale: ');
+  const metaUvCode = document.createElement('code');
+  metaUvCode.textContent = item.uvScaleText;
+  metaUv.appendChild(metaUvCode);
+  meta.append(metaTile, metaUv);
   card.appendChild(meta);
 
   const notes = document.createElement('div');
@@ -448,7 +506,8 @@ function buildItemCard(item) {
     thumb.loading = 'lazy';
     thumb.alt = a.kind;
     if (a.isImage && a.check.ok && (a.kind === 'preview' || a.kind === 'albedo')) {
-      thumb.src = cacheBust(a.url);
+      const safeThumbUrl = setValidatorSafeImageSource(thumb, cacheBust(a.url), { allowDataImage: true, allowBlob: true });
+      if (!safeThumbUrl) thumb.classList.add('pv-thumb--empty');
     }
     row.appendChild(thumb);
 
@@ -483,10 +542,17 @@ function buildItemCard(item) {
     const actions = document.createElement('div');
     actions.className = 'pv-asset__actions';
     const open = document.createElement('a');
-    open.href = a.url;
     open.target = '_blank';
     open.rel = 'noreferrer noopener';
     open.textContent = 'Открыть';
+    const safeOpenUrl = setValidatorSafeLinkHref(open, a.url, { allowDataImage: true, allowBlob: true });
+    if (!safeOpenUrl) {
+      open.setAttribute('aria-disabled', 'true');
+      open.className = 'is-disabled';
+      open.tabIndex = -1;
+      open.removeAttribute('target');
+      open.removeAttribute('rel');
+    }
     actions.appendChild(open);
     row.appendChild(actions);
 
@@ -713,7 +779,7 @@ async function validatePalette(paletteUrl, opts) {
 }
 
 function renderReport(report, opts) {
-  els.results.innerHTML = '';
+  els.results.replaceChildren();
 
   const itemsToRender = report.items.filter((it) => {
     if (!opts.onlyIssues) return true;
@@ -802,7 +868,7 @@ async function initShapes() {
   try {
     const shapes = await fetchJson('shapes.json');
     const list = Array.isArray(shapes) ? shapes : (Array.isArray(shapes?.shapes) ? shapes.shapes : []);
-    els.shape.innerHTML = '';
+    els.shape.replaceChildren();
     list.forEach((s) => {
       if (!s || typeof s !== 'object' || !s.id) return;
       const opt = document.createElement('option');
@@ -816,7 +882,11 @@ async function initShapes() {
     }
   } catch {
     // If shapes.json not readable, user can paste URL manually.
-    els.shape.innerHTML = '<option value="">(не удалось загрузить shapes.json)</option>';
+    els.shape.replaceChildren();
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = '(не удалось загрузить shapes.json)';
+    els.shape.appendChild(opt);
   }
 }
 
@@ -839,8 +909,8 @@ els.btnRun.addEventListener('click', async () => {
     return;
   }
 
-  els.results.innerHTML = '';
-  els.summary.innerHTML = '';
+  els.results.replaceChildren();
+  els.summary.replaceChildren();
   setHint('Проверяю…');
 
   try {
