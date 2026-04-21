@@ -1,3 +1,5 @@
+import { applySafeBackgroundImage, normalizeSafeContentUrl, setSafeImageSource } from './utils.js';
+
 const detailHeroGalleryCache = new Map();
 
 
@@ -58,9 +60,9 @@ function withRuntimeAssetVersion(url) {
 function renderDetailHeroFallback(detailHeroEl, shape) {
   if (!detailHeroEl) return;
   detailHeroEl.dataset.heroHasResolvedGallery = '0';
-  detailHeroEl.innerHTML = '';
+  detailHeroEl.replaceChildren();
   const fallback = withRuntimeAssetVersion(shape?.hero || shape?.icon || '');
-  detailHeroEl.style.backgroundImage = fallback ? `url(${fallback})` : 'none';
+  applySafeBackgroundImage(detailHeroEl, fallback);
 }
 
 function renderDetailHeroCarousel(detailHeroEl, gallery = []) {
@@ -68,28 +70,48 @@ function renderDetailHeroCarousel(detailHeroEl, gallery = []) {
   const items = Array.isArray(gallery) ? gallery.filter(Boolean) : [];
   if (!items.length) {
     detailHeroEl.dataset.heroHasResolvedGallery = '0';
-    detailHeroEl.innerHTML = '';
+    detailHeroEl.replaceChildren();
     detailHeroEl.style.backgroundImage = 'none';
     return;
   }
 
   detailHeroEl.dataset.heroHasResolvedGallery = '1';
   detailHeroEl.style.backgroundImage = 'none';
-  detailHeroEl.innerHTML = `
-    <div class="heroCarousel">
-      <div class="heroTrack" id="heroTrack">
-        ${items.map((src, idx) => `
-          <div class="heroSlide" data-idx="${idx}">
-            <img src="${src}" alt="">
-          </div>`).join('')}
-      </div>
-      <div class="heroDots" id="heroDots">
-        ${items.map((_, idx) => `<div class="heroDot ${idx===0?'active':''}" data-idx="${idx}"></div>`).join('')}
-      </div>
-    </div>
-  `;
-  const track = detailHeroEl.querySelector('#heroTrack');
-  const dots = [...detailHeroEl.querySelectorAll('.heroDot')];
+  detailHeroEl.replaceChildren();
+
+  const carousel = document.createElement('div');
+  carousel.className = 'heroCarousel';
+
+  const track = document.createElement('div');
+  track.className = 'heroTrack';
+
+  const dotsWrap = document.createElement('div');
+  dotsWrap.className = 'heroDots';
+
+  const dots = [];
+  items.forEach((src, idx) => {
+    const slide = document.createElement('div');
+    slide.className = 'heroSlide';
+    slide.dataset.idx = String(idx);
+
+    const img = document.createElement('img');
+    setSafeImageSource(img, src);
+    img.alt = '';
+    slide.appendChild(img);
+    track.appendChild(slide);
+
+    const dot = document.createElement('div');
+    dot.className = 'heroDot';
+    if (idx === 0) dot.classList.add('active');
+    dot.dataset.idx = String(idx);
+    dots.push(dot);
+    dotsWrap.appendChild(dot);
+  });
+
+  carousel.appendChild(track);
+  carousel.appendChild(dotsWrap);
+  detailHeroEl.appendChild(carousel);
+
   const activateDot = (i) => dots.forEach((d, di) => d.classList.toggle('active', di === i));
   track.addEventListener('scroll', () => {
     const w = track.clientWidth || 1;
@@ -99,7 +121,7 @@ function renderDetailHeroCarousel(detailHeroEl, gallery = []) {
 }
 
 async function probeAssetExists(url) {
-  const src = withRuntimeAssetVersion(url);
+  const src = normalizeSafeContentUrl(withRuntimeAssetVersion(url));
   if (!src) return false;
 
   try {
@@ -121,7 +143,7 @@ async function probeAssetExists(url) {
       };
       img.onload = () => finish(true);
       img.onerror = () => finish(false);
-      img.src = src;
+      setSafeImageSource(img, src);
     });
   } catch (_) {
     return false;
@@ -235,7 +257,7 @@ export function renderCatalog(list, ctx = {}) {
     const card = document.createElement('button');
     card.type = 'button';
     card.className = 'catalogCard catalogCard--square';
-    card.style.backgroundImage = `url(${shape.icon || shape.hero || ''})`;
+    applySafeBackgroundImage(card, shape.icon || shape.hero || '');
     card.setAttribute('aria-label', shape.name || shape.id || 'Форма');
     card.addEventListener('click', () => {
       if (typeof onShapeSelect === 'function') onShapeSelect(shape.id, shape);
@@ -278,7 +300,7 @@ export function renderDetailHero(detailHeroEl, shape) {
 
 export function renderDetailTech(detailTechEl, techBodyEl, btnTechToggleEl, shape) {
   if (!detailTechEl) return;
-  detailTechEl.innerHTML = '';
+  detailTechEl.replaceChildren();
   const tech = shape?.tech || {
     'Толщина': '—',
     'Назначение': '—',
@@ -290,13 +312,23 @@ export function renderDetailTech(detailTechEl, techBodyEl, btnTechToggleEl, shap
     if (/^\s*Толщина/.test(key)) {
       const row = document.createElement('div');
       row.className = 'kvRow kvRowFull';
-      row.innerHTML = `<div class="kvFull">${key.replace(/\s*,\s*мм\s*$/i,'')} - ${val.replace(/\s*мм\s*$/i,'')}мм</div>`;
+      const full = document.createElement('div');
+      full.className = 'kvFull';
+      full.textContent = `${key.replace(/\s*,\s*мм\s*$/i, '')} - ${val.replace(/\s*мм\s*$/i, '')}мм`;
+      row.appendChild(full);
       detailTechEl.appendChild(row);
       continue;
     }
     const row = document.createElement('div');
     row.className = 'kvRow';
-    row.innerHTML = `<div class="kvK">${key}</div><div class="kvV">${val}</div>`;
+    const keyEl = document.createElement('div');
+    keyEl.className = 'kvK';
+    keyEl.textContent = key;
+    const valEl = document.createElement('div');
+    valEl.className = 'kvV';
+    valEl.textContent = val;
+    row.appendChild(keyEl);
+    row.appendChild(valEl);
     detailTechEl.appendChild(row);
   }
   if (techBodyEl) techBodyEl.hidden = true;
@@ -306,7 +338,7 @@ export function renderDetailTech(detailTechEl, techBodyEl, btnTechToggleEl, shap
 export function buildShapePickerList(ctx = {}) {
   const { UI, state, onShapeSelect, setShapePickerOpen } = ctx;
   if (!UI || !UI.shapePickerList) return;
-  UI.shapePickerList.innerHTML = '';
+  UI.shapePickerList.replaceChildren();
 
   const shapes = Array.isArray(state?.shapes) ? state.shapes : [];
   for (const s of shapes) {
@@ -321,12 +353,21 @@ export function buildShapePickerList(ctx = {}) {
     const icon = (s.hero ? s.hero : (s.icon ? s.icon : ''));
     const name = s.name ? s.name : s.id;
 
-    btn.innerHTML = `
-      <div class="shapePickerThumbWrap">
-        <img class="shapePickerThumb" src="${icon}" alt="" loading="lazy">
-      </div>
-      <div class="shapePickerName">${name}</div>
-    `;
+    const thumbWrap = document.createElement('div');
+    thumbWrap.className = 'shapePickerThumbWrap';
+    const thumb = document.createElement('img');
+    thumb.className = 'shapePickerThumb';
+    thumb.alt = '';
+    thumb.loading = 'lazy';
+    if (icon) setSafeImageSource(thumb, icon);
+    thumbWrap.appendChild(thumb);
+
+    const nameEl = document.createElement('div');
+    nameEl.className = 'shapePickerName';
+    nameEl.textContent = name;
+
+    btn.appendChild(thumbWrap);
+    btn.appendChild(nameEl);
 
     btn.addEventListener('click', async () => {
       if (typeof setShapePickerOpen === 'function') setShapePickerOpen(false);

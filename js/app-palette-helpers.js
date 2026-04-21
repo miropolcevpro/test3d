@@ -1,3 +1,5 @@
+import { applySafeBackgroundImage, normalizeSafeContentUrl, setSafeImageSource } from './utils.js';
+
 export function getDirectPaletteUrlForShape(shape, surfacePaletteBaseUrl = '') {
   if (!shape || !shape.id) return '';
   if (shape.surfacePalette) return shape.surfacePalette;
@@ -97,7 +99,12 @@ export function prefetchImageUrls(urls, concurrency = 3) {
       img.onload = () => resolve({ url, ok: true });
       img.onerror = () => resolve({ url, ok: false });
       try { img.referrerPolicy = 'no-referrer'; } catch (_) {}
-      img.src = url;
+      const safeUrl = normalizeSafeContentUrl(url, { allowBlob: true, allowData: true });
+      if (!safeUrl) {
+        resolve({ url, ok: false });
+        return;
+      }
+      setSafeImageSource(img, safeUrl, { allowBlob: true, allowData: true });
     });
 
     const workers = new Array(Math.max(1, Math.min(concurrency, 6))).fill(0).map(async () => {
@@ -124,8 +131,8 @@ export function ensureLazySwatchObserver() {
       const el = entry.target;
       const bg = el?.dataset?.bg;
       if (bg && !el.dataset.bgLoaded) {
-        el.style.backgroundImage = `url(${bg})`;
-        el.dataset.bgLoaded = '1';
+        const applied = applySafeBackgroundImage(el, bg, { allowBlob: true, allowData: true });
+        if (applied) el.dataset.bgLoaded = '1';
       }
       lazySwatchObserver.unobserve(el);
     });
@@ -159,10 +166,10 @@ export function renderColorRow(container, tiles, opts = {}) {
     sw.className = 'swatch';
     sw.dataset.tileId = String(tile.id);
     if (tile && tile.shapeId) sw.dataset.shapeId = String(tile.shapeId);
-    const bgUrl = getTilePreviewUrl(tile);
+    const bgUrl = normalizeSafeContentUrl(getTilePreviewUrl(tile), { allowBlob: true, allowData: true });
     sw.dataset.bg = bgUrl;
     if (idx < eagerCount && bgUrl) {
-      sw.style.backgroundImage = `url(${bgUrl})`;
+      applySafeBackgroundImage(sw, bgUrl, { allowBlob: true, allowData: true });
       sw.dataset.bgLoaded = '1';
     }
     sw.title = tile.name || 'Текстура';
@@ -215,10 +222,10 @@ export function renderGroupedColorRow(container, groups, opts = {}) {
       sw.className = 'swatch';
       sw.dataset.tileId = String(tile.id);
       if (tile && tile.shapeId) sw.dataset.shapeId = String(tile.shapeId);
-      const bgUrl = getTilePreviewUrl(tile);
+      const bgUrl = normalizeSafeContentUrl(getTilePreviewUrl(tile), { allowBlob: true, allowData: true });
       sw.dataset.bg = bgUrl;
       if (eagerIndex < eagerCount && bgUrl) {
-        sw.style.backgroundImage = `url(${bgUrl})`;
+        applySafeBackgroundImage(sw, bgUrl, { allowBlob: true, allowData: true });
         sw.dataset.bgLoaded = '1';
       }
       eagerIndex += 1;

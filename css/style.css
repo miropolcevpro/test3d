@@ -368,6 +368,75 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
 .btnPrimaryText{white-space:nowrap;}
 .btnPrimaryLogo{height:100%;width:auto;flex:0 0 auto;display:block;}
 
+.appFatalState{
+  position:absolute;
+  inset:0;
+  z-index:2200;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:18px 14px calc(18px + var(--safe-bottom));
+  background:rgba(7,10,16,0.74);
+  backdrop-filter:blur(12px);
+  pointer-events:auto;
+}
+.appFatalCard{
+  width:min(100%, 440px);
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+  padding:18px;
+  border-radius:22px;
+  background:rgba(18,22,30,0.96);
+  border:1px solid rgba(255,255,255,0.12);
+  box-shadow:0 20px 48px rgba(0,0,0,0.36);
+}
+.appFatalEyebrow{
+  color:rgba(255,255,255,0.62);
+  font-size:11px;
+  font-weight:900;
+  letter-spacing:0.22px;
+  text-transform:uppercase;
+}
+.appFatalTitle{
+  color:#fff;
+  font-size:24px;
+  line-height:1.12;
+  font-weight:1000;
+}
+.appFatalText{
+  color:rgba(255,255,255,0.9);
+  font-size:15px;
+  line-height:1.45;
+}
+.appFatalMeta{
+  color:rgba(255,255,255,0.62);
+  font-size:12px;
+  line-height:1.4;
+  padding:10px 12px;
+  border-radius:14px;
+  background:rgba(255,255,255,0.06);
+  border:1px solid rgba(255,255,255,0.08);
+  white-space:pre-wrap;
+  word-break:break-word;
+}
+.appFatalActions{
+  display:grid;
+  grid-template-columns:minmax(0,1fr);
+  gap:10px;
+}
+.appFatalSecondary{
+  width:100%;
+  justify-content:center;
+  text-decoration:none;
+  min-height:48px;
+  display:flex;
+  align-items:center;
+}
+@media (min-width: 560px){
+  .appFatalActions{grid-template-columns:minmax(0,1fr) minmax(0,1fr);}
+}
+
 /* AR */
 .arTop{
   position:absolute;left:0;right:0;top:0;

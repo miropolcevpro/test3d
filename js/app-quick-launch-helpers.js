@@ -1,3 +1,5 @@
+import { applySafeBackgroundImage } from './utils.js';
+
 const QUICK_LAUNCH_SHAPE_PRIORITY = new Map([
   ['bruschatka', 0],
   ['new_gorod', 1],
@@ -132,15 +134,22 @@ function renderQuickLaunchCards(container, items = [], onLaunch) {
 
     const preview = document.createElement('div');
     preview.className = 'quickArCardPreview';
-    if (item.previewUrl) preview.style.backgroundImage = `url(${item.previewUrl})`;
+    if (item.previewUrl) applySafeBackgroundImage(preview, item.previewUrl);
     btn.appendChild(preview);
 
     const meta = document.createElement('div');
     meta.className = 'quickArCardMeta';
-    meta.innerHTML = `
-      <div class="quickArCardShape">${item.shapeName || 'Форма'}</div>
-      <div class="quickArCardTile">${item.tileName || 'Текстура'}</div>
-    `;
+
+    const shapeEl = document.createElement('div');
+    shapeEl.className = 'quickArCardShape';
+    shapeEl.textContent = item.shapeName || 'Форма';
+    meta.appendChild(shapeEl);
+
+    const tileEl = document.createElement('div');
+    tileEl.className = 'quickArCardTile';
+    tileEl.textContent = item.tileName || 'Текстура';
+    meta.appendChild(tileEl);
+
     btn.appendChild(meta);
 
     btn.addEventListener('click', async () => {

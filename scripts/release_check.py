@@ -54,6 +54,51 @@ JS_GLOBS = [
     'sw.js',
 ]
 
+ADMIN_CRITICAL_SYMBOLS = [
+    'apiGetConfig',
+    'apiDeleteTexture',
+    'apiSyncTexture',
+]
+
+ADMIN_CRITICAL_FLOW_NAMES = [
+    'deleteTextureFlow',
+    'renderBucketTextures',
+    'runUploadQueue',
+    'buildPaletteItemFromUpload',
+    'upsertItemAndSavePalette',
+]
+
+ADMIN_SMOKE_PATTERNS = [
+    ('deleteTextureFlow uses apiGetConfig', r'deleteTextureFlow\s*\([^)]*\)\s*\{[\s\S]*?apiGetConfig\s*\('),
+    ('deleteTextureFlow uses apiDeleteTexture', r'deleteTextureFlow\s*\([^)]*\)\s*\{[\s\S]*?apiDeleteTexture\s*\('),
+    ('bucket delete path uses apiDeleteTexture', r'renderBucketTextures\s*\([^)]*\)\s*\{[\s\S]*?apiDeleteTexture\s*\('),
+    ('structured upload auto-sync uses apiSyncTexture', r'await\s+apiSyncTexture\s*\(\s*shapeId\s*,\s*tid\s*\)'),
+    ('manual upload auto-sync uses apiSyncTexture', r'await\s+apiSyncTexture\s*\(\s*shapeId\s*,\s*textureId\s*\)'),
+]
+
+PUBLIC_RUNTIME_DOM_SAFE_FILES = [
+    'js/app-catalog-detail-helpers.js',
+    'js/app-quick-launch-helpers.js',
+]
+
+PUBLIC_RUNTIME_CRITICAL_FLOW_NAMES = [
+    'renderDetailTech',
+    'buildShapePickerList',
+    'renderDetailHeroCarousel',
+    'renderQuickLaunchCards',
+    'renderQuickLaunchRail',
+]
+
+PUBLIC_RUNTIME_SMOKE_PATTERNS = [
+    ('renderDetailTech uses createElement', r'export\s+function\s+renderDetailTech\s*\([^)]*\)\s*\{[\s\S]*?createElement\s*\('),
+    ('renderDetailTech uses textContent', r'export\s+function\s+renderDetailTech\s*\([^)]*\)\s*\{[\s\S]*?textContent\s*='),
+    ('buildShapePickerList uses createElement', r'export\s+function\s+buildShapePickerList\s*\([^)]*\)\s*\{[\s\S]*?createElement\s*\('),
+    ('buildShapePickerList uses textContent', r'export\s+function\s+buildShapePickerList\s*\([^)]*\)\s*\{[\s\S]*?textContent\s*='),
+    ('renderDetailHeroCarousel uses createElement', r'function\s+renderDetailHeroCarousel\s*\([^)]*\)\s*\{[\s\S]*?createElement\s*\('),
+    ('renderQuickLaunchCards uses createElement', r'function\s+renderQuickLaunchCards\s*\([^)]*\)\s*\{[\s\S]*?createElement\s*\('),
+    ('renderQuickLaunchCards uses textContent', r'function\s+renderQuickLaunchCards\s*\([^)]*\)\s*\{[\s\S]*?textContent\s*='),
+]
+
 
 def rel(path: Path) -> str:
     return path.relative_to(ROOT).as_posix()
@@ -190,6 +235,81 @@ def check_sw_import_chain() -> None:
     ok('Service worker import chain loads runtime-config before sw-meta')
 
 
+def read_admin_js_text() -> str:
+    return (ROOT / 'admin/admin.js').read_text(encoding='utf-8')
+
+
+def collect_declared_identifiers(js_text: str) -> set[str]:
+    names: set[str] = set()
+    patterns = [
+        r'\b(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(',
+        r'\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=',
+        r'\bclass\s+([A-Za-z_$][\w$]*)\b',
+    ]
+    for pattern in patterns:
+        names.update(re.findall(pattern, js_text))
+    return names
+
+
+def check_admin_no_undef() -> None:
+    js_text = read_admin_js_text()
+    declared = collect_declared_identifiers(js_text)
+    missing: list[str] = []
+    for name in ADMIN_CRITICAL_SYMBOLS:
+        referenced = re.search(rf'\b{name}\b', js_text)
+        if referenced and name not in declared:
+            missing.append(name)
+    if missing:
+        fail('admin/admin.js has unresolved critical symbols: ' + ', '.join(sorted(missing)))
+    ok('admin/admin.js critical helper symbols are declared (' + ', '.join(ADMIN_CRITICAL_SYMBOLS) + ')')
+
+
+def check_admin_flow_smoke() -> None:
+    js_text = read_admin_js_text()
+    declared = collect_declared_identifiers(js_text)
+    missing_flows = [name for name in ADMIN_CRITICAL_FLOW_NAMES if name not in declared]
+    if missing_flows:
+        fail('admin/admin.js missing critical flow functions: ' + ', '.join(sorted(missing_flows)))
+    missing_patterns = [label for label, pattern in ADMIN_SMOKE_PATTERNS if not re.search(pattern, js_text, re.DOTALL)]
+    if missing_patterns:
+        fail('admin/admin.js smoke-check failed: ' + '; '.join(missing_patterns))
+    ok('admin/admin.js critical flow smoke-check passed')
+
+
+
+def check_public_runtime_dom_safety() -> None:
+    violations: list[str] = []
+    for rel_path in PUBLIC_RUNTIME_DOM_SAFE_FILES:
+        path = ROOT / rel_path
+        js_text = path.read_text(encoding='utf-8')
+        if 'insertAdjacentHTML' in js_text:
+            violations.append(f'{rel_path}: insertAdjacentHTML is forbidden in guarded public runtime helpers')
+        if 'outerHTML' in js_text:
+            violations.append(f'{rel_path}: outerHTML is forbidden in guarded public runtime helpers')
+        for match in re.finditer(r'innerHTML\s*=\s*([^;\n]+)', js_text):
+            expr = match.group(1).strip()
+            if expr in {"''", '""', '``'}:
+                continue
+            line = js_text.count('\n', 0, match.start()) + 1
+            snippet = expr[:80].replace('\n', ' ')
+            violations.append(f'{rel_path}:{line}: unsafe innerHTML assignment ({snippet})')
+    if violations:
+        fail('Public runtime DOM safety check failed: ' + '; '.join(violations))
+    ok('Public runtime DOM safety guard passed for content-driven helper files')
+
+
+def check_public_runtime_flow_smoke() -> None:
+    texts = {rel_path: (ROOT / rel_path).read_text(encoding='utf-8') for rel_path in PUBLIC_RUNTIME_DOM_SAFE_FILES}
+    combined = '\n'.join(texts.values())
+    declared = collect_declared_identifiers(combined)
+    missing_flows = [name for name in PUBLIC_RUNTIME_CRITICAL_FLOW_NAMES if name not in declared]
+    if missing_flows:
+        fail('Public runtime missing critical render/helper functions: ' + ', '.join(sorted(missing_flows)))
+    missing_patterns = [label for label, pattern in PUBLIC_RUNTIME_SMOKE_PATTERNS if not re.search(pattern, combined, re.DOTALL)]
+    if missing_patterns:
+        fail('Public runtime smoke-check failed: ' + '; '.join(missing_patterns))
+    ok('Public runtime helper smoke-check passed')
+
 def check_js_syntax() -> None:
     node = shutil.which('node')
     if not node:
@@ -264,6 +384,10 @@ def main() -> None:
     check_junk()
     check_forbidden_release_files()
     check_js_syntax()
+    check_admin_no_undef()
+    check_admin_flow_smoke()
+    check_public_runtime_dom_safety()
+    check_public_runtime_flow_smoke()
     check_sw_import_chain()
     check_release_token_alignment()
     check_modular_docs()

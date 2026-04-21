@@ -5,7 +5,7 @@
   <link rel="icon" href="../favicon.ico" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Админка контента — WebAR плитка</title>
-  <link rel="stylesheet" href="./admin.css?v=20260421-f24cg" />
+  <link rel="stylesheet" href="./admin.css?v=20260421-f24ct" />
 </head>
 <body>
   <header class="topbar">
@@ -645,17 +645,40 @@
       </div>
     </div>
   </div>
+
+  <!-- Modal: confirm destructive action -->
+  <div class="modal confirmModal" id="confirmModal" hidden>
+    <div class="modal__backdrop" data-action="close"></div>
+    <div class="modal__card confirmModal__card">
+      <div class="modal__head">
+        <div>
+          <div class="modal__title" id="confirmModalTitle">Подтвердите действие</div>
+          <div class="modal__subtitle" id="confirmModalSubtitle">Проверьте действие перед продолжением.</div>
+        </div>
+        <button class="btn btn--ghost" id="confirmModalCloseBtn" title="Закрыть">✕</button>
+      </div>
+      <div class="modal__body confirmModal__body">
+        <div class="confirmModal__message" id="confirmModalMessage"></div>
+        <div class="confirmModal__details" id="confirmModalDetails" hidden></div>
+        <div class="status mtSm" id="confirmModalStatus"></div>
+      </div>
+      <div class="modal__foot confirmModal__foot">
+        <button class="btn btn--ghost" id="confirmModalCancelBtn">Отмена</button>
+        <button class="btn" id="confirmModalConfirmBtn">Подтвердить</button>
+      </div>
+    </div>
+  </div>
   <!--
     IMPORTANT:
     Admin must NOT be cached by the Service Worker (it caused stale JS/JSON and "phantom" textures).
     We intentionally do NOT register SW here.
     Cache-busting query params force browsers/CDN to fetch the latest scripts after deploy.
   -->
-  <script src="../js/runtime-config.js?v=20260421-f24cg"></script>
-  <script src="../js/site-env.js?v=20260421-f24cg"></script>
-  <script src="../js/content-identity.js?v=20260421-f24cg"></script>
-  <script src="./config.js?v=20260421-f24cg"></script>
-  <script src="../js/telemetry.js?v=20260421-f24cg"></script>
-  <script src="./admin.js?v=20260421-f24cg"></script>
+  <script src="../js/runtime-config.js?v=20260421-f24ct"></script>
+  <script src="../js/site-env.js?v=20260421-f24ct"></script>
+  <script src="../js/content-identity.js?v=20260421-f24ct"></script>
+  <script src="./config.js?v=20260421-f24ct"></script>
+  <script src="../js/telemetry.js?v=20260421-f24ct"></script>
+  <script src="./admin.js?v=20260421-f24ct"></script>
 </body>
 </html>

@@ -11,6 +11,53 @@ function getArEnv() {
 const ARCORE_PLAY_URL = 'https://play.google.com/store/apps/details?id=com.google.ar.core';
 const ARCORE_ALT_URL = 'https://apkpure.com/ru/google-play-services-for-ar-2025/com.google.ar.core';
 
+function getLocationHostname() {
+  try {
+    return String(window.location && window.location.hostname || '').trim().toLowerCase();
+  } catch (_) {
+    return '';
+  }
+}
+
+function isPrivateIpv4Hostname(hostname) {
+  if (!hostname || !/^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostname)) return false;
+  const parts = hostname.split('.').map((part) => parseInt(part, 10) || 0);
+  return parts[0] === 10 ||
+    parts[0] === 127 ||
+    (parts[0] === 192 && parts[1] === 168) ||
+    (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31);
+}
+
+function isDevArHelpContext() {
+  try {
+    if (window.location && window.location.protocol === 'file:') return true;
+  } catch (_) {}
+  const hostname = getLocationHostname();
+  if (!hostname) return false;
+  return hostname === 'localhost' || hostname === '::1' || hostname === '[::1]' ||
+    hostname.endsWith('.local') || hostname.endsWith('.test') || hostname.endsWith('.localhost') ||
+    isPrivateIpv4Hostname(hostname);
+}
+
+function isAltArcoreSourceAllowed() {
+  try {
+    if (window.__ALLOW_ALT_ARCORE_SOURCE__ === true) return true;
+  } catch (_) {}
+  try {
+    const whitelist = Array.isArray(window.__ALT_ARCORE_SOURCE_HOST_WHITELIST__)
+      ? window.__ALT_ARCORE_SOURCE_HOST_WHITELIST__
+      : [];
+    const hostname = getLocationHostname();
+    if (hostname) {
+      const normalized = whitelist
+        .map((item) => String(item || '').trim().toLowerCase())
+        .filter(Boolean);
+      if (normalized.includes(hostname)) return true;
+    }
+  } catch (_) {}
+  return isDevArHelpContext();
+}
+
 function makeChromeIntent(url) {
   const clean = String(url || '').replace(/^https?:\/\//i, '');
   return `intent://${clean}#Intent;scheme=https;package=com.android.chrome;end`;
@@ -37,6 +84,10 @@ function openArcoreInstall() {
 }
 
 function openArcoreAlt() {
+  if (!isAltArcoreSourceAllowed()) {
+    openArcoreInstall();
+    return;
+  }
   try {
     window.open(ARCORE_ALT_URL, '_blank');
   } catch (_) {
@@ -104,6 +155,7 @@ function showArHelp(kind, err, opts = {}) {
   const btnArcoreAlt = overlay.querySelector('#arHelpBtnArcoreAlt');
   const arcoreNote = overlay.querySelector('#arHelpArcoreNote');
   const arcoreWarn = overlay.querySelector('#arHelpArcoreWarn');
+  const allowAltArcoreSource = isAltArcoreSourceAllowed();
 
   btnChrome.style.display = 'none';
   btnArcorePlay.style.display = 'none';
@@ -123,16 +175,16 @@ function showArHelp(kind, err, opts = {}) {
     msg = 'Ваш браузер не поддерживает WebXR AR.\nОткройте сайт в Google Chrome на Android.';
     btnChrome.style.display = env.isAndroid ? 'inline-block' : 'none';
     btnArcorePlay.style.display = env.isAndroid ? 'inline-block' : 'none';
-    btnArcoreAlt.style.display = env.isAndroid ? 'inline-block' : 'none';
-    arcoreNote.style.display = env.isAndroid ? 'block' : 'none';
-    arcoreWarn.style.display = env.isAndroid ? 'block' : 'none';
+    btnArcoreAlt.style.display = env.isAndroid && allowAltArcoreSource ? 'inline-block' : 'none';
+    arcoreNote.style.display = env.isAndroid && allowAltArcoreSource ? 'block' : 'none';
+    arcoreWarn.style.display = env.isAndroid && allowAltArcoreSource ? 'block' : 'none';
   } else if (kind === 'AR_NOT_SUPPORTED') {
     title = 'AR недоступен на этом устройстве';
     msg = 'Не удалось включить immersive-ar.\nУстановите/обновите Google Play Services for AR (ARCore) и попробуйте снова.\nЕсли устройство не поддерживает ARCore — AR может не запуститься.';
     btnArcorePlay.style.display = env.isAndroid ? 'inline-block' : 'none';
-    btnArcoreAlt.style.display = env.isAndroid ? 'inline-block' : 'none';
-    arcoreNote.style.display = env.isAndroid ? 'block' : 'none';
-    arcoreWarn.style.display = env.isAndroid ? 'block' : 'none';
+    btnArcoreAlt.style.display = env.isAndroid && allowAltArcoreSource ? 'inline-block' : 'none';
+    arcoreNote.style.display = env.isAndroid && allowAltArcoreSource ? 'block' : 'none';
+    arcoreWarn.style.display = env.isAndroid && allowAltArcoreSource ? 'block' : 'none';
   } else if (kind === 'CAMERA_DENIED') {
     title = 'Нет доступа к камере';
     msg = 'Разрешите доступ к камере для браузера и для сайта, затем попробуйте снова.\n(Настройки → Приложения → Chrome → Разрешения → Камера)';
@@ -149,9 +201,9 @@ function showArHelp(kind, err, opts = {}) {
     msg = 'Попробуйте открыть сайт в Google Chrome.\nЕсли не помогает — установите/обновите ARCore.';
     btnChrome.style.display = env.isAndroid ? 'inline-block' : 'none';
     btnArcorePlay.style.display = env.isAndroid ? 'inline-block' : 'none';
-    btnArcoreAlt.style.display = env.isAndroid ? 'inline-block' : 'none';
-    arcoreNote.style.display = env.isAndroid ? 'block' : 'none';
-    arcoreWarn.style.display = env.isAndroid ? 'block' : 'none';
+    btnArcoreAlt.style.display = env.isAndroid && allowAltArcoreSource ? 'inline-block' : 'none';
+    arcoreNote.style.display = env.isAndroid && allowAltArcoreSource ? 'block' : 'none';
+    arcoreWarn.style.display = env.isAndroid && allowAltArcoreSource ? 'block' : 'none';
   }
 
   titleEl.textContent = title;

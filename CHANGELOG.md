@@ -1,8 +1,40 @@
-## 20260421-f24cg — ar curb width realism plus20
-- Release token: `20260421-f24cg`
-- Increased curb thickness by 20% across the AR curb presets so curbs remain readable and realistic on larger paving areas without changing the existing zone, seam, or curb workflow.
-- Updated the curb helper fallback width to the same thicker baseline so restored/runtime curbs without an explicit stored width stay visually consistent with the new preset profile.
-- Kept curb heights, seam-safe stitching logic, edge selection flow, AR geometry pipeline, admin behavior, telemetry, and backend packaging unchanged.
+## 20260421-f24ct — admin status ux polish
+- Release token: `20260421-f24ct`
+- Improved admin status UX for delete/sync/upload flows with structured status cards and clearer partial-success messages.
+- Normalized legacy status aliases (`error` -> `err`, `success` -> `ok`) to avoid misleading unstyled states.
+
+## 20260421-f24cr — release check public runtime guard
+- Release token: `20260421-f24cr`
+- Усилен `scripts/release_check.py` для публичного runtime: добавлены проверки на unsafe `innerHTML`/`outerHTML`/`insertAdjacentHTML` в content-driven helper-модулях `app-catalog-detail-helpers.js` и `app-quick-launch-helpers.js`, при этом пустая очистка контейнеров по-прежнему разрешена.
+- Добавлен минимальный public smoke-check на ключевые render/helper flows (`renderDetailTech`, `buildShapePickerList`, `renderDetailHeroCarousel`, `renderQuickLaunchCards`, `renderQuickLaunchRail`) и на ожидаемую DOM-safe сборку через `createElement`/`textContent`.
+- Release check теперь способен ловить опасные регрессии публичного DOM-рендеринга до упаковки архива, не затрагивая AR-ядро, multizone, curb, admin runtime или backend.
+
+
+## 20260421-f24cr — public fatal ui state instead of alert
+- Release token: `20260421-f24cr`
+- Public app init failure no longer falls back to `alert(...)`; it now shows a built-in fatal UI state with retry and site actions.
+- Added a blocking in-app fatal card with a friendly message, reload action, and optional technical detail for debugging.
+- Removed the remaining `window.alert` fallback from AR runtime toast handling in the public app; toast fallback now degrades to console warning instead of interrupting the user.
+
+
+## 20260421-f24co
+- admin UX hardening: replaced native confirm() dialogs with a consistent admin confirm overlay for telemetry clear and texture delete flows.
+- Keeps destructive actions inside admin UI, with clearer copy for palette delete, bucket delete and telemetry error clear.
+
+## 20260421-f24co — production-safe admin api override guard
+- Release token: `20260421-f24co`
+- Runtime config no longer accepts `?api=` / `localStorage` admin API overrides in production by default.
+- Admin API override is now honored only in dev contexts (`localhost`, `file:`, local/private hosts) or when the target API base is explicitly whitelisted via `window.__ADMIN_API_OVERRIDE_WHITELIST__`.
+- Non-whitelisted query/storage overrides are ignored and cleared, so production admin/public pages fall back to the configured API base instead of persisting a poisoned endpoint.
+- Existing code-level `window.API_BASE_URL` / `window.__API_BASE_URL__` overrides remain supported for intentional deploy-time configuration.
+
+## 20260421-f24co — admin texture api hotfix
+- Release token: `20260421-f24co`
+- Admin hotfix: restored missing helper functions `apiGetConfig`, `apiDeleteTexture`, and `apiSyncTexture` so delete/sync flows no longer crash with `ReferenceError`.
+- Added endpoint negotiation for texture delete/sync (`/api/textures/...`, `/api/surfaces/...`) with safe fallbacks when a dedicated backend route is unavailable.
+- Added fallback sync logic that rebuilds a palette item from the scanned bucket index and preserves existing `name`, `tileSizeM`, and `params`.
+- Added fallback delete logic that safely removes a texture from the palette document even when the backend file-delete API is unavailable, while surfacing a clear warning that bucket files were not removed.
+- Upload auto-add flow now reuses the restored sync helper, so upload → auto-add → sync no longer breaks on missing functions.
 
 ## 20260421-f24cf — admin palette validator access hardening
 - Release token: `20260421-f24cf`
@@ -410,3 +442,7 @@ Release token: `20260411-f24g`
 ## 2026-04-17 — remove bottom navigation from home screen
 - Removed the fixed bottom navigation block on the main catalog screen (`Формы`, `3D`, `Админка`).
 - Cleaned related CSS tails for the removed home-screen bottom navigation.
+## 2026-04-21 — safe handling content URLs in public runtime
+- Added safe normalization for content-driven image/background URLs in public helpers.
+- Applied guarded URL handling to detail hero, catalog cards, shape picker, quick AR rail, and palette swatches.
+- Invalid or unsupported content URLs now fail closed instead of being injected into src/backgroundImage directly.

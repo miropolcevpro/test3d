@@ -499,6 +499,19 @@
 
     </section>
 
+    <div id="appFatalState" class="appFatalState" hidden role="alertdialog" aria-modal="true" aria-labelledby="appFatalTitle" aria-describedby="appFatalText">
+      <div class="appFatalCard">
+        <div class="appFatalEyebrow">Визуализатор временно недоступен</div>
+        <div id="appFatalTitle" class="appFatalTitle">Не удалось загрузить визуализатор</div>
+        <div id="appFatalText" class="appFatalText">Обновите страницу и попробуйте снова.</div>
+        <div id="appFatalMeta" class="appFatalMeta" hidden></div>
+        <div class="appFatalActions">
+          <button id="btnAppFatalRetry" class="btnPrimary" type="button">Обновить страницу</button>
+          <a id="btnAppFatalSite" class="btnGhost appFatalSecondary" href="https://ag-ru.com/" target="_blank" rel="noopener">Перейти на сайт</a>
+        </div>
+      </div>
+    </div>
+
   </div>
 
   <script>
@@ -516,13 +529,13 @@
     window.setTimeout(hide, 3000);
   })();
 </script>
-<script src="js/runtime-config.js?v=20260421-f24cg"></script>
-<script src="js/site-env.js?v=20260421-f24cg"></script>
-  <script src="js/content-identity.js?v=20260421-f24cg"></script>
-<script src="js/sw-meta.js?v=20260421-f24cg"></script>
-<script src="js/sw-register.js?v=20260421-f24cg"></script>
-  <script src="js/telemetry.js?v=20260421-f24cg"></script>
-  <script type="module" src="js/app.js?v=20260421-f24cg"></script>
+<script src="js/runtime-config.js?v=20260421-f24ct"></script>
+<script src="js/site-env.js?v=20260421-f24ct"></script>
+  <script src="js/content-identity.js?v=20260421-f24ct"></script>
+<script src="js/sw-meta.js?v=20260421-f24ct"></script>
+<script src="js/sw-register.js?v=20260421-f24ct"></script>
+  <script src="js/telemetry.js?v=20260421-f24ct"></script>
+  <script type="module" src="js/app.js?v=20260421-f24ct"></script>
 
 
 </body>

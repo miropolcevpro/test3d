@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { applySafeBackgroundImage } from './utils.js';
 
 export function createSelectionHelpers(ctx) {
   let selectTileSeq = 0;
@@ -469,7 +470,7 @@ export function createSelectionHelpers(ctx) {
       const hasResolvedGallery = ctx.UI.detailHero.dataset && ctx.UI.detailHero.dataset.heroHasResolvedGallery === '1';
       if (!hasResolvedGallery) {
         const hero = t.preview || (t.maps && t.maps.albedo) || t.texture || '';
-        ctx.UI.detailHero.style.backgroundImage = hero ? `url(${hero})` : 'none';
+        applySafeBackgroundImage(ctx.UI.detailHero, hero);
       }
     }
 

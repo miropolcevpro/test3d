@@ -13,7 +13,7 @@
     skipWaiting: 'SKIP_WAITING',
     getVersion: 'GET_VERSION',
     activated: 'SW_ACTIVATED',
-    version: '20260421-f24cg'
+    version: '20260421-f24ct'
   });
 
   function safeString(value) {
@@ -101,20 +101,94 @@
     return ensureTrailingSlash(fallbackUrl || '');
   }
 
+  function getLocationHostname() {
+    try {
+      return safeString(global.location && global.location.hostname).toLowerCase();
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function isPrivateIpv4Hostname(hostname) {
+    if (!hostname || !/^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostname)) return false;
+    var parts = hostname.split('.').map(function(part) { return parseInt(part, 10) || 0; });
+    return parts[0] === 10 ||
+      (parts[0] === 127) ||
+      (parts[0] === 192 && parts[1] === 168) ||
+      (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31);
+  }
+
+  function isDevSiteContext() {
+    try {
+      if (global.location && global.location.protocol === 'file:') return true;
+    } catch (_) {}
+    var hostname = getLocationHostname();
+    if (!hostname) return false;
+    return hostname === 'localhost' || hostname === '::1' || hostname === '[::1]' ||
+      hostname.endsWith('.local') || hostname.endsWith('.test') || hostname.endsWith('.localhost') ||
+      isPrivateIpv4Hostname(hostname);
+  }
+
+  function normalizeAdminApiCandidate(value) {
+    var s = trimTrailingSlashes(value);
+    if (!s) return '';
+    try {
+      var u = new URL(s, global.location.href);
+      if (!/^https?:$/i.test(u.protocol)) return '';
+      return trimTrailingSlashes(u.toString());
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function resolveAdminApiOverrideWhitelist() {
+    var defaults = [trimTrailingSlashes(DEFAULTS.adminApiBaseUrl)];
+    var fromGlobal = [];
+    try {
+      if (Array.isArray(global.__ADMIN_API_OVERRIDE_WHITELIST__)) {
+        fromGlobal = global.__ADMIN_API_OVERRIDE_WHITELIST__;
+      }
+    } catch (_) {}
+    var merged = defaults.concat(fromGlobal || []);
+    var normalized = [];
+    for (var i = 0; i < merged.length; i += 1) {
+      var item = normalizeAdminApiCandidate(merged[i]);
+      if (item && normalized.indexOf(item) === -1) normalized.push(item);
+    }
+    return normalized;
+  }
+
+  function isAllowedAdminApiOverride(candidate) {
+    var normalized = normalizeAdminApiCandidate(candidate);
+    if (!normalized) return false;
+    if (isDevSiteContext()) return true;
+    var whitelist = resolveAdminApiOverrideWhitelist();
+    return whitelist.indexOf(normalized) !== -1;
+  }
+
   function resolveAdminApiBaseUrl() {
     var LS_KEY = 'admin_api_base_url';
+
     try {
       var u = new URL(global.location.href);
-      var qp = trimTrailingSlashes(u.searchParams.get('api'));
+      var qp = normalizeAdminApiCandidate(u.searchParams.get('api'));
       if (qp) {
-        try { global.localStorage.setItem(LS_KEY, qp); } catch (_) {}
-        return qp;
+        if (isAllowedAdminApiOverride(qp)) {
+          try { global.localStorage.setItem(LS_KEY, qp); } catch (_) {}
+          return qp;
+        }
+        try { global.localStorage.removeItem(LS_KEY); } catch (_) {}
+        try { console.warn('[runtime-config] Ignored non-whitelisted admin API override:', qp); } catch (_) {}
       }
     } catch (_) {}
 
     try {
-      var saved = trimTrailingSlashes(global.localStorage.getItem(LS_KEY));
-      if (saved) return saved;
+      var saved = normalizeAdminApiCandidate(global.localStorage.getItem(LS_KEY));
+      if (saved) {
+        if (isAllowedAdminApiOverride(saved)) return saved;
+        try { global.localStorage.removeItem(LS_KEY); } catch (_) {}
+        try { console.warn('[runtime-config] Cleared non-whitelisted stored admin API override:', saved); } catch (_) {}
+      }
     } catch (_) {}
 
     var existing = trimTrailingSlashes(global.API_BASE_URL || global.__API_BASE_URL__ || '');
@@ -130,7 +204,7 @@
   if (!siteBasePath.endsWith('/')) siteBasePath += '/';
 
   var config = Object.freeze({
-    version: '20260421-f24cg',
+    version: '20260421-f24ct',
     site: Object.freeze({
       siteBaseUrl: siteBaseUrl,
       siteBasePath: siteBasePath,
@@ -139,7 +213,7 @@
       isSpecialUrl: isSpecialUrl
     }),
     sw: Object.freeze({
-      version: '20260421-f24cg',
+      version: '20260421-f24ct',
       scriptFilename: 'sw.js',
       messages: SW_MESSAGES
     }),

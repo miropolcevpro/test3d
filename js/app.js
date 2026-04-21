@@ -175,6 +175,12 @@ const UI = {
   screenCatalog: document.getElementById('screenCatalog'),
   screenDetail: document.getElementById('screenDetail'),
   screenAR: document.getElementById('screenAR'),
+  appFatalState: document.getElementById('appFatalState'),
+  appFatalTitle: document.getElementById('appFatalTitle'),
+  appFatalText: document.getElementById('appFatalText'),
+  appFatalMeta: document.getElementById('appFatalMeta'),
+  btnAppFatalRetry: document.getElementById('btnAppFatalRetry'),
+  btnAppFatalSite: document.getElementById('btnAppFatalSite'),
 
   // Catalog
   catalogSearch: document.getElementById('catalogSearch'),
@@ -303,6 +309,11 @@ const UI = {
   layoutSelect: document.getElementById('layoutSelect'),
   toggleOcclusion: document.getElementById('toggleOcclusion'),
 };
+
+UI.btnAppFatalRetry?.addEventListener('click', () => {
+  try { hideFatalUiState(); } catch (_) {}
+  try { window.location.reload(); } catch (_) {}
+});
 
 // ------------------------
 
@@ -1708,13 +1719,45 @@ async function activateArZoneById(zoneId, opts = {}) {
   }
 }
 
+function getFatalErrorMeta(err) {
+  try {
+    const message = String(err?.message || err || '').trim();
+    if (!message) return '';
+    return `Техническая информация: ${message}`;
+  } catch (_) {
+    return '';
+  }
+}
+
+function showFatalUiState(err, opts = {}) {
+  try {
+    const title = String(opts?.title || 'Не удалось загрузить визуализатор').trim() || 'Не удалось загрузить визуализатор';
+    const message = String(opts?.message || 'Обновите страницу и попробуйте снова. Если проблема повторится, перейдите на сайт или свяжитесь с менеджером.').trim() || 'Обновите страницу и попробуйте снова.';
+    const meta = getFatalErrorMeta(err);
+    if (UI.appFatalTitle) UI.appFatalTitle.textContent = title;
+    if (UI.appFatalText) UI.appFatalText.textContent = message;
+    if (UI.appFatalMeta) {
+      UI.appFatalMeta.textContent = meta;
+      show(UI.appFatalMeta, Boolean(meta));
+    }
+    document.body.classList.remove('splash-active');
+    try { document.getElementById('splashScreen')?.remove(); } catch (_) {}
+    show(UI.appFatalState, true);
+    UI.btnAppFatalRetry?.focus?.();
+  } catch (_) {}
+}
+
+function hideFatalUiState() {
+  try { show(UI.appFatalState, false); } catch (_) {}
+}
+
 function showArRuntimeToast(message, durationMs = 2200) {
   const text = String(message || '').trim();
   if (!text) return;
   try {
     showSnapshotToast(text, durationMs);
   } catch (_) {
-    try { window.alert(text); } catch (_) {}
+    try { console.warn('AR runtime toast fallback:', text); } catch (_) {}
   }
 }
 
@@ -5312,7 +5355,10 @@ renderer.setAnimationLoop((t, frame) => {
 init().catch(err => {
   console.error(err);
   telemetryError('app_init_failed', err, {});
-  alert('Ошибка инициализации: ' + (err?.message || err));
+  showFatalUiState(err, {
+    title: 'Не удалось загрузить визуализатор',
+    message: 'Обновите страницу и попробуйте снова. Если проблема повторится, перейдите на сайт производителя или свяжитесь с менеджером.'
+  });
 });
 
 

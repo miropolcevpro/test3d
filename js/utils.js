@@ -625,6 +625,87 @@ export function sanitizePalettePayload(rawData, options = {}) {
   return { payload, warnings };
 }
 
+
+function hasUnsafeControlChars(value) {
+  return /[\u0000-\u001F\u007F]/.test(asNonEmptyString(value));
+}
+
+function isAllowedDataImageUrl(value) {
+  const src = asNonEmptyString(value).trim();
+  if (!src) return false;
+  return /^data:image\/(?:png|apng|avif|bmp|gif|jpeg|jpg|webp|x-icon|icon);/i.test(src);
+}
+
+function getContentUrlBase() {
+  try {
+    if (typeof document !== 'undefined' && document.baseURI) return document.baseURI;
+  } catch (_) {}
+  try {
+    if (typeof location !== 'undefined' && location.href) return location.href;
+  } catch (_) {}
+  return 'https://invalid.local/';
+}
+
+function escapeCssUrlValue(value) {
+  return asNonEmptyString(value)
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\r/g, '')
+    .replace(/\n/g, '')
+    .replace(/\f/g, '');
+}
+
+export function normalizeSafeContentUrl(value, options = {}) {
+  const raw = asNonEmptyString(value).trim();
+  if (!raw || hasUnsafeControlChars(raw)) return '';
+
+  if (/^blob:/i.test(raw)) {
+    return options.allowBlob === false ? '' : raw;
+  }
+
+  if (/^data:/i.test(raw)) {
+    return options.allowData === true && isAllowedDataImageUrl(raw) ? raw : '';
+  }
+
+  try {
+    const parsed = new URL(raw, getContentUrlBase());
+    const protocol = asNonEmptyString(parsed.protocol).toLowerCase();
+    if (protocol !== 'http:' && protocol !== 'https:') return '';
+    return parsed.toString();
+  } catch (_) {
+    return '';
+  }
+}
+
+export function buildSafeBackgroundImageValue(value, options = {}) {
+  const safeUrl = normalizeSafeContentUrl(value, options);
+  if (!safeUrl) return 'none';
+  return `url("${escapeCssUrlValue(safeUrl)}")`;
+}
+
+export function applySafeBackgroundImage(el, value, options = {}) {
+  const safeUrl = normalizeSafeContentUrl(value, options);
+  if (el && el.style) {
+    el.style.backgroundImage = safeUrl ? buildSafeBackgroundImageValue(safeUrl, options) : 'none';
+  }
+  return safeUrl;
+}
+
+export function setSafeImageSource(img, value, options = {}) {
+  const safeUrl = normalizeSafeContentUrl(value, options);
+  if (!img) return safeUrl;
+  if (safeUrl) {
+    img.src = safeUrl;
+    return safeUrl;
+  }
+  try {
+    img.removeAttribute('src');
+  } catch (_) {
+    try { img.src = ''; } catch (_) {}
+  }
+  return '';
+}
+
 export function reportValidationWarnings(context, warnings) {
   if (!Array.isArray(warnings) || !warnings.length) return;
   const prefix = `[data] ${context}`;

@@ -1,5 +1,5 @@
 // BUILD: v28 2026-01-16f (runtime-config)
-const __BUILD_ID__ = "20260421-f24cg";
+const __BUILD_ID__ = "20260421-f24ct";
 console.log("[Admin] build", __BUILD_ID__);
 /* Admin (Step 3 start) — shapes list + shape details (read-only palette), router scaffold */
 (async () => {
@@ -104,6 +104,127 @@ function getToken() {
       throw err;
     }
     return json;
+  }
+
+  function buildQueryString(obj = {}) {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(obj || {})) {
+      if (value === undefined || value === null) continue;
+      params.set(key, String(value));
+    }
+    const qs = params.toString();
+    return qs ? `?${qs}` : '';
+  }
+
+  async function apiFetchFirstAvailable(candidates = []) {
+    let lastErr = null;
+    for (const entry of candidates) {
+      if (!entry || !entry.path) continue;
+      try {
+        return await apiFetch(entry.path, entry.opts || {});
+      } catch (err) {
+        lastErr = err;
+        const status = Number(err?.status || 0);
+        if (status && ![404, 405, 501].includes(status)) break;
+      }
+    }
+    throw lastErr || new Error('API endpoint not available');
+  }
+
+  async function apiGetConfig() {
+    const cfg = await tryLoadRemoteConfig();
+    if (cfg) return cfg;
+    return apiFetch('/api/config');
+  }
+
+  async function fallbackSyncTexture(shapeId, textureId) {
+    const canonicalId = canonicalTextureId(shapeId, textureId);
+    await ensureBucketIndexLoaded(shapeId, { forceReload: true });
+    const idx = state.bucketIndexByShapeId.get(shapeId) || { textures: [] };
+    const textures = Array.isArray(idx?.textures) ? idx.textures : [];
+    const bucketTex = textures.find((t) => canonicalTextureId(shapeId, t?.textureId || t?.id || '') === canonicalId);
+    if (!bucketTex) {
+      throw new Error(`Текстура "${canonicalId}" не найдена в бакете surfaces/${shapeId}/.`);
+    }
+    if (isBucketTextureBroken(bucketTex)) {
+      throw new Error(`Текстура "${canonicalId}" неполная в бакете: нужны albedo + normal + roughness + height в 1k.`);
+    }
+
+    const palette = await ensurePaletteLoaded(shapeId, { forceReload: true });
+    const items = Array.isArray(palette?.items) ? palette.items : [];
+    const existing = items.find((item) => canonicalTextureId(shapeId, item?.id || item?.textureId || '') === canonicalId) || null;
+    const synced = buildPaletteItemFromBucket(shapeId, canonicalId, bucketTex);
+    const merged = {
+      ...synced,
+      ...(existing && typeof existing === 'object' ? { name: existing.name || synced.name } : {}),
+      tileSizeM: existing?.tileSizeM || synced.tileSizeM,
+      params: (existing && typeof existing.params === 'object' && existing.params) ? { ...existing.params } : {},
+    };
+    await upsertItemAndSavePalette(shapeId, merged);
+    return { ok: true, fallback: true, paletteResult: { upserted: 1 } };
+  }
+
+  async function apiSyncTexture(shapeId, textureId) {
+    const sid = encodeURIComponent(shapeId || '');
+    const tid = encodeURIComponent(canonicalTextureId(shapeId, textureId));
+    try {
+      return await apiFetchFirstAvailable([
+        { path: `/api/textures/${sid}/${tid}/sync`, opts: { method: 'POST' } },
+        { path: `/api/surfaces/${sid}/${tid}/sync`, opts: { method: 'POST' } },
+        { path: `/api/textures/${sid}/${tid}`, opts: { method: 'POST', body: JSON.stringify({ action: 'sync' }) } },
+      ]);
+    } catch (err) {
+      const status = Number(err?.status || 0);
+      if (status && ![404, 405, 501].includes(status)) throw err;
+      return fallbackSyncTexture(shapeId, textureId);
+    }
+  }
+
+  async function fallbackDeleteTexture(shapeId, textureId, { palette = true, files = false } = {}) {
+    if (!palette) {
+      throw new Error('Удаление файлов без backend DELETE API недоступно. Палитра не изменялась.');
+    }
+    const paletteDoc = await ensurePaletteLoaded(shapeId, { forceReload: true });
+    const items = Array.isArray(paletteDoc?.items) ? [...paletteDoc.items] : [];
+    const canonicalId = canonicalTextureId(shapeId, textureId);
+    const nextItems = items.filter((item) => canonicalTextureId(shapeId, item?.id || item?.textureId || '') !== canonicalId);
+    const removed = items.length - nextItems.length;
+    if (removed <= 0) {
+      throw new Error(`Текстура "${canonicalId}" не найдена в палитре формы "${shapeId}".`);
+    }
+    const nextPalette = { ...(paletteDoc && typeof paletteDoc === 'object' ? paletteDoc : {}), shapeId, items: nextItems };
+    await savePalette(shapeId, nextPalette);
+    return {
+      ok: true,
+      fallback: true,
+      paletteResult: { removed },
+      filesResult: {
+        deletedObjects: 0,
+        deletedPrefixes: [],
+        deleteErrors: files ? [{ reason: 'delete_api_unavailable', textureId: canonicalId }] : [],
+      },
+      message: files
+        ? 'Текстура удалена из палитры. Backend DELETE API для удаления файлов бакета недоступен, поэтому файлы surfaces/... не удалялись.'
+        : 'Текстура удалена из палитры.',
+    };
+  }
+
+  async function apiDeleteTexture(shapeId, textureId, { palette = true, files = true } = {}) {
+    const sid = encodeURIComponent(shapeId || '');
+    const tid = encodeURIComponent(canonicalTextureId(shapeId, textureId));
+    const qs = buildQueryString({ palette: palette ? 1 : 0, files: files ? 1 : 0 });
+    try {
+      return await apiFetchFirstAvailable([
+        { path: `/api/textures/${sid}/${tid}${qs}`, opts: { method: 'DELETE' } },
+        { path: `/api/surfaces/${sid}/${tid}${qs}`, opts: { method: 'DELETE' } },
+        { path: `/api/textures/${sid}/${tid}/delete`, opts: { method: 'POST', body: JSON.stringify({ palette, files }) } },
+        { path: `/api/surfaces/${sid}/${tid}/delete`, opts: { method: 'POST', body: JSON.stringify({ palette, files }) } },
+      ]);
+    } catch (err) {
+      const status = Number(err?.status || 0);
+      if (status && ![404, 405, 501].includes(status)) throw err;
+      return fallbackDeleteTexture(shapeId, textureId, { palette, files });
+    }
   }
 
   // In GitHub Pages the admin lives under /<repo>/admin/, while site assets are under /<repo>/assets/.
@@ -415,6 +536,16 @@ function pickMediaUrl(candidates, opts) {
   const elTexSaveBtn = $('texSaveBtn');
   const elTexOpenArCalibBtn = $('texOpenArCalibBtn');
 
+  // Modal: confirm destructive action
+  const elConfirmModal = $('confirmModal');
+  const elConfirmModalTitle = $('confirmModalTitle');
+  const elConfirmModalSubtitle = $('confirmModalSubtitle');
+  const elConfirmModalMessage = $('confirmModalMessage');
+  const elConfirmModalDetails = $('confirmModalDetails');
+  const elConfirmModalStatus = $('confirmModalStatus');
+  const elConfirmModalCloseBtn = $('confirmModalCloseBtn');
+  const elConfirmModalCancelBtn = $('confirmModalCancelBtn');
+  const elConfirmModalConfirmBtn = $('confirmModalConfirmBtn');
 
   const visualParamTelemetryTimers = new Map();
   let telemetryErrorReportState = null;
@@ -544,12 +675,100 @@ function pickMediaUrl(candidates, opts) {
   let currentTexShapeId = '';
   let currentTexItemId = '';
   let currentTexSnapshot = null;
+  let confirmModalResolve = null;
+
+  function normalizeStatusType(type) {
+    const t = String(type || '').trim().toLowerCase();
+    if (!t) return '';
+    if (t === 'error' || t === 'danger' || t === 'failed' || t === 'fail') return 'err';
+    if (t === 'warning') return 'warn';
+    if (t === 'success' || t === 'done') return 'ok';
+    return t;
+  }
+
+  function clearNode(el) {
+    if (!el) return;
+    if (typeof el.replaceChildren === 'function') el.replaceChildren();
+    else el.textContent = '';
+  }
 
   function setStatus(el, type, msg) {
     if (!el) return;
-    el.className = 'status ' + (type || '');
-    el.textContent = msg || '';
-    el.style.display = msg ? 'block' : 'none';
+    const tone = normalizeStatusType(type);
+    el.className = 'status ' + tone;
+    clearNode(el);
+    if (!msg) {
+      el.style.display = 'none';
+      return;
+    }
+    const line = document.createElement('div');
+    line.className = 'status__text';
+    line.textContent = msg;
+    el.appendChild(line);
+    el.style.display = 'block';
+  }
+
+  function setStatusRich(el, type, payload) {
+    if (!el) return;
+    if (!payload || typeof payload === 'string') {
+      setStatus(el, type, payload || '');
+      return;
+    }
+    const tone = normalizeStatusType(type || payload.type || '');
+    el.className = 'status ' + tone;
+    clearNode(el);
+
+    const title = String(payload.title || '').trim();
+    const message = String(payload.message || '').trim();
+    const note = String(payload.note || '').trim();
+    const bullets = Array.isArray(payload.bullets) ? payload.bullets.filter(Boolean).map((v) => String(v).trim()).filter(Boolean) : [];
+    const meta = Array.isArray(payload.meta) ? payload.meta.filter(Boolean).map((v) => String(v).trim()).filter(Boolean) : [];
+
+    if (!title && !message && !note && !bullets.length && !meta.length) {
+      el.style.display = 'none';
+      return;
+    }
+
+    if (title) {
+      const titleEl = document.createElement('div');
+      titleEl.className = 'status__title';
+      titleEl.textContent = title;
+      el.appendChild(titleEl);
+    }
+    if (message) {
+      const messageEl = document.createElement('div');
+      messageEl.className = 'status__text';
+      messageEl.textContent = message;
+      el.appendChild(messageEl);
+    }
+    if (bullets.length) {
+      const listEl = document.createElement('ul');
+      listEl.className = 'status__list';
+      bullets.forEach((item) => {
+        const li = document.createElement('li');
+        li.textContent = item;
+        listEl.appendChild(li);
+      });
+      el.appendChild(listEl);
+    }
+    if (note) {
+      const noteEl = document.createElement('div');
+      noteEl.className = 'status__note';
+      noteEl.textContent = note;
+      el.appendChild(noteEl);
+    }
+    if (meta.length) {
+      const metaWrap = document.createElement('div');
+      metaWrap.className = 'status__meta';
+      meta.forEach((item) => {
+        const chip = document.createElement('span');
+        chip.className = 'status__chip';
+        chip.textContent = item;
+        metaWrap.appendChild(chip);
+      });
+      el.appendChild(metaWrap);
+    }
+    el.style.display = 'block';
   }
 
   function escapeHtml(s) {
@@ -1697,7 +1916,15 @@ function setTelemetryStatus(message, kind) {
       return;
     }
     const scopeLabel = state.sourceMode === 'remote' ? 'серверного отчёта' : 'журнала этого браузера';
-    const confirmed = window.confirm(`Очистить текущие ошибки из ${scopeLabel}? Будет скрыто ${visibleItems.length} записей по текущим фильтрам.`);
+    const confirmed = await showConfirmModal({
+      title: 'Очистить текущие ошибки?',
+      subtitle: `Источник: ${scopeLabel}`,
+      message: `Будет скрыто ${visibleItems.length} записей по текущим фильтрам.`,
+      details: 'Действие применяется только к текущей выборке отчёта и не затрагивает другие записи вне активных фильтров.',
+      confirmText: 'Очистить ошибки',
+      cancelText: 'Отмена',
+      tone: 'danger'
+    });
     if (!confirmed) return;
 
     telemetryTrack('admin_error_report_clear_click', Object.assign({}, getTelemetryFilters(), getTelemetryErrorReportFilters(), {
@@ -1749,9 +1976,81 @@ function setTelemetryStatus(message, kind) {
     setTelemetryErrorReportStatus('Очистка для текущего источника данных не поддерживается.', 'warn');
   }
 
-  function syncTelemetryModalBodyState() {
-    const isOpen = !!((elTelemetryModal && !elTelemetryModal.hidden) || (elTelemetryErrorReportModal && !elTelemetryErrorReportModal.hidden));
+  function syncAdminModalBodyState() {
+    const isOpen = !!(
+      (elTelemetryModal && !elTelemetryModal.hidden) ||
+      (elTelemetryErrorReportModal && !elTelemetryErrorReportModal.hidden) ||
+      (elConfirmModal && !elConfirmModal.hidden)
+    );
     document.body.classList.toggle('modal-open', isOpen);
+  }
+
+  function closeConfirmModal(result = false) {
+    if (!elConfirmModal) return;
+    elConfirmModal.hidden = true;
+    setStatus(elConfirmModalStatus, '', '');
+    if (elConfirmModalConfirmBtn) {
+      elConfirmModalConfirmBtn.disabled = false;
+      elConfirmModalConfirmBtn.classList.remove('btn--danger');
+    }
+    if (elConfirmModalConfirmBtn) elConfirmModalConfirmBtn.textContent = 'Подтвердить';
+    if (elConfirmModalCancelBtn) elConfirmModalCancelBtn.textContent = 'Отмена';
+    if (elConfirmModalTitle) elConfirmModalTitle.textContent = 'Подтвердите действие';
+    if (elConfirmModalSubtitle) elConfirmModalSubtitle.textContent = 'Проверьте действие перед продолжением.';
+    if (elConfirmModalMessage) elConfirmModalMessage.textContent = '';
+    if (elConfirmModalDetails) {
+      elConfirmModalDetails.textContent = '';
+      elConfirmModalDetails.hidden = true;
+    }
+    syncAdminModalBodyState();
+    const resolver = confirmModalResolve;
+    confirmModalResolve = null;
+    if (resolver) resolver(Boolean(result));
+  }
+
+  function showConfirmModal(options = {}) {
+    if (!elConfirmModal) return Promise.resolve(false);
+    const opts = options && typeof options === 'object' ? options : {};
+    if (confirmModalResolve) {
+      const prev = confirmModalResolve;
+      confirmModalResolve = null;
+      try { prev(false); } catch (_) {}
+    }
+    if (elConfirmModalTitle) elConfirmModalTitle.textContent = String(opts.title || 'Подтвердите действие');
+    if (elConfirmModalSubtitle) elConfirmModalSubtitle.textContent = String(opts.subtitle || 'Проверьте действие перед продолжением.');
+    if (elConfirmModalMessage) elConfirmModalMessage.textContent = String(opts.message || '');
+    if (elConfirmModalDetails) {
+      const details = String(opts.details || '').trim();
+      elConfirmModalDetails.textContent = details;
+      elConfirmModalDetails.hidden = !details;
+    }
+    setStatus(elConfirmModalStatus, '', '');
+    if (elConfirmModalCancelBtn) elConfirmModalCancelBtn.textContent = String(opts.cancelText || 'Отмена');
+    if (elConfirmModalConfirmBtn) {
+      elConfirmModalConfirmBtn.textContent = String(opts.confirmText || 'Подтвердить');
+      elConfirmModalConfirmBtn.classList.toggle('btn--danger', opts.tone === 'danger');
+      elConfirmModalConfirmBtn.disabled = false;
+    }
+    elConfirmModal.hidden = false;
+    syncAdminModalBodyState();
+    try { (elConfirmModalConfirmBtn || elConfirmModalCancelBtn || elConfirmModalCloseBtn)?.focus(); } catch (_) {}
+    return new Promise((resolve) => {
+      confirmModalResolve = resolve;
+    });
+  }
+
+  function bindConfirmModal() {
+    if (!elConfirmModal) return;
+    elConfirmModal.querySelectorAll('[data-action="close"]').forEach((el) => {
+      el.addEventListener('click', () => closeConfirmModal(false));
+    });
+    elConfirmModalCloseBtn?.addEventListener('click', () => closeConfirmModal(false));
+    elConfirmModalCancelBtn?.addEventListener('click', () => closeConfirmModal(false));
+    elConfirmModalConfirmBtn?.addEventListener('click', () => closeConfirmModal(true));
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      if (!elConfirmModal.hidden) closeConfirmModal(false);
+    });
   }
 
   const TELEMETRY_KPI_STANDARDS = {
@@ -2081,13 +2380,13 @@ function setTelemetryStatus(message, kind) {
   function showTelemetryModal(open) {
     if (!elTelemetryModal) return;
     elTelemetryModal.hidden = !open;
-    syncTelemetryModalBodyState();
+    syncAdminModalBodyState();
   }
 
   function showTelemetryErrorReportModal(open) {
     if (!elTelemetryErrorReportModal) return;
     elTelemetryErrorReportModal.hidden = !open;
-    syncTelemetryModalBodyState();
+    syncAdminModalBodyState();
   }
 
   async function openTelemetryModal() {
@@ -2365,7 +2664,15 @@ function setTelemetryStatus(message, kind) {
     renderRoute().catch(() => {});
   }
   async function deleteTextureFlow(shapeId, textureId) {
-    const okPalette = confirm(`Удалить текстуру "${textureId}" из палитры формы "${shapeId}" и удалить файлы из бакета?`);
+    const okPalette = await showConfirmModal({
+      title: 'Удалить текстуру?',
+      subtitle: `Форма: ${shapeId}`,
+      message: `Текстура "${textureId}" будет удалена из палитры и из бакета.`,
+      details: 'Используйте это действие только если текстура больше не нужна в рабочей библиотеке формы.',
+      confirmText: 'Удалить текстуру',
+      cancelText: 'Отмена',
+      tone: 'danger'
+    });
     if (!okPalette) return;
     // Пользовательский сценарий: удаляем "по всем фронтам" всегда.
     const alsoBucket = true;
@@ -2385,13 +2692,21 @@ try {
   console.warn('apiGetConfig failed', e);
 }
 
-    setStatus(elPaletteStatus, '', 'Удаляем...');
+        setStatusRich(elPaletteStatus, '', {
+      title: 'Удаляем текстуру…',
+      message: `Форма: ${shapeId} • Текстура: ${textureId}`,
+      note: 'Обновляем палитру и удаляем связанные файлы из бакета, если backend это поддерживает.',
+    });
     // На backend реализован резолв папок в бакете по textureId (с учётом префиксов),
     // поэтому передаём ровно то значение, которое отображается в админке.
     const res = await apiDeleteTexture(shapeId, textureId, { palette: true, files: alsoBucket });
     if (!res?.ok) {
       const msg = res?.message || 'Delete failed';
-      setStatus(elPaletteStatus, 'error', msg);
+      setStatusRich(elPaletteStatus, 'err', {
+        title: 'Не удалось удалить текстуру',
+        message: msg,
+        meta: [`Форма: ${shapeId}`, `Текстура: ${textureId}`],
+      });
       renderTelemetryPanel();
       return;
     }
@@ -2411,19 +2726,41 @@ try {
 
     // If palette was not actually changed, treat as a problem (UI would otherwise lie).
     if (removed === 0) {
-      const hint = 'Текстура не была удалена из палитры (возможен несоответствующий textureId в данных).';
-      setStatus(elPaletteStatus, 'error', hint);
+      const hint = 'Текстура не была удалена из палитры. Возможна проблема с textureId или несогласованные данные палитры.';
+      setStatusRich(elPaletteStatus, 'err', {
+        title: 'Удаление не завершено',
+        message: hint,
+        meta: [`Форма: ${shapeId}`, `Текстура: ${textureId}`],
+      });
       return;
     }
 
-    const delMsg = alsoBucket
-      ? `Удалено из палитры и из бакета (объекты: ${delObjects}, префиксы: ${delPrefixes}).`
-      : 'Удалено из палитры.';
-
-    const warn = deleteErrors.length
-      ? ` Ошибки при удалении файлов: ${deleteErrors.map(e => e.key || e.prefix || 'unknown').join(', ')}`
-      : '';
-    setStatus(elPaletteStatus, deleteErrors.length ? 'warn' : 'ok', delMsg + warn);
+    const fallbackFileDelete = deleteErrors.some((e) => String(e?.reason || '') === 'delete_api_unavailable');
+    const deleteLabels = deleteErrors.map((e) => e?.key || e?.prefix || e?.textureId || 'unknown').filter(Boolean);
+    const tone = fallbackFileDelete || deleteErrors.length ? 'warn' : 'ok';
+    const title = fallbackFileDelete
+      ? 'Удалено только из палитры'
+      : (deleteErrors.length ? 'Удаление выполнено частично' : 'Текстура удалена');
+    const message = fallbackFileDelete
+      ? 'Запись убрана из палитры, но backend DELETE API для удаления файлов бакета недоступен.'
+      : (deleteErrors.length
+        ? 'Палитра обновлена, но часть файлов в бакете удалить не удалось.'
+        : 'Текстура удалена из палитры и связанных файлов бакета.');
+    const bullets = [
+      `Удалено из палитры: ${removed}`,
+      alsoBucket ? `Удалено объектов в бакете: ${delObjects}` : null,
+      alsoBucket ? `Затронуто префиксов: ${delPrefixes}` : null,
+    ].filter(Boolean);
+    if (deleteLabels.length) bullets.push(`Проблемные элементы: ${deleteLabels.join(', ')}`);
+    setStatusRich(elPaletteStatus, tone, {
+      title,
+      message,
+      bullets,
+      note: fallbackFileDelete
+        ? 'Если текстуру нужно удалить полностью, включите backend DELETE API и повторите операцию.'
+        : (deleteErrors.length ? 'Проверьте backend / права S3 и повторите удаление при необходимости.' : ''),
+      meta: [`Форма: ${shapeId}`, `Текстура: ${textureId}`],
+    });
   }
 
   function isBucketTextureBroken(t) {
@@ -2584,19 +2921,52 @@ try {
               await deleteTextureFlow(shapeId, textureId);
               return;
             }
-            const ok = confirm(`Удалить текстуру "${textureId}" полностью (baket + previews + палитра)?`);
+            const ok = await showConfirmModal({
+              title: 'Удалить texture asset?',
+              subtitle: `Форма: ${shapeId}`,
+              message: `Текстура "${textureId}" будет удалена из бакета, превью и палитры.`,
+              details: 'После удаления потребуется повторная загрузка файлов, если текстуру нужно будет вернуть.',
+              confirmText: 'Удалить полностью',
+              cancelText: 'Отмена',
+              tone: 'danger'
+            });
             if (!ok) return;
-            setStatus(elBucketStatus, '', 'Удаляем…');
+            setStatusRich(elBucketStatus, '', {
+              title: 'Удаляем texture asset…',
+              message: `Форма: ${shapeId} • Текстура: ${textureId}`,
+              note: 'Удаляем запись из палитры, превью и связанные файлы бакета.',
+            });
             // Backend now resolves real bucket folder names (shapeId_/pack_ prefixes),
             // so we always send the logical textureId from UI.
-            await apiDeleteTexture(shapeId, textureId, { palette: true, files: true });
+            const res = await apiDeleteTexture(shapeId, textureId, { palette: true, files: true });
             state.bucketIndexByShapeId.delete(shapeId);
             await ensureBucketIndexLoaded(shapeId, { forceReload: true });
             renderBucketTextures(shapeId);
-            setStatus(elBucketStatus, 'ok', 'Удаление выполнено.');
+            const removed = Number(res?.paletteResult?.removed || 0);
+            const delObjects = Number(res?.filesResult?.deletedObjects || 0);
+            const delPrefixes = Array.isArray(res?.filesResult?.deletedPrefixes) ? res.filesResult.deletedPrefixes.length : 0;
+            const deleteErrors = Array.isArray(res?.filesResult?.deleteErrors) ? res.filesResult.deleteErrors : [];
+            const fallbackFileDelete = deleteErrors.some((e) => String(e?.reason || '') === 'delete_api_unavailable');
+            const tone = fallbackFileDelete || deleteErrors.length ? 'warn' : 'ok';
+            setStatusRich(elBucketStatus, tone, {
+              title: fallbackFileDelete ? 'Удалено только из палитры' : (deleteErrors.length ? 'Удаление выполнено частично' : 'Удаление выполнено'),
+              message: fallbackFileDelete
+                ? 'Запись удалена, но backend DELETE API для очистки файлов бакета недоступен.'
+                : (deleteErrors.length ? 'Часть файлов удалить не удалось. Проверьте backend и права доступа.' : 'Текстура и связанные файлы удалены.'),
+              bullets: [
+                `Удалено из палитры: ${removed}`,
+                `Удалено объектов в бакете: ${delObjects}`,
+                `Затронуто префиксов: ${delPrefixes}`,
+              ],
+              meta: [`Форма: ${shapeId}`, `Текстура: ${textureId}`],
+            });
           } catch (err) {
             console.warn(err);
-            setStatus(elBucketStatus, 'err', `Не удалось удалить: ${String(err.message || err)}`);
+            setStatusRich(elBucketStatus, 'err', {
+              title: 'Не удалось удалить texture asset',
+              message: String(err.message || err),
+              meta: [`Форма: ${shapeId}`, `Текстура: ${textureId}`],
+            });
           }
         });
       }
@@ -4056,6 +4426,8 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
       }
     });
 
+    bindConfirmModal();
+
     elTelemetryExportBtn && elTelemetryExportBtn.addEventListener('click', () => {
       telemetryTrack('admin_telemetry_export', {});
       const payload = telemetry && telemetry.exportJson ? telemetry.exportJson() : {};
@@ -4334,16 +4706,36 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
               renderUploadQueue();
 
               const conc = Number(elUploadConcurrency?.value || 3);
-              setStatus(elUploadStatus, '', `Загрузка началась… (текстур: ${parsed.textures.size}, файлов: ${parsed.tasks.length})`);
+                            setStatusRich(elUploadStatus, '', {
+                title: 'Загрузка началась…',
+                message: 'Передаём файлы в бакет по structured ZIP.',
+                bullets: [`Текстур: ${parsed.textures.size}`, `Файлов: ${parsed.tasks.length}`],
+                meta: [`Форма: ${shapeId}`],
+              });
               const res = await runUploadQueue(conc);
               if (!res.ok) {
-                setStatus(elUploadStatus, 'err', `Загрузка завершена с ошибками: ${res.failed}. Проверьте CORS бакета и имена файлов.`);
+                              setStatusRich(elUploadStatus, 'err', {
+                title: 'Загрузка завершена с ошибками',
+                message: 'Не все файлы удалось передать в бакет.',
+                bullets: [`Ошибок: ${res.failed}`],
+                note: 'Проверьте CORS бакета, имена файлов и повторите попытку.',
+                meta: [`Форма: ${shapeId}`],
+              });
                 return;
               }
-              setStatus(elUploadStatus, 'ok', 'Файлы загружены.');
+                            setStatusRich(elUploadStatus, 'ok', {
+                title: 'Файлы загружены',
+                message: 'Structured ZIP успешно выгружен в бакет.',
+                bullets: [`Текстур: ${parsed.textures.size}`, `Файлов: ${parsed.tasks.length}`],
+                meta: [`Форма: ${shapeId}`],
+              });
 
               if (elUploadAutoAdd?.checked) {
-                setStatus(elUploadStatus, '', 'Обновляем палитру…');
+                                setStatusRich(elUploadStatus, '', {
+                  title: 'Обновляем палитру…',
+                  message: 'Добавляем или обновляем записи текстур после загрузки structured ZIP.',
+                  meta: [`Форма: ${shapeId}`],
+                });
 
                 // tileSizeM: explicit (uploadTileW/H) wins, else from palette-settings defaults if exists, else omit.
                 let tileSizeM = null;
@@ -4382,7 +4774,12 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
                 const fresh = await ensurePaletteLoaded(shapeId);
                 renderTextures(shapeId, Array.isArray(fresh?.items) ? fresh.items : []);
 
-                setStatus(elUploadStatus, 'ok', 'Готово: файлы загружены, палитра обновлена и сохранена.');
+                                setStatusRich(elUploadStatus, 'ok', {
+                  title: 'Палитра обновлена',
+                  message: 'Файлы загружены, палитра сохранена.',
+                  bullets: [`Текстур обновлено: ${tasksByTexture1k.size}`],
+                  meta: [`Форма: ${shapeId}`],
+                });
                 try {
                   await ensureBucketIndexLoaded(shapeId, { forceReload: true });
                 } catch {}
@@ -4395,22 +4792,46 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
                   const toSync = (parsed?.textures && typeof parsed.textures.keys === 'function')
                     ? Array.from(parsed.textures.keys())
                     : [];
+                  let fallbackCount = 0;
                   for (const tid of toSync) {
                     if (!tid) continue;
-                    await apiSyncTexture(shapeId, tid);
+                    const syncRes = await apiSyncTexture(shapeId, tid);
+                    if (syncRes?.fallback) fallbackCount += 1;
                   }
                   state.paletteByShapeId.delete(shapeId);
                   const fresh2 = await ensurePaletteLoaded(shapeId, { forceReload: true });
                   if (parseRoute().name === 'shape') renderTextures(shapeId, Array.isArray(fresh2?.items) ? fresh2.items : []);
+                  setStatusRich(elUploadStatus, fallbackCount ? 'warn' : 'ok', {
+                    title: fallbackCount ? 'Готово: синхронизация выполнена через fallback' : 'Готово: загрузка и синхронизация завершены',
+                    message: fallbackCount
+                      ? 'Файлы загружены и палитра обновлена, но часть синхронизации выполнена без штатного backend sync endpoint.'
+                      : 'Файлы загружены, палитра обновлена и синхронизирована с бакетом.',
+                    bullets: [
+                      `Текстур синхронизировано: ${toSync.length}`,
+                      fallbackCount ? `Fallback sync: ${fallbackCount}` : null,
+                    ].filter(Boolean),
+                    note: fallbackCount ? 'Проверьте backend sync endpoint, если хотите полностью штатный сценарий.' : '',
+                    meta: [`Форма: ${shapeId}`],
+                  });
                 } catch (e) {
                   console.warn(e);
-                  setStatus(elUploadStatus, 'warn', 'Файлы загружены, но синхронизация палитры по бакету не удалась. Проверьте backend / доступы S3.');
+                  setStatusRich(elUploadStatus, 'warn', {
+                    title: 'Загрузка завершена, но синхронизация не удалась',
+                    message: 'Файлы уже загружены, но обновить палитру по данным бакета не получилось.',
+                    note: 'Проверьте backend / доступы S3 и повторите sync при необходимости.',
+                    meta: [`Форма: ${shapeId}`],
+                  });
                 }
               } else {
                 try {
                   await ensureBucketIndexLoaded(shapeId, { forceReload: true });
                 } catch {}
-                setStatus(elUploadStatus, 'ok', 'Готово: файлы загружены. Палитра не изменялась, так как auto-add выключен.');
+                                setStatusRich(elUploadStatus, 'ok', {
+                  title: 'Файлы загружены',
+                  message: 'Палитра не изменялась, потому что auto-add выключен.',
+                  bullets: [`Текстур: ${parsed.textures.size}`, `Файлов: ${parsed.tasks.length}`],
+                  meta: [`Форма: ${shapeId}`],
+                });
               }
 
               return;
@@ -4463,16 +4884,39 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
             renderUploadQueue();
 
             const conc = Number(elUploadConcurrency?.value || 3);
-            setStatus(elUploadStatus, '', 'Загрузка началась…');
+            setStatusRich(elUploadStatus, '', {
+              title: 'Загрузка началась…',
+              message: 'Передаём выбранные файлы в бакет.',
+              bullets: [`Texture ID: ${textureId}`, `Качество: ${quality}`, `Файлов: ${tasks.length}`],
+              meta: [`Форма: ${shapeId}`],
+            });
             const res = await runUploadQueue(conc);
             if (!res.ok) {
-              setStatus(elUploadStatus, 'err', `Загрузка завершена с ошибками: ${res.failed}. Проверьте CORS бакета и имена файлов.`);
+              setStatusRich(elUploadStatus, 'err', {
+                title: 'Загрузка завершена с ошибками',
+                message: 'Не все файлы удалось передать в бакет.',
+                bullets: [`Ошибок: ${res.failed}`],
+                note: 'Проверьте CORS бакета, имена файлов и повторите попытку.',
+                meta: [`Форма: ${shapeId}`],
+              });
               return;
             }
-            setStatus(elUploadStatus, 'ok', 'Файлы загружены.');
+            setStatusRich(elUploadStatus, 'ok', {
+              title: 'Файлы загружены',
+              message: 'Выбранные файлы успешно выгружены в бакет.',
+              bullets: [`Texture ID: ${textureId}`, `Качество: ${quality}`, `Файлов: ${tasks.length}`],
+              meta: [`Форма: ${shapeId}`],
+            });
 
             if (elUploadAutoAdd?.checked) {
-              setStatus(elUploadStatus, '', quality === '2k' ? 'Синхронизируем палитру после загрузки 2k…' : 'Обновляем палитру…');
+              setStatusRich(elUploadStatus, '', {
+                title: quality === '2k' ? 'Синхронизируем палитру…' : 'Обновляем палитру…',
+                message: quality === '2k'
+                  ? 'Подтягиваем canonical карты из бакета после загрузки 2k.'
+                  : 'Добавляем или обновляем запись текстуры в палитре.',
+                bullets: [`Texture ID: ${textureId}`, `Качество: ${quality}`],
+                meta: [`Форма: ${shapeId}`],
+              });
 
               let tileSizeM = null;
               if (quality === '1k') {
@@ -4498,17 +4942,37 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
                 await upsertItemAndSavePalette(shapeId, item);
               }
 
-              // Sync from bucket to ensure correct extensions/paths (png/webp mix, non-standard names)
-              // and to keep palette items anchored to the canonical 1k representation.
+              let syncUsedFallback = false;
+              let syncFailed = false;
               try {
-                await apiSyncTexture(shapeId, textureId);
+                const syncRes = await apiSyncTexture(shapeId, textureId);
+                syncUsedFallback = Boolean(syncRes?.fallback);
               } catch (e) {
                 console.warn(e);
-                setStatus(elUploadStatus, 'warn', 'Палитра обновлена, но синхронизация по бакету не удалась. Проверьте backend / доступы S3.');
+                syncFailed = true;
+                setStatusRich(elUploadStatus, 'warn', {
+                  title: 'Палитра обновлена, но синхронизация не удалась',
+                  message: 'Файлы загружены и запись в палитре сохранена, но sync по бакету завершился ошибкой.',
+                  bullets: [`Texture ID: ${textureId}`, `Качество: ${quality}`],
+                  note: 'Проверьте backend / доступы S3 и повторите sync при необходимости.',
+                  meta: [`Форма: ${shapeId}`],
+                });
               }
-              setStatus(elUploadStatus, 'ok', quality === '2k'
-                ? 'Готово: 2k-файлы загружены, палитра синхронизирована с существующей 1k-текстурой.'
-                : 'Готово: файлы загружены, палитра обновлена и сохранена.');
+              if (!syncFailed) {
+                setStatusRich(elUploadStatus, syncUsedFallback ? 'warn' : 'ok', {
+                  title: syncUsedFallback ? 'Готово: синхронизация выполнена через fallback' : 'Готово: загрузка завершена',
+                  message: quality === '2k'
+                    ? '2k-файлы загружены и синхронизированы с существующей 1k-текстурой.'
+                    : 'Файлы загружены, палитра обновлена и сохранена.',
+                  bullets: [
+                    `Texture ID: ${textureId}`,
+                    `Качество: ${quality}`,
+                    syncUsedFallback ? 'Sync: fallback' : 'Sync: backend',
+                  ],
+                  note: syncUsedFallback ? 'Штатный backend sync endpoint недоступен — использован безопасный fallback.' : '',
+                  meta: [`Форма: ${shapeId}`],
+                });
+              }
               try {
                 await ensureBucketIndexLoaded(shapeId, { forceReload: true });
               } catch {}
