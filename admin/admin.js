@@ -1,5 +1,5 @@
 // BUILD: v28 2026-01-16f (runtime-config)
-const __BUILD_ID__ = "20260421-f24db";
+const __BUILD_ID__ = "20260421-f24df";
 console.log("[Admin] build", __BUILD_ID__);
 /* Admin (Step 3 start) — shapes list + shape details (read-only palette), router scaffold */
 (async () => {
@@ -415,6 +415,65 @@ function setAdminSafeImageSource(img, value, options = {}) {
     return false;
   }
   return true;
+}
+
+function formatAdminErrorMessage(err, fallback = 'Неизвестная ошибка') {
+  const raw = String(err?.message || err || '').trim();
+  if (!raw) return fallback;
+  if (raw === 'preview_url_empty') return 'Для выбранной текстуры не найден preview/albedo.';
+  if (raw === 'preview_url_unsafe') return 'URL превью не прошёл проверку безопасности.';
+  if (raw === 'preview_image_load_failed') return 'Файл превью не удалось загрузить.';
+  if (raw === 'upload_cancelled') return 'Операция отменена пользователем.';
+  if (raw === 'item_not_found_in_palette') return 'Текстура не найдена в палитре. Обновите список и повторите попытку.';
+  if (raw === 'map_modal_not_found') return 'Не удалось открыть окно сопоставления карт.';
+  return raw;
+}
+
+function describeAdminPreviewProblem(sourceValue, safeUrl, err) {
+  const rawSource = String(sourceValue || '').trim();
+  const rawMessage = String(err?.message || err || '').trim();
+  if (!rawSource) {
+    return {
+      title: 'Превью недоступно',
+      message: 'Для этой текстуры в палитре не найден preview/albedo.',
+      note: 'Параметры всё равно можно сохранить. Для визуального контроля добавьте preview или albedo в палитру/бакет.',
+    };
+  }
+  if (!safeUrl || rawMessage === 'preview_url_unsafe') {
+    return {
+      title: 'Превью заблокировано',
+      message: 'URL превью не прошёл безопасную проверку и не был открыт в админке.',
+      note: 'Проверьте preview/albedo URL в палитре и убедитесь, что ссылка ведёт на допустимый ресурс.',
+    };
+  }
+  if (rawMessage === 'preview_image_load_failed') {
+    return {
+      title: 'Превью не загрузилось',
+      message: 'Файл превью найден, но браузер не смог его открыть.',
+      note: 'Проверьте, что albedo действительно доступна по URL и возвращает изображение, а не HTML/ошибку доступа.',
+    };
+  }
+  return {
+    title: 'Превью недоступно',
+    message: formatAdminErrorMessage(err, 'Не удалось подготовить превью.'),
+    note: 'Параметры можно сохранить и без превью, но стоит проверить albedo/preview для этой текстуры.',
+  };
+}
+
+async function syncTexturesBatch(shapeId, textureIds) {
+  const ids = Array.from(new Set((Array.isArray(textureIds) ? textureIds : []).map((v) => String(v || '').trim()).filter(Boolean)));
+  const summary = { requested: ids.length, synced: 0, fallback: 0, failed: 0, failures: [] };
+  for (const tid of ids) {
+    try {
+      const res = await apiSyncTexture(shapeId, tid);
+      summary.synced += 1;
+      if (res?.fallback) summary.fallback += 1;
+    } catch (e) {
+      summary.failed += 1;
+      summary.failures.push({ textureId: tid, message: formatAdminErrorMessage(e, 'Не удалось синхронизировать текстуру.') });
+    }
+  }
+  return summary;
 }
 
 
@@ -1040,7 +1099,7 @@ function normalizeTextureId(v, shapeId) {
     return new Promise((resolve, reject) => {
       // Reset
       setStatus(elMapModalStatus, '', '');
-      elMapTbody.innerHTML = '';
+      elMapTbody.replaceChildren();
 
       const textureId = task.textureId;
       const quality = task.quality;
@@ -1061,15 +1120,32 @@ function normalizeTextureId(v, shapeId) {
         { type: 'ao', required: false },
       ];
 
+      const autoSuggestedCount = rows.reduce((acc, row) => {
+        const picked = suggested.get(row.type);
+        return acc + ((picked && byPath.has(picked)) ? 1 : 0);
+      }, 0);
+      setStatusRich(elMapModalStatus, 'warn', {
+        title: 'Требуется ручное сопоставление карт',
+        message: 'Автоопределение не смогло надёжно разобрать все карты по именам файлов из structured ZIP.',
+        bullets: [`Файлов в группе: ${entries.length}`, `Автоподсказок: ${autoSuggestedCount}/${rows.length}`],
+        note: 'Обязательные карты: albedo, normal, roughness, height. AO можно оставить пустой.',
+        meta: [`Форма: ${shapeId}`, `Текстура: ${textureId}`, `Качество: ${quality}`],
+      });
+
       const selects = new Map();
 
       for (const row of rows) {
         const tr = document.createElement('tr');
 
         const tdType = document.createElement('td');
-        tdType.innerHTML = row.required
-          ? `<b>${escapeHtml(row.type)}</b> <span class="uploadPill">обяз.</span>`
-          : `<b>${escapeHtml(row.type)}</b> <span class="uploadPill">опц.</span>`;
+        const typeStrong = document.createElement('b');
+        typeStrong.textContent = row.type;
+        tdType.appendChild(typeStrong);
+        tdType.appendChild(document.createTextNode(' '));
+        const typePill = document.createElement('span');
+        typePill.className = 'uploadPill';
+        typePill.textContent = row.required ? 'обяз.' : 'опц.';
+        tdType.appendChild(typePill);
         tr.appendChild(tdType);
 
         const tdSel = document.createElement('td');
@@ -1084,6 +1160,7 @@ function normalizeTextureId(v, shapeId) {
           const o = document.createElement('option');
           o.value = e.originalPath;
           o.textContent = e.filename;
+          o.title = e.originalPath;
           sel.appendChild(o);
         }
 
@@ -1122,22 +1199,35 @@ function normalizeTextureId(v, shapeId) {
       const onApply = () => {
         // Validate required
         const required = ['albedo', 'normal', 'roughness', 'height'];
-        for (const t of required) {
-          const v = selects.get(t)?.value || '';
-          if (!v) {
-            setStatus(elMapModalStatus, 'err', `Выберите файл для обязательной карты: ${t}`);
-            return;
-          }
+        const missingRequired = required.filter((t) => !(selects.get(t)?.value || ''));
+        if (missingRequired.length) {
+          setStatusRich(elMapModalStatus, 'err', {
+            title: 'Не выбраны обязательные карты',
+            message: 'Для structured ZIP нужны albedo, normal, roughness и height.',
+            bullets: missingRequired.map((t) => `Не выбрана карта: ${t}`),
+            note: 'AO можно оставить пустой. Если имя файла неочевидно, выберите его вручную из списка.',
+          });
+          return;
         }
         // Validate uniqueness (avoid selecting the same file for different required maps)
-        const used = new Set();
+        const used = new Map();
+        const duplicateFiles = [];
         for (const t of required) {
           const v = selects.get(t).value;
           if (used.has(v)) {
-            setStatus(elMapModalStatus, 'err', 'Один и тот же файл выбран для нескольких обязательных карт. Проверьте сопоставление.');
-            return;
+            duplicateFiles.push(byPath.get(v)?.filename || v || 'unknown');
+            continue;
           }
-          used.add(v);
+          used.set(v, t);
+        }
+        if (duplicateFiles.length) {
+          setStatusRich(elMapModalStatus, 'err', {
+            title: 'Один файл выбран для нескольких карт',
+            message: 'Для разных обязательных карт нужны разные файлы. Проверьте сопоставление.',
+            bullets: duplicateFiles.map((name) => `Повторяется файл: ${name}`),
+            note: 'Обычно albedo, normal, roughness и height — это разные изображения.',
+          });
+          return;
         }
 
         const mapping = new Map();
@@ -2867,12 +2957,13 @@ function setTelemetryStatus(message, kind) {
     for (const it of list) {
       const id = it?.id || it?.textureId || '';
       const name = it?.name || id || '(без названия)';
-      const previewUrl = normalizeAdminSafeUrl(pickMediaUrl([
+      const previewSource = pickMediaUrl([
         it?.maps?.albedoUrl,
         it?.maps?.albedo,
         it?.previewUrl,
         it?.preview,
-      ], { shapeId, textureId: id, quality: '1k' }));
+      ], { shapeId, textureId: id, quality: '1k' });
+      const previewUrl = normalizeAdminSafeUrl(previewSource);
 
       const hasTileOverride = !!it?.tileSizeM;
       const hasParams = it?.params && typeof it.params === 'object' && Object.keys(it.params).length > 0;
@@ -2921,7 +3012,10 @@ function setTelemetryStatus(message, kind) {
       const pillParams = document.createElement('span');
       pillParams.className = hasParams ? 'pill pill--set' : 'pill';
       pillParams.textContent = hasParams ? 'params' : 'params: default';
-      pillsEl.append(pillTile, document.createTextNode(' '), pillParams);
+      const pillPreview = document.createElement('span');
+      pillPreview.className = previewUrl ? 'pill' : 'pill pill--warn';
+      pillPreview.textContent = previewUrl ? 'preview' : 'без preview';
+      pillsEl.append(pillTile, document.createTextNode(' '), pillParams, document.createTextNode(' '), pillPreview);
 
       const actions = document.createElement('div');
       actions.className = 'row tileActions';
@@ -3159,11 +3253,12 @@ try {
       const inPalette = !!texCanonical && paletteIds.has(texCanonical);
       const broken = isBucketTextureBroken(t);
       const has2k = !!t?.qualities?.['2k'];
-      const previewUrl = normalizeAdminSafeUrl(pickMediaUrl([
+      const previewSource = pickMediaUrl([
         t?.qualities?.['1k']?.maps?.albedo?.key,
         t?.previewKey,
         t?.preview,
-      ], { shapeId: (state.activeShapeId || shapeId || ''), textureId, quality: '1k' }));
+      ], { shapeId: (state.activeShapeId || shapeId || ''), textureId, quality: '1k' });
+      const previewUrl = normalizeAdminSafeUrl(previewSource);
 
       const card = document.createElement('div');
       card.className = 'tile';
@@ -3191,6 +3286,7 @@ try {
         { cls: 'pill', text: '1k' },
         { cls: 'pill', text: has2k ? '2k' : '2k: нет' },
         { cls: broken ? 'pill pill--warn' : 'pill', text: broken ? 'неполная 1k' : 'ok' },
+        { cls: previewUrl ? 'pill' : 'pill pill--warn', text: previewUrl ? 'preview' : 'без preview' },
       ];
       pillSpecs.forEach((spec, index) => {
         const pill = document.createElement('span');
@@ -4109,14 +4205,22 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
       };
     }
 
-    const previewUrl = normalizeAdminSafeUrl(pickMediaUrl([
+    const previewSource = pickMediaUrl([
       item?.maps?.albedoUrl,
       item?.maps?.albedo,
       item?.previewUrl,
       item?.preview,
-    ], { shapeId: (state.activeShapeId || ''), textureId: (item?.id || item?.textureId || ''), quality: '1k' }));
+    ], { shapeId: (state.activeShapeId || ''), textureId: (item?.id || item?.textureId || ''), quality: '1k' });
+    const previewUrl = normalizeAdminSafeUrl(previewSource);
+    const previewMissingInfo = !previewUrl
+      ? describeAdminPreviewProblem(previewSource, previewUrl, previewSource ? new Error('preview_url_unsafe') : new Error('preview_url_empty'))
+      : null;
     if (elTexPreview && previewUrl) {
-      elTexPreview.onerror = () => { try { elTexPreview.style.display = 'none'; } catch {} };
+      elTexPreview.onerror = () => {
+        try { elTexPreview.style.display = 'none'; } catch {}
+        const info = describeAdminPreviewProblem(previewSource, previewUrl, new Error('preview_image_load_failed'));
+        elTexPreviewHint.textContent = info.message;
+      };
       elTexPreview.style.display = '';
       setAdminSafeImageSource(elTexPreview, previewUrl);
       elTexPreviewHint.textContent = 'Превью: albedo (из палитры)';
@@ -4125,7 +4229,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
         elTexPreview.removeAttribute('src');
         elTexPreview.style.display = 'none';
       }
-      elTexPreviewHint.textContent = 'Превью недоступно (в palettes/*.json нет preview/albedo)';
+      elTexPreviewHint.textContent = previewMissingInfo ? previewMissingInfo.message : 'Превью недоступно';
     }
 
     const defaults = getDefaultsForShape(shapeId);
@@ -4334,6 +4438,14 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
 
     showTexModal(true);
     setStatus(elTexModalStatus, '', '');
+    if (previewMissingInfo) {
+      setStatusRich(elTexModalStatus, 'warn', {
+        title: previewMissingInfo.title,
+        message: previewMissingInfo.message,
+        note: previewMissingInfo.note,
+        meta: [`Форма: ${shapeId}`, `Текстура: ${itemId}`],
+      });
+    }
 
     // Load and draw preview (non-blocking)
     texPreviewLoaded = false;
@@ -4352,7 +4464,14 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
           }
         } catch (e) {
           console.warn(e);
-          elTexPreviewHint.textContent = 'Превью недоступно (не удалось загрузить albedo).';
+          const info = describeAdminPreviewProblem(previewSource, previewUrl, e);
+          elTexPreviewHint.textContent = info.message;
+          setStatusRich(elTexModalStatus, 'warn', {
+            title: info.title,
+            message: info.message,
+            note: info.note,
+            meta: [`Форма: ${shapeId}`, `Текстура: ${itemId}`],
+          });
         }
       })();
     }
@@ -5275,32 +5394,39 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
                   const toSync = (parsed?.textures && typeof parsed.textures.keys === 'function')
                     ? Array.from(parsed.textures.keys())
                     : [];
-                  let fallbackCount = 0;
-                  for (const tid of toSync) {
-                    if (!tid) continue;
-                    const syncRes = await apiSyncTexture(shapeId, tid);
-                    if (syncRes?.fallback) fallbackCount += 1;
-                  }
+                  const syncSummary = await syncTexturesBatch(shapeId, toSync);
                   state.paletteByShapeId.delete(shapeId);
                   const fresh2 = await ensurePaletteLoaded(shapeId, { forceReload: true });
                   if (parseRoute().name === 'shape') renderTextures(shapeId, Array.isArray(fresh2?.items) ? fresh2.items : []);
-                  setStatusRich(elUploadStatus, fallbackCount ? 'warn' : 'ok', {
-                    title: fallbackCount ? 'Готово: синхронизация выполнена через fallback' : 'Готово: загрузка и синхронизация завершены',
-                    message: fallbackCount
+                  const failedLabels = syncSummary.failures.map((item) => item.textureId).filter(Boolean);
+                  const tone = syncSummary.failed > 0 || syncSummary.fallback > 0 ? 'warn' : 'ok';
+                  const title = syncSummary.failed > 0
+                    ? 'Загрузка завершена, синхронизация выполнена частично'
+                    : (syncSummary.fallback > 0 ? 'Готово: синхронизация выполнена через fallback' : 'Готово: загрузка и синхронизация завершены');
+                  const message = syncSummary.failed > 0
+                    ? 'Файлы уже загружены и палитра обновлена, но часть текстур не удалось синхронизировать с бакетом.'
+                    : (syncSummary.fallback > 0
                       ? 'Файлы загружены и палитра обновлена, но часть синхронизации выполнена без штатного backend sync endpoint.'
-                      : 'Файлы загружены, палитра обновлена и синхронизирована с бакетом.',
+                      : 'Файлы загружены, палитра обновлена и синхронизирована с бакетом.');
+                  setStatusRich(elUploadStatus, tone, {
+                    title,
+                    message,
                     bullets: [
-                      `Текстур синхронизировано: ${toSync.length}`,
-                      fallbackCount ? `Fallback sync: ${fallbackCount}` : null,
+                      `Текстур синхронизировано: ${syncSummary.synced}/${syncSummary.requested}`,
+                      syncSummary.fallback > 0 ? `Fallback sync: ${syncSummary.fallback}` : null,
+                      syncSummary.failed > 0 ? `Не удалось синхронизировать: ${syncSummary.failed}` : null,
+                      failedLabels.length ? `Проблемные текстуры: ${failedLabels.join(', ')}` : null,
                     ].filter(Boolean),
-                    note: fallbackCount ? 'Проверьте backend sync endpoint, если хотите полностью штатный сценарий.' : '',
+                    note: syncSummary.failed > 0
+                      ? 'Откройте проблемные текстуры и повторите sync после проверки bucket index / backend endpoint.'
+                      : (syncSummary.fallback > 0 ? 'Проверьте backend sync endpoint, если хотите полностью штатный сценарий.' : ''),
                     meta: [`Форма: ${shapeId}`],
                   });
                 } catch (e) {
                   console.warn(e);
                   setStatusRich(elUploadStatus, 'warn', {
-                    title: 'Загрузка завершена, но синхронизация не удалась',
-                    message: 'Файлы уже загружены, но обновить палитру по данным бакета не получилось.',
+                    title: 'Загрузка завершена, но итог синхронизации не получен',
+                    message: formatAdminErrorMessage(e, 'Файлы уже загружены, но обновить палитру по данным бакета не получилось.'),
                     note: 'Проверьте backend / доступы S3 и повторите sync при необходимости.',
                     meta: [`Форма: ${shapeId}`],
                   });
@@ -5425,23 +5551,22 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
                 await upsertItemAndSavePalette(shapeId, item);
               }
 
-              let syncUsedFallback = false;
-              let syncFailed = false;
-              try {
-                const syncRes = await apiSyncTexture(shapeId, textureId);
-                syncUsedFallback = Boolean(syncRes?.fallback);
-              } catch (e) {
-                console.warn(e);
-                syncFailed = true;
+              const syncSummary = await syncTexturesBatch(shapeId, [textureId]);
+              if (syncSummary.failed > 0) {
+                const firstFailure = syncSummary.failures[0];
                 setStatusRich(elUploadStatus, 'warn', {
                   title: 'Палитра обновлена, но синхронизация не удалась',
                   message: 'Файлы загружены и запись в палитре сохранена, но sync по бакету завершился ошибкой.',
-                  bullets: [`Texture ID: ${textureId}`, `Качество: ${quality}`],
+                  bullets: [
+                    `Texture ID: ${textureId}`,
+                    `Качество: ${quality}`,
+                    firstFailure ? `Причина: ${firstFailure.message}` : null,
+                  ].filter(Boolean),
                   note: 'Проверьте backend / доступы S3 и повторите sync при необходимости.',
                   meta: [`Форма: ${shapeId}`],
                 });
-              }
-              if (!syncFailed) {
+              } else {
+                const syncUsedFallback = syncSummary.fallback > 0;
                 setStatusRich(elUploadStatus, syncUsedFallback ? 'warn' : 'ok', {
                   title: syncUsedFallback ? 'Готово: синхронизация выполнена через fallback' : 'Готово: загрузка завершена',
                   message: quality === '2k'

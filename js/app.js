@@ -925,6 +925,18 @@ const { checkXrSupport, cleanupXR, stopAR, fullRestartAR } = arSessionHelpers;
 // Geometry state adapters
 // ------------------------
 const computeAreaM2 = () => computeAreaM2FromContours(state.points, state.holes);
+const computeTotalAreaM2 = () => {
+  const zones = Array.isArray(state.arZones) ? state.arZones.filter(Boolean) : [];
+  if (!zones.length) return computeAreaM2();
+  let total = 0;
+  let hasContour = false;
+  for (const zone of zones) {
+    if (!zone || !Array.isArray(zone.points) || zone.points.length < 3) continue;
+    hasContour = true;
+    total += computeAreaM2FromContours(zone.points, zone.holes);
+  }
+  return hasContour ? Math.max(0, total) : computeAreaM2();
+};
 syncSelectedTileToActiveZone(state.selectedTile);
 syncRotationToActiveZone(state.textureRotationDeg);
 
@@ -3879,7 +3891,7 @@ const updateMeasureLabels = (xrCam) => updateMeasureLabelsHelper({
   xrCam,
   fmtMeters,
 });
-const updateAreaUI = () => updateAreaUIHelper({ UI, state, computeAreaM2, fmtArea });
+const updateAreaUI = () => updateAreaUIHelper({ UI, state, computeAreaM2, computeTotalAreaM2, fmtArea });
 
 // ------------------------
 // AR debug overlay (Patch 1)

@@ -27,6 +27,7 @@ This project uses a simple repeatable release ritual so every fix or improvement
 - guarded public helper files do not regress to unsafe DOM patterns
 - palette-validator.js is guarded against unsafe DOM regressions and missing safe URL helpers
 - key admin periphery render zones (upload queue, bulk params, telemetry blocks) are guarded against unsafe DOM patterns
+- residual DOM cleanup spots are guarded so ZIP-mapping modal and AR help UI do not regress to unsafe DOM patterns
 - module structure docs are present and in sync with the modular layout
 - release docs exist
 - core content files still contain tiles and shapes

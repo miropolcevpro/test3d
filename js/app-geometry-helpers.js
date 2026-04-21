@@ -254,16 +254,18 @@ export function updateMeasureLabels({ state, measureEls, measureLayer, floorY, a
   }
 }
 
-export function updateAreaUI({ UI, state, computeAreaM2, fmtArea }) {
+export function updateAreaUI({ UI, state, computeAreaM2, computeTotalAreaM2, fmtArea }) {
   if (!UI.arArea) return;
 
-  const areaText = (state.points.length >= 3) ? fmtArea(computeAreaM2()) : '—';
-  if (state.phase === 'ar_final') {
-    if (UI.arProductTitle) UI.arProductTitle.textContent = `Площадь: ${areaText}`;
-    UI.arArea.textContent = '';
-    return;
+  const currentAreaM2 = Math.max(0, Number((typeof computeAreaM2 === 'function' ? computeAreaM2() : 0)) || 0);
+  let totalAreaM2 = currentAreaM2;
+  if (typeof computeTotalAreaM2 === 'function') {
+    const nextTotal = Number(computeTotalAreaM2());
+    if (Number.isFinite(nextTotal) && nextTotal >= 0) totalAreaM2 = nextTotal;
   }
+  const hasAnyArea = totalAreaM2 > 0.0001 || currentAreaM2 > 0.0001;
+  const areaText = hasAnyArea ? `Площадь: ${fmtArea(totalAreaM2)}` : 'Площадь: —';
 
   if (UI.arProductTitle && state.selectedTile) UI.arProductTitle.textContent = state.selectedTile.name;
-  UI.arArea.textContent = state.closed ? fmtArea(computeAreaM2()) : areaText;
+  UI.arArea.textContent = areaText;
 }

@@ -119,20 +119,76 @@ function ensureArHelpUI({ currentUrl } = {}) {
 
   const overlay = document.createElement('div');
   overlay.id = 'arHelpModalOverlay';
-  overlay.innerHTML = `
-    <div id="arHelpModal" role="dialog" aria-modal="true" aria-labelledby="arHelpTitle">
-      <div id="arHelpTitle">Не удалось запустить AR</div>
-      <div id="arHelpText"></div>
-      <div id="arHelpBtns">
-        <button id="arHelpBtnChrome" class="arHelpBtn arHelpBtnPrimary" style="display:none;">Открыть в Chrome</button>
-        <button id="arHelpBtnArcorePlay" class="arHelpBtn arHelpBtnSecondary" style="display:none;">Скачать из Play Market</button>
-        <div id="arHelpArcoreNote" style="display:none; margin-top:6px; font-size:12px; opacity:0.85;">Если Play Market недоступен, скачайте напрямую по ссылке ниже.</div>
-        <button id="arHelpBtnArcoreAlt" class="arHelpBtn arHelpBtnSecondary" style="display:none;">Скачать APK (альтернативный источник)</button>
-        <div id="arHelpArcoreWarn" style="display:none; margin-top:6px; font-size:11px; opacity:0.75;">Скчать в обход Play Market. Устанавливайте только если доверяете источнику.</div>
-        <button id="arHelpBtnOk" class="arHelpBtn arHelpBtnSecondary">ОК</button>
-      </div>
-    </div>
-  `;
+
+  const modal = document.createElement('div');
+  modal.id = 'arHelpModal';
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
+  modal.setAttribute('aria-labelledby', 'arHelpTitle');
+
+  const title = document.createElement('div');
+  title.id = 'arHelpTitle';
+  title.textContent = 'Не удалось запустить AR';
+  modal.appendChild(title);
+
+  const text = document.createElement('div');
+  text.id = 'arHelpText';
+  modal.appendChild(text);
+
+  const btns = document.createElement('div');
+  btns.id = 'arHelpBtns';
+
+  const btnChrome = document.createElement('button');
+  btnChrome.id = 'arHelpBtnChrome';
+  btnChrome.className = 'arHelpBtn arHelpBtnPrimary';
+  btnChrome.type = 'button';
+  btnChrome.style.display = 'none';
+  btnChrome.textContent = 'Открыть в Chrome';
+  btns.appendChild(btnChrome);
+
+  const btnArcorePlay = document.createElement('button');
+  btnArcorePlay.id = 'arHelpBtnArcorePlay';
+  btnArcorePlay.className = 'arHelpBtn arHelpBtnSecondary';
+  btnArcorePlay.type = 'button';
+  btnArcorePlay.style.display = 'none';
+  btnArcorePlay.textContent = 'Скачать из Play Market';
+  btns.appendChild(btnArcorePlay);
+
+  const arcoreNote = document.createElement('div');
+  arcoreNote.id = 'arHelpArcoreNote';
+  arcoreNote.style.display = 'none';
+  arcoreNote.style.marginTop = '6px';
+  arcoreNote.style.fontSize = '12px';
+  arcoreNote.style.opacity = '0.85';
+  arcoreNote.textContent = 'Если Play Market недоступен, скачайте напрямую по ссылке ниже.';
+  btns.appendChild(arcoreNote);
+
+  const btnArcoreAlt = document.createElement('button');
+  btnArcoreAlt.id = 'arHelpBtnArcoreAlt';
+  btnArcoreAlt.className = 'arHelpBtn arHelpBtnSecondary';
+  btnArcoreAlt.type = 'button';
+  btnArcoreAlt.style.display = 'none';
+  btnArcoreAlt.textContent = 'Скачать APK (альтернативный источник)';
+  btns.appendChild(btnArcoreAlt);
+
+  const arcoreWarn = document.createElement('div');
+  arcoreWarn.id = 'arHelpArcoreWarn';
+  arcoreWarn.style.display = 'none';
+  arcoreWarn.style.marginTop = '6px';
+  arcoreWarn.style.fontSize = '11px';
+  arcoreWarn.style.opacity = '0.75';
+  arcoreWarn.textContent = 'Скчать в обход Play Market. Устанавливайте только если доверяете источнику.';
+  btns.appendChild(arcoreWarn);
+
+  const btnOk = document.createElement('button');
+  btnOk.id = 'arHelpBtnOk';
+  btnOk.className = 'arHelpBtn arHelpBtnSecondary';
+  btnOk.type = 'button';
+  btnOk.textContent = 'ОК';
+  btns.appendChild(btnOk);
+
+  modal.appendChild(btns);
+  overlay.appendChild(modal);
   document.body.appendChild(overlay);
 
   const close = () => { overlay.style.display = 'none'; };
@@ -226,12 +282,23 @@ function updateArEntryUI(UI, { currentUrl } = {}) {
     if (!hint) {
       hint = document.createElement('div');
       hint.id = 'arChromeHint';
-      hint.innerHTML = `
-        <div><b>AR работает только в Google Chrome на Android.</b><br/>Откройте страницу в Chrome, чтобы запустить AR.</div>
-        <button type="button" id="btnOpenInChrome">Открыть в Chrome</button>
-      `;
+
+      const hintText = document.createElement('div');
+      const hintStrong = document.createElement('b');
+      hintStrong.textContent = 'AR работает только в Google Chrome на Android.';
+      hintText.appendChild(hintStrong);
+      hintText.appendChild(document.createElement('br'));
+      hintText.appendChild(document.createTextNode('Откройте страницу в Chrome, чтобы запустить AR.'));
+      hint.appendChild(hintText);
+
+      const openBtn = document.createElement('button');
+      openBtn.type = 'button';
+      openBtn.id = 'btnOpenInChrome';
+      openBtn.textContent = 'Открыть в Chrome';
+      hint.appendChild(openBtn);
+
       btn.parentElement?.appendChild(hint);
-      hint.querySelector('#btnOpenInChrome')?.addEventListener('click', () => openInChrome(resolvedCurrentUrl()));
+      openBtn.addEventListener('click', () => openInChrome(resolvedCurrentUrl()));
     } else {
       hint.style.display = '';
     }

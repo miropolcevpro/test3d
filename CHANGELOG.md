@@ -1,3 +1,17 @@
+## 2026-04-21 — Patch f24df
+- AR-показ площади больше не исчезает после заливки: `arArea` сохраняется и продолжает показывать площадь в финальном режиме.
+- Для многозонного сценария площадь теперь считается суммарно по всем зонам и обновляется во время построения новой зоны, чтобы пользователь всегда видел общий расчёт площади.
+- Заголовок выбранной текстуры в AR больше не подменяется площадью; площадь вынесена в отдельную строку и остаётся видимой без вмешательства в геометрию и state flow.
+- Release token: `20260421-f24df`
+
+## 2026-04-21 — Patch f24dc
+
+- Cleanup patch: removed the last residual `innerHTML` usage in the admin ZIP-mapping modal and replaced static `innerHTML` templates in AR help UI with DOM-based construction.
+- Switched `openZipMappingModal()` reset path to `replaceChildren()` and built the map type cell through `createElement`/`textContent` instead of string HTML.
+- Rebuilt `ensureArHelpUI()` and the non-Chrome Android hint in `app-ar-entry-helpers.js` using DOM APIs only, preserving existing IDs, behavior and styling.
+- No AR geometry, multizone, curb, backend or admin API logic changes.
+- Release token: `20260421-f24dc`
+
 ## 2026-04-21 — Patch f24db
 
 - Усилен `scripts/release_check.py` для admin/periphery: добавлены guards для `js/palette-validator.js` и ключевых admin render-зон (`upload queue`, `bulk params`, основные telemetry blocks).
@@ -504,3 +518,18 @@ Release token: `20260411-f24g`
 - Обновление теперь откладывается до безопасного момента и показывает мягкий update-prompt с действиями «Обновить» и «Позже».
 - Добавлены guards для активного AR-экрана, fullscreen/immersive состояний, splash-экрана и короткого idle-окна после действий пользователя.
 - Release token: `20260421-f24cx`
+
+## 2026-04-21 — Patch f24de
+
+- P23: improved admin edge-case UX without changing backend/API semantics.
+- Structured ZIP mapping now shows clearer guidance, file counts, and actionable validation errors for required maps and duplicate selections.
+- Admin texture modal now explains missing/unsafe/broken preview states more clearly and keeps warnings visible after opening the modal.
+- Upload + auto-add + sync now summarizes partial sync, fallback sync, and failed texture IDs instead of hiding the exact outcome.
+- Palette and bucket texture cards now mark edge-case items with "без preview" for faster operator triage.
+- Release token: `20260421-f24de`
+
+## 2026-04-21 — Patch f24dd
+- Расширен `release_check.py` на residual DOM cleanup spots: ZIP-mapping modal в `admin/admin.js` и AR help UI в `js/app-ar-entry-helpers.js`.
+- Release check теперь валит релиз, если эти зоны снова возвращаются к `innerHTML`, `outerHTML` или `insertAdjacentHTML`, и проверяет ожидаемый безопасный DOM render-path.
+- `docs/RELEASE.md` синхронизирован с новым coverage release-check.
+- Release token: `20260421-f24de`

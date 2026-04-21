@@ -78,8 +78,8 @@ ADMIN_SMOKE_PATTERNS = [
     ('deleteTextureFlow uses apiGetConfig', r'deleteTextureFlow\s*\([^)]*\)\s*\{[\s\S]*?apiGetConfig\s*\('),
     ('deleteTextureFlow uses apiDeleteTexture', r'deleteTextureFlow\s*\([^)]*\)\s*\{[\s\S]*?apiDeleteTexture\s*\('),
     ('bucket delete path uses apiDeleteTexture', r'renderBucketTextures\s*\([^)]*\)\s*\{[\s\S]*?apiDeleteTexture\s*\('),
-    ('structured upload auto-sync uses apiSyncTexture', r'await\s+apiSyncTexture\s*\(\s*shapeId\s*,\s*tid\s*\)'),
-    ('manual upload auto-sync uses apiSyncTexture', r'await\s+apiSyncTexture\s*\(\s*shapeId\s*,\s*textureId\s*\)'),
+    ('structured upload auto-sync uses guarded sync path', r'(?:await\s+apiSyncTexture\s*\(\s*shapeId\s*,\s*tid\s*\)|syncTexturesBatch\s*\(\s*shapeId\s*,\s*toSync\s*\))'),
+    ('manual upload auto-sync uses guarded sync path', r'(?:await\s+apiSyncTexture\s*\(\s*shapeId\s*,\s*textureId\s*\)|syncTexturesBatch\s*\(\s*shapeId\s*,\s*\[\s*textureId\s*\]\s*\))'),
 ]
 
 PUBLIC_RUNTIME_DOM_SAFE_FILES = [
@@ -137,6 +137,17 @@ ADMIN_PERIPHERY_RENDER_GUARDS = [
     ('renderTelemetryAudience', ['appendChild']),
     ('renderTelemetryDynamics', ['appendChild']),
     ('renderTelemetryPanel', ['replaceChildren']),
+]
+
+ADMIN_RESIDUAL_CLEANUP_GUARDS = [
+    ('openZipMappingModal', ['createElement', 'appendChild', 'replaceChildren']),
+]
+
+AR_ENTRY_FILE = 'js/app-ar-entry-helpers.js'
+
+AR_ENTRY_RESIDUAL_CLEANUP_GUARDS = [
+    ('ensureArHelpUI', ['createElement', 'appendChild']),
+    ('updateArEntryUI', ['createElement', 'appendChild']),
 ]
 
 
@@ -426,6 +437,40 @@ def check_admin_periphery_render_guards() -> None:
     ok('Admin periphery render guard passed for upload queue, bulk params, and telemetry blocks')
 
 
+def check_residual_dom_cleanup_guards() -> None:
+    admin_text = read_admin_js_text()
+    ar_entry_text = (ROOT / AR_ENTRY_FILE).read_text(encoding='utf-8')
+    problems: list[str] = []
+
+    for name, required_tokens in ADMIN_RESIDUAL_CLEANUP_GUARDS:
+        block = extract_function_block(admin_text, name)
+        if not block:
+            problems.append(f'missing admin residual cleanup function {name}')
+            continue
+        for banned in ('innerHTML', 'insertAdjacentHTML', 'outerHTML'):
+            if banned in block:
+                problems.append(f'{name} contains forbidden {banned}')
+        for token in required_tokens:
+            if token not in block:
+                problems.append(f'{name} missing expected safe render token {token}')
+
+    for name, required_tokens in AR_ENTRY_RESIDUAL_CLEANUP_GUARDS:
+        block = extract_function_block(ar_entry_text, name)
+        if not block:
+            problems.append(f'missing AR entry cleanup function {name}')
+            continue
+        for banned in ('innerHTML', 'insertAdjacentHTML', 'outerHTML'):
+            if banned in block:
+                problems.append(f'{name} contains forbidden {banned}')
+        for token in required_tokens:
+            if token not in block:
+                problems.append(f'{name} missing expected safe render token {token}')
+
+    if problems:
+        fail('Residual DOM cleanup guard failed: ' + '; '.join(problems))
+    ok('Residual DOM cleanup guard passed for ZIP mapping modal and AR help UI')
+
+
 def check_js_syntax() -> None:
     node = shutil.which('node')
     if not node:
@@ -503,6 +548,7 @@ def main() -> None:
     check_admin_no_undef()
     check_admin_flow_smoke()
     check_admin_periphery_render_guards()
+    check_residual_dom_cleanup_guards()
     check_public_runtime_dom_safety()
     check_public_runtime_flow_smoke()
     check_palette_validator_dom_safety()
