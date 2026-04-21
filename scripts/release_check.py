@@ -40,6 +40,12 @@ JUNK_GLOBS = [
 
 FORBIDDEN_RELEASE_FILES = [
     'app_texture_block.txt',
+    'test_write.txt',
+]
+
+FORBIDDEN_RELEASE_NAME_PATTERNS = [
+    re.compile(r'^(?:test_|tmp_|scratch_).+'),
+    re.compile(r'^.+\.(?:tmp|bak|orig|rej)$'),
 ]
 
 HTML_FILES = [
@@ -140,7 +146,15 @@ def check_junk() -> None:
 
 
 def check_forbidden_release_files() -> None:
-    found = [name for name in FORBIDDEN_RELEASE_FILES if (ROOT / name).exists()]
+    found_exact = [name for name in FORBIDDEN_RELEASE_FILES if (ROOT / name).exists()]
+    found_pattern: list[str] = []
+    for path in ROOT.rglob('*'):
+        if not path.is_file():
+            continue
+        name = path.name
+        if any(pattern.match(name) for pattern in FORBIDDEN_RELEASE_NAME_PATTERNS):
+            found_pattern.append(rel(path))
+    found = sorted(set(found_exact + found_pattern))
     if found:
         fail('Forbidden release files found: ' + ', '.join(found))
     ok('No forbidden release artifact files detected')

@@ -1,5 +1,5 @@
 // BUILD: v28 2026-01-16f (runtime-config)
-const __BUILD_ID__ = "20260421-f24ct";
+const __BUILD_ID__ = "20260421-f24cx";
 console.log("[Admin] build", __BUILD_ID__);
 /* Admin (Step 3 start) — shapes list + shape details (read-only palette), router scaffold */
 (async () => {
@@ -366,6 +366,55 @@ function resolveMediaUrl(u, opts = {}) {
 
   // Bucket-relative paths (surfaces/..., palettes/..., shape_settings/...)
   return new URL(s.replace(/^\/+/, ''), BUCKET_BASE_URL).toString();
+}
+
+
+function normalizeAdminSafeUrl(value, options = {}) {
+  if (value == null) return '';
+  const raw = String(value).trim();
+  if (!raw) return '';
+  if (/[\x00-\x1F\x7F]/.test(raw)) return '';
+
+  const allowBlob = options.allowBlob === true;
+  const allowDataImage = options.allowDataImage === true;
+
+  if (/^blob:/i.test(raw)) return allowBlob ? raw : '';
+  if (/^data:/i.test(raw)) {
+    if (!allowDataImage) return '';
+    return /^data:image\/(?:png|jpe?g|webp|gif|avif|svg\+xml);/i.test(raw) ? raw : '';
+  }
+
+  try {
+    const baseUrl = options.baseUrl || SITE_BASE_URL;
+    const parsed = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw) ? new URL(raw) : new URL(raw, baseUrl);
+    const protocol = String(parsed.protocol || '').toLowerCase();
+    if (protocol === 'http:' || protocol === 'https:') return parsed.toString();
+    if (protocol === 'blob:' && allowBlob) return parsed.toString();
+    return '';
+  } catch {
+    return '';
+  }
+}
+
+function setAdminSafeImageSource(img, value, options = {}) {
+  if (!img) return false;
+  const safeUrl = normalizeAdminSafeUrl(value, options);
+  if (!safeUrl) {
+    try {
+      img.removeAttribute('src');
+      delete img.dataset.safeSrc;
+      img.dataset.invalidSrc = '1';
+    } catch {}
+    return false;
+  }
+  try {
+    delete img.dataset.invalidSrc;
+    img.dataset.safeSrc = safeUrl;
+    img.src = safeUrl;
+  } catch {
+    return false;
+  }
+  return true;
 }
 
 function pickMediaUrl(candidates, opts) {
@@ -874,7 +923,7 @@ function normalizeTextureId(v, shapeId) {
       img.crossOrigin = 'anonymous';
       img.onload = () => resolve(img);
       img.onerror = () => reject(new Error('preview_image_load_failed'));
-      img.src = url;
+      if (!setAdminSafeImageSource(img, url, { allowBlob: true, allowDataImage: true })) { reject(new Error('preview_url_unsafe')); return; }
     });
   }
 
@@ -2487,7 +2536,7 @@ function setTelemetryStatus(message, kind) {
           return id.includes(q) || name.includes(q);
         });
 
-    elShapesGrid.innerHTML = '';
+    elShapesGrid.replaceChildren();
     elShapesEmpty.style.display = filtered.length ? 'none' : 'block';
 
     const frag = document.createDocumentFragment();
@@ -2495,22 +2544,45 @@ function setTelemetryStatus(message, kind) {
       const id = sh?.id || '';
       const name = sh?.name || id;
       const desc = sh?.description || '';
-      const icon = resolveSiteUrl(sh?.icon || sh?.hero || '');
+      const icon = normalizeAdminSafeUrl(resolveSiteUrl(sh?.icon || sh?.hero || ''));
 
       const card = document.createElement('div');
       card.className = 'shapeCard';
       card.setAttribute('role', 'button');
       card.tabIndex = 0;
-      card.innerHTML = `
-        <div class="shapeThumb">
-          ${icon ? `<img alt="" loading="lazy" src="${escapeHtml(icon)}" />` : ''}
-        </div>
-        <div class="shapeBody">
-          <div class="shapeName">${escapeHtml(name)}</div>
-          <div class="shapeId">${escapeHtml(id)}</div>
-          <div class="shapeDesc">${escapeHtml(desc)}</div>
-        </div>
-      `;
+
+      const thumb = document.createElement('div');
+      thumb.className = 'shapeThumb';
+      if (icon) {
+        const img = document.createElement('img');
+        img.alt = '';
+        img.loading = 'lazy';
+        img.referrerPolicy = 'no-referrer';
+        setAdminSafeImageSource(img, icon);
+        img.addEventListener('error', () => {
+          try { img.style.display = 'none'; } catch {}
+        });
+        thumb.appendChild(img);
+      }
+
+      const body = document.createElement('div');
+      body.className = 'shapeBody';
+
+      const nameEl = document.createElement('div');
+      nameEl.className = 'shapeName';
+      nameEl.textContent = name;
+
+      const idEl = document.createElement('div');
+      idEl.className = 'shapeId';
+      idEl.textContent = id;
+
+      const descEl = document.createElement('div');
+      descEl.className = 'shapeDesc';
+      descEl.textContent = desc;
+
+      body.append(nameEl, idEl, descEl);
+      card.append(thumb, body);
+
       const go = () => {
         location.hash = `#/shape/${encodeURIComponent(id)}/textures`;
       };
@@ -2529,18 +2601,45 @@ function setTelemetryStatus(message, kind) {
   function renderShapeHeader(shape) {
     const id = shape?.id || '';
     const name = shape?.name || id;
-    const hero = resolveSiteUrl(shape?.hero || shape?.icon || '');
+    const hero = normalizeAdminSafeUrl(resolveSiteUrl(shape?.hero || shape?.icon || ''));
     const desc = shape?.description || '';
 
     elShapeTitle.textContent = id ? `shapeId: ${id}` : '';
-    elShapeHeader.innerHTML = `
-      ${hero ? `<img class="shapeHero" alt="" loading="lazy" src="${escapeHtml(hero)}" />` : ''}
-      <div class="shapeInfo">
-        <div class="hName">${escapeHtml(name)}</div>
-        <div class="hMeta">${escapeHtml(id)}</div>
-        ${desc ? `<div class="hDesc">${escapeHtml(desc)}</div>` : ''}
-      </div>
-    `;
+    elShapeHeader.replaceChildren();
+
+    if (hero) {
+      const img = document.createElement('img');
+      img.className = 'shapeHero';
+      img.alt = '';
+      img.loading = 'lazy';
+      img.referrerPolicy = 'no-referrer';
+      setAdminSafeImageSource(img, hero);
+      img.addEventListener('error', () => {
+        try { img.style.display = 'none'; } catch {}
+      });
+      elShapeHeader.appendChild(img);
+    }
+
+    const info = document.createElement('div');
+    info.className = 'shapeInfo';
+
+    const hName = document.createElement('div');
+    hName.className = 'hName';
+    hName.textContent = name;
+
+    const hMeta = document.createElement('div');
+    hMeta.className = 'hMeta';
+    hMeta.textContent = id;
+
+    info.append(hName, hMeta);
+    if (desc) {
+      const hDesc = document.createElement('div');
+      hDesc.className = 'hDesc';
+      hDesc.textContent = desc;
+      info.appendChild(hDesc);
+    }
+
+    elShapeHeader.appendChild(info);
   }
 
   function getSelectedSet(shapeId) {
@@ -2565,7 +2664,7 @@ function setTelemetryStatus(message, kind) {
   }
 
   function renderTextures(shapeId, items) {
-    elTexturesGrid.innerHTML = '';
+    elTexturesGrid.replaceChildren();
     const list = Array.isArray(items) ? items : [];
     elEmptyTextures.style.display = list.length ? 'none' : 'block';
     updateBulkBar(shapeId, list.length);
@@ -2575,75 +2674,113 @@ function setTelemetryStatus(message, kind) {
     for (const it of list) {
       const id = it?.id || it?.textureId || '';
       const name = it?.name || id || '(без названия)';
-      // Prefer material map URLs over "preview" fields.
-      // Preview fields historically contained broken values (e.g. "shapeId:textureId_albedo.png"),
-      // which triggers Chrome ORB and produces noisy errors in DevTools.
-      const previewUrl = pickMediaUrl([
+      const previewUrl = normalizeAdminSafeUrl(pickMediaUrl([
         it?.maps?.albedoUrl,
         it?.maps?.albedo,
         it?.previewUrl,
         it?.preview,
-      ], { shapeId, textureId: id, quality: '1k' });
+      ], { shapeId, textureId: id, quality: '1k' }));
 
       const hasTileOverride = !!it?.tileSizeM;
       const hasParams = it?.params && typeof it.params === 'object' && Object.keys(it.params).length > 0;
-      const pills = [
-        hasTileOverride ? '<span class="pill pill--set">tileSize</span>' : '<span class="pill">tileSize: default</span>',
-        hasParams ? '<span class="pill pill--set">params</span>' : '<span class="pill">params: default</span>',
-      ].join(' ');
-
       const selected = getSelectedSet(shapeId).has(id);
+
       const card = document.createElement('div');
       card.className = 'tile';
-      card.innerHTML = `
-        <label class="tileSelect" title="Выбрать текстуру для массового редактирования">
-          <input type="checkbox" data-action="select" data-id="${escapeHtml(id)}" ${selected ? 'checked' : ''} />
-          <span></span>
-        </label>
-        <img class="thumb" alt="" loading="lazy" referrerpolicy="no-referrer" src="${escapeHtml(previewUrl)}">
-        <div class="meta">
-          <div class="name">${escapeHtml(name)}</div>
-          <div class="id">${escapeHtml(id)}</div>
-          <div class="muted mtSm">${pills}</div>
-          <div class="row tileActions">
-            <button class="btn btn--ghost btn--sm" data-action="edit" data-id="${escapeHtml(id)}">Настроить</button>
-            <button class="btn btn--ghost btn--sm" data-action="update" data-id="${escapeHtml(id)}" title="Перезагрузить файлы карты (обновить текущую текстуру)">Обновить файлы</button>
-            <button class="btn btn--danger btn--sm" data-action="delete" data-id="${escapeHtml(id)}" title="Удалить текстуру">Удалить</button>
-          </div>
-        </div>
-      `;
 
-      // Avoid inline event handlers (CSP-friendly).
-      const img = card.querySelector('img.thumb');
-      if (img) img.addEventListener('error', () => {
+      const selectWrap = document.createElement('label');
+      selectWrap.className = 'tileSelect';
+      selectWrap.title = 'Выбрать текстуру для массового редактирования';
+      const selCb = document.createElement('input');
+      selCb.type = 'checkbox';
+      selCb.dataset.action = 'select';
+      selCb.dataset.id = id;
+      selCb.checked = selected;
+      const selDecor = document.createElement('span');
+      selectWrap.append(selCb, selDecor);
+
+      const img = document.createElement('img');
+      img.className = 'thumb';
+      img.alt = '';
+      img.loading = 'lazy';
+      img.referrerPolicy = 'no-referrer';
+      if (!setAdminSafeImageSource(img, previewUrl)) img.style.display = 'none';
+      img.addEventListener('error', () => {
         try { img.style.display = 'none'; } catch {}
       });
 
-      const selCb = card.querySelector('input[data-action="select"]');
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+
+      const nameEl = document.createElement('div');
+      nameEl.className = 'name';
+      nameEl.textContent = name;
+
+      const idEl = document.createElement('div');
+      idEl.className = 'id';
+      idEl.textContent = id;
+
+      const pillsEl = document.createElement('div');
+      pillsEl.className = 'muted mtSm';
+      const pillTile = document.createElement('span');
+      pillTile.className = hasTileOverride ? 'pill pill--set' : 'pill';
+      pillTile.textContent = hasTileOverride ? 'tileSize' : 'tileSize: default';
+      const pillParams = document.createElement('span');
+      pillParams.className = hasParams ? 'pill pill--set' : 'pill';
+      pillParams.textContent = hasParams ? 'params' : 'params: default';
+      pillsEl.append(pillTile, document.createTextNode(' '), pillParams);
+
+      const actions = document.createElement('div');
+      actions.className = 'row tileActions';
+      const btnEdit = document.createElement('button');
+      btnEdit.className = 'btn btn--ghost btn--sm';
+      btnEdit.dataset.action = 'edit';
+      btnEdit.dataset.id = id;
+      btnEdit.type = 'button';
+      btnEdit.textContent = 'Настроить';
+      const btnUpdate = document.createElement('button');
+      btnUpdate.className = 'btn btn--ghost btn--sm';
+      btnUpdate.dataset.action = 'update';
+      btnUpdate.dataset.id = id;
+      btnUpdate.type = 'button';
+      btnUpdate.title = 'Перезагрузить файлы карты (обновить текущую текстуру)';
+      btnUpdate.textContent = 'Обновить файлы';
+      const btnDelete = document.createElement('button');
+      btnDelete.className = 'btn btn--danger btn--sm';
+      btnDelete.dataset.action = 'delete';
+      btnDelete.dataset.id = id;
+      btnDelete.type = 'button';
+      btnDelete.title = 'Удалить текстуру';
+      btnDelete.textContent = 'Удалить';
+      actions.append(btnEdit, btnUpdate, btnDelete);
+
+      meta.append(nameEl, idEl, pillsEl, actions);
+      card.append(selectWrap, img, meta);
+
       selCb.addEventListener('change', () => {
         const set = getSelectedSet(shapeId);
         if (selCb.checked) set.add(id);
         else set.delete(id);
         updateBulkBar(shapeId, list.length);
       });
-      card.querySelector('[data-action="edit"]').addEventListener('click', (e) => {
+      btnEdit.addEventListener('click', (e) => {
         e.stopPropagation();
         const r = parseRoute();
         if (r.name !== 'shape') return;
         const shapeId = decodeURIComponent(r.id || '');
-      telemetryPage('admin_shape', { shapeId, tab: String(r.tab || 'textures') });
+        telemetryPage('admin_shape', { shapeId, tab: String(r.tab || 'textures') });
         openTextureParamsModal(shapeId, id).catch(err => {
           console.warn(err);
           setStatus(elPaletteStatus, 'err', `Не удалось открыть редактор: ${err.message}`);
         });
       });
 
-      card.querySelector('[data-action="update"]').addEventListener('click', (e) => {
+      btnUpdate.addEventListener('click', (e) => {
         e.stopPropagation();
         goToUpdateUpload(shapeId, id);
       });
 
-      card.querySelector('[data-action="delete"]').addEventListener('click', async (e) => {
+      btnDelete.addEventListener('click', async (e) => {
         e.stopPropagation();
         await deleteTextureFlow(shapeId, id).catch(err => {
           console.warn(err);
@@ -2798,11 +2935,10 @@ try {
 
   function renderBucketTextures(shapeId) {
     if (!elBucketGrid) return;
-    elBucketGrid.innerHTML = '';
+    elBucketGrid.replaceChildren();
     const idx = state.bucketIndexByShapeId.get(shapeId) || { textures: [] };
     const textures = Array.isArray(idx.textures) ? idx.textures : [];
     const palette = state.paletteByShapeId.get(shapeId);
-    // Compare in canonical space to avoid legacy prefixes ("klassika:paver...") and casing drift.
     const paletteIds = new Set(
       (Array.isArray(palette?.items) ? palette.items : [])
         .map(x => canonicalTextureId(shapeId, x?.id || x?.textureId || ''))
@@ -2830,44 +2966,88 @@ try {
       const inPalette = !!texCanonical && paletteIds.has(texCanonical);
       const broken = isBucketTextureBroken(t);
       const has2k = !!t?.qualities?.['2k'];
-      const previewUrl = pickMediaUrl([
+      const previewUrl = normalizeAdminSafeUrl(pickMediaUrl([
         t?.qualities?.['1k']?.maps?.albedo?.key,
         t?.previewKey,
         t?.preview,
-      ], { shapeId: (state.activeShapeId || shapeId || ''), textureId, quality: '1k' });
-
-      const pills = [
-        inPalette ? '<span class="pill pill--set">в палитре</span>' : '<span class="pill">не в палитре</span>',
-        '<span class="pill">1k</span>',
-        has2k ? '<span class="pill">2k</span>' : '<span class="pill">2k: нет</span>',
-        broken ? '<span class="pill pill--warn">неполная 1k</span>' : '<span class="pill">ok</span>',
-      ].join(' ');
+      ], { shapeId: (state.activeShapeId || shapeId || ''), textureId, quality: '1k' }));
 
       const card = document.createElement('div');
       card.className = 'tile';
-      card.innerHTML = `
-        <img class="thumb" alt="" loading="lazy" referrerpolicy="no-referrer" src="${escapeHtml(previewUrl)}">
-        <div class="meta">
-          <div class="name">${escapeHtml(textureId)}</div>
-          <div class="muted mtSm">${pills}</div>
-          <div class="row tileActions">
-            ${inPalette
-              ? `<button class="btn btn--ghost btn--sm" data-action="edit" data-id="${escapeHtml(textureId)}">Настроить</button>`
-              : `<button class="btn btn--sm" data-action="add" data-id="${escapeHtml(textureId)}" ${broken ? 'disabled' : ''}>Добавить в палитру</button>`
-            }
-            <button class="btn btn--ghost btn--sm" data-action="update" data-id="${escapeHtml(textureId)}" title="Перезагрузить файлы карты (обновить текущую текстуру)">Обновить файлы</button>
-            <button class="btn btn--danger btn--sm" data-action="delete" data-id="${escapeHtml(textureId)}" title="Удалить текстуру">Удалить</button>
-          </div>
-        </div>
-      `;
 
-      // Avoid inline event handlers (CSP-friendly).
-      const img = card.querySelector('img.thumb');
-      if (img) img.addEventListener('error', () => {
+      const img = document.createElement('img');
+      img.className = 'thumb';
+      img.alt = '';
+      img.loading = 'lazy';
+      img.referrerPolicy = 'no-referrer';
+      if (!setAdminSafeImageSource(img, previewUrl)) img.style.display = 'none';
+      img.addEventListener('error', () => {
         try { img.style.display = 'none'; } catch {}
       });
 
-      const btnAdd = card.querySelector('[data-action="add"]');
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      const nameEl = document.createElement('div');
+      nameEl.className = 'name';
+      nameEl.textContent = textureId;
+
+      const pillsEl = document.createElement('div');
+      pillsEl.className = 'muted mtSm';
+      const pillSpecs = [
+        { cls: inPalette ? 'pill pill--set' : 'pill', text: inPalette ? 'в палитре' : 'не в палитре' },
+        { cls: 'pill', text: '1k' },
+        { cls: 'pill', text: has2k ? '2k' : '2k: нет' },
+        { cls: broken ? 'pill pill--warn' : 'pill', text: broken ? 'неполная 1k' : 'ok' },
+      ];
+      pillSpecs.forEach((spec, index) => {
+        const pill = document.createElement('span');
+        pill.className = spec.cls;
+        pill.textContent = spec.text;
+        pillsEl.appendChild(pill);
+        if (index !== pillSpecs.length - 1) pillsEl.appendChild(document.createTextNode(' '));
+      });
+
+      const actions = document.createElement('div');
+      actions.className = 'row tileActions';
+      let btnAdd = null;
+      let btnEdit = null;
+      if (inPalette) {
+        btnEdit = document.createElement('button');
+        btnEdit.className = 'btn btn--ghost btn--sm';
+        btnEdit.dataset.action = 'edit';
+        btnEdit.dataset.id = textureId;
+        btnEdit.type = 'button';
+        btnEdit.textContent = 'Настроить';
+        actions.appendChild(btnEdit);
+      } else {
+        btnAdd = document.createElement('button');
+        btnAdd.className = 'btn btn--sm';
+        btnAdd.dataset.action = 'add';
+        btnAdd.dataset.id = textureId;
+        btnAdd.type = 'button';
+        btnAdd.disabled = broken;
+        btnAdd.textContent = 'Добавить в палитру';
+        actions.appendChild(btnAdd);
+      }
+      const btnUpdate = document.createElement('button');
+      btnUpdate.className = 'btn btn--ghost btn--sm';
+      btnUpdate.dataset.action = 'update';
+      btnUpdate.dataset.id = textureId;
+      btnUpdate.type = 'button';
+      btnUpdate.title = 'Перезагрузить файлы карты (обновить текущую текстуру)';
+      btnUpdate.textContent = 'Обновить файлы';
+      const btnDel = document.createElement('button');
+      btnDel.className = 'btn btn--danger btn--sm';
+      btnDel.dataset.action = 'delete';
+      btnDel.dataset.id = textureId;
+      btnDel.type = 'button';
+      btnDel.title = 'Удалить текстуру';
+      btnDel.textContent = 'Удалить';
+      actions.append(btnUpdate, btnDel);
+
+      meta.append(nameEl, pillsEl, actions);
+      card.append(img, meta);
+
       if (btnAdd) {
         btnAdd.addEventListener('click', async (e) => {
           e.preventDefault();
@@ -2881,7 +3061,6 @@ try {
             const item = buildPaletteItemFromBucket(shapeId, textureId, t);
             await upsertItemAndSavePalette(shapeId, item);
             setStatus(elBucketStatus, 'ok', `Добавлено в палитру: ${textureId}`);
-            // refresh bucket view pills
             renderBucketTextures(shapeId);
           } catch (err) {
             console.warn(err);
@@ -2890,7 +3069,6 @@ try {
         });
       }
 
-      const btnEdit = card.querySelector('[data-action="edit"]');
       if (btnEdit) {
         btnEdit.addEventListener('click', (e) => {
           e.preventDefault();
@@ -2902,74 +3080,66 @@ try {
         });
       }
 
-      const btnUpdate = card.querySelector('[data-action="update"]');
-      if (btnUpdate) {
-        btnUpdate.addEventListener('click', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          goToUpdateUpload(shapeId, textureId);
-        });
-      }
+      btnUpdate.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        goToUpdateUpload(shapeId, textureId);
+      });
 
-      const btnDel = card.querySelector('[data-action="delete"]');
-      if (btnDel) {
-        btnDel.addEventListener('click', async (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          try {
-            if (inPalette) {
-              await deleteTextureFlow(shapeId, textureId);
-              return;
-            }
-            const ok = await showConfirmModal({
-              title: 'Удалить texture asset?',
-              subtitle: `Форма: ${shapeId}`,
-              message: `Текстура "${textureId}" будет удалена из бакета, превью и палитры.`,
-              details: 'После удаления потребуется повторная загрузка файлов, если текстуру нужно будет вернуть.',
-              confirmText: 'Удалить полностью',
-              cancelText: 'Отмена',
-              tone: 'danger'
-            });
-            if (!ok) return;
-            setStatusRich(elBucketStatus, '', {
-              title: 'Удаляем texture asset…',
-              message: `Форма: ${shapeId} • Текстура: ${textureId}`,
-              note: 'Удаляем запись из палитры, превью и связанные файлы бакета.',
-            });
-            // Backend now resolves real bucket folder names (shapeId_/pack_ prefixes),
-            // so we always send the logical textureId from UI.
-            const res = await apiDeleteTexture(shapeId, textureId, { palette: true, files: true });
-            state.bucketIndexByShapeId.delete(shapeId);
-            await ensureBucketIndexLoaded(shapeId, { forceReload: true });
-            renderBucketTextures(shapeId);
-            const removed = Number(res?.paletteResult?.removed || 0);
-            const delObjects = Number(res?.filesResult?.deletedObjects || 0);
-            const delPrefixes = Array.isArray(res?.filesResult?.deletedPrefixes) ? res.filesResult.deletedPrefixes.length : 0;
-            const deleteErrors = Array.isArray(res?.filesResult?.deleteErrors) ? res.filesResult.deleteErrors : [];
-            const fallbackFileDelete = deleteErrors.some((e) => String(e?.reason || '') === 'delete_api_unavailable');
-            const tone = fallbackFileDelete || deleteErrors.length ? 'warn' : 'ok';
-            setStatusRich(elBucketStatus, tone, {
-              title: fallbackFileDelete ? 'Удалено только из палитры' : (deleteErrors.length ? 'Удаление выполнено частично' : 'Удаление выполнено'),
-              message: fallbackFileDelete
-                ? 'Запись удалена, но backend DELETE API для очистки файлов бакета недоступен.'
-                : (deleteErrors.length ? 'Часть файлов удалить не удалось. Проверьте backend и права доступа.' : 'Текстура и связанные файлы удалены.'),
-              bullets: [
-                `Удалено из палитры: ${removed}`,
-                `Удалено объектов в бакете: ${delObjects}`,
-                `Затронуто префиксов: ${delPrefixes}`,
-              ],
-              meta: [`Форма: ${shapeId}`, `Текстура: ${textureId}`],
-            });
-          } catch (err) {
-            console.warn(err);
-            setStatusRich(elBucketStatus, 'err', {
-              title: 'Не удалось удалить texture asset',
-              message: String(err.message || err),
-              meta: [`Форма: ${shapeId}`, `Текстура: ${textureId}`],
-            });
+      btnDel.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        try {
+          if (inPalette) {
+            await deleteTextureFlow(shapeId, textureId);
+            return;
           }
-        });
-      }
+          const ok = await showConfirmModal({
+            title: 'Удалить texture asset?',
+            subtitle: `Форма: ${shapeId}`,
+            message: `Текстура "${textureId}" будет удалена из бакета, превью и палитры.`,
+            details: 'После удаления потребуется повторная загрузка файлов, если текстуру нужно будет вернуть.',
+            confirmText: 'Удалить полностью',
+            cancelText: 'Отмена',
+            tone: 'danger'
+          });
+          if (!ok) return;
+          setStatusRich(elBucketStatus, '', {
+            title: 'Удаляем texture asset…',
+            message: `Форма: ${shapeId} • Текстура: ${textureId}`,
+            note: 'Удаляем запись из палитры, превью и связанные файлы бакета.',
+          });
+          const res = await apiDeleteTexture(shapeId, textureId, { palette: true, files: true });
+          state.bucketIndexByShapeId.delete(shapeId);
+          await ensureBucketIndexLoaded(shapeId, { forceReload: true });
+          renderBucketTextures(shapeId);
+          const removed = Number(res?.paletteResult?.removed || 0);
+          const delObjects = Number(res?.filesResult?.deletedObjects || 0);
+          const delPrefixes = Array.isArray(res?.filesResult?.deletedPrefixes) ? res.filesResult.deletedPrefixes.length : 0;
+          const deleteErrors = Array.isArray(res?.filesResult?.deleteErrors) ? res.filesResult.deleteErrors : [];
+          const fallbackFileDelete = deleteErrors.some((e) => String(e?.reason || '') === 'delete_api_unavailable');
+          const tone = fallbackFileDelete || deleteErrors.length ? 'warn' : 'ok';
+          setStatusRich(elBucketStatus, tone, {
+            title: fallbackFileDelete ? 'Удалено только из палитры' : (deleteErrors.length ? 'Удаление выполнено частично' : 'Удаление выполнено'),
+            message: fallbackFileDelete
+              ? 'Запись удалена, но backend DELETE API для очистки файлов бакета недоступен.'
+              : (deleteErrors.length ? 'Часть файлов удалить не удалось. Проверьте backend и права доступа.' : 'Текстура и связанные файлы удалены.'),
+            bullets: [
+              `Удалено из палитры: ${removed}`,
+              `Удалено объектов в бакете: ${delObjects}`,
+              `Затронуто префиксов: ${delPrefixes}`,
+            ],
+            meta: [`Форма: ${shapeId}`, `Текстура: ${textureId}`],
+          });
+        } catch (err) {
+          console.warn(err);
+          setStatusRich(elBucketStatus, 'err', {
+            title: 'Не удалось удалить texture asset',
+            message: String(err.message || err),
+            meta: [`Форма: ${shapeId}`, `Текстура: ${textureId}`],
+          });
+        }
+      });
 
       frag.appendChild(card);
     }
@@ -3599,7 +3769,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
     currentTexShapeId = '';
     currentTexItemId = '';
     currentTexSnapshot = null;
-    if (elTexParams) elTexParams.innerHTML = '';
+    if (elTexParams) elTexParams.replaceChildren();
     if (elTexPreview) elTexPreview.removeAttribute('src');
     texPreviewLoaded = false;
     texPreviewOriginal = null;
@@ -3623,19 +3793,46 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
     const row = document.createElement('div');
     row.className = 'paramRow';
     const meta = isOverride ? `Переопределено • default: ${defaultValue}` : `По умолчанию: ${defaultValue}`;
-    row.innerHTML = `
-      <div class="paramTop">
-        <div class="paramLabel">${escapeHtml(label)} <span class="paramHelp" title="${escapeHtml(help)}">i</span></div>
-        <div class="paramMeta">${escapeHtml(meta)}</div>
-      </div>
-      <div class="paramControls">
-        <input type="range" min="${escapeHtml(min)}" max="${escapeHtml(max)}" step="${escapeHtml(step)}" value="${escapeHtml(value)}" />
-        <input type="number" step="${escapeHtml(step)}" min="${escapeHtml(min)}" max="${escapeHtml(max)}" value="${escapeHtml(value)}" />
-      </div>
-      <div class="paramNote">Подсказка: наведите на <b>i</b>, чтобы увидеть описание влияния параметра.</div>
-    `;
-    const range = row.querySelector('input[type="range"]');
-    const numInput = row.querySelector('input[type="number"]');
+
+    const top = document.createElement('div');
+    top.className = 'paramTop';
+    const labelWrap = document.createElement('div');
+    labelWrap.className = 'paramLabel';
+    labelWrap.append(document.createTextNode(label + ' '));
+    const helpEl = document.createElement('span');
+    helpEl.className = 'paramHelp';
+    helpEl.title = help;
+    helpEl.textContent = 'i';
+    labelWrap.appendChild(helpEl);
+    const metaEl = document.createElement('div');
+    metaEl.className = 'paramMeta';
+    metaEl.textContent = meta;
+    top.append(labelWrap, metaEl);
+
+    const controls = document.createElement('div');
+    controls.className = 'paramControls';
+    const range = document.createElement('input');
+    range.type = 'range';
+    range.min = String(min);
+    range.max = String(max);
+    range.step = String(step);
+    range.value = String(value);
+    const numInput = document.createElement('input');
+    numInput.type = 'number';
+    numInput.step = String(step);
+    numInput.min = String(min);
+    numInput.max = String(max);
+    numInput.value = String(value);
+    controls.append(range, numInput);
+
+    const note = document.createElement('div');
+    note.className = 'paramNote';
+    note.append('Подсказка: наведите на ');
+    const noteBold = document.createElement('b');
+    noteBold.textContent = 'i';
+    note.append(noteBold, ', чтобы увидеть описание влияния параметра.');
+
+    row.append(top, controls, note);
     const onSync = (v) => {
       const n = Number(v);
       if (!Number.isFinite(n)) return;
@@ -3702,24 +3899,29 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
       };
     }
 
-    const previewUrl = pickMediaUrl([
+    const previewUrl = normalizeAdminSafeUrl(pickMediaUrl([
       item?.maps?.albedoUrl,
       item?.maps?.albedo,
       item?.previewUrl,
       item?.preview,
-    ], { shapeId: (state.activeShapeId || ''), textureId: (item?.id || item?.textureId || ''), quality: '1k' });
+    ], { shapeId: (state.activeShapeId || ''), textureId: (item?.id || item?.textureId || ''), quality: '1k' }));
     if (elTexPreview && previewUrl) {
       elTexPreview.onerror = () => { try { elTexPreview.style.display = 'none'; } catch {} };
-    elTexPreview.src = previewUrl;
+      elTexPreview.style.display = '';
+      setAdminSafeImageSource(elTexPreview, previewUrl);
       elTexPreviewHint.textContent = 'Превью: albedo (из палитры)';
     } else {
+      if (elTexPreview) {
+        elTexPreview.removeAttribute('src');
+        elTexPreview.style.display = 'none';
+      }
       elTexPreviewHint.textContent = 'Превью недоступно (в palettes/*.json нет preview/albedo)';
     }
 
     const defaults = getDefaultsForShape(shapeId);
 
     // Build UI
-    elTexParams.innerHTML = '';
+    elTexParams.replaceChildren();
 
     // Tile size (mm)
     const tileOverride = item.tileSizeM && typeof item.tileSizeM === 'object'
@@ -3728,26 +3930,66 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
     const tileEffective = tileOverride || defaults.tileSizeMm;
     const tileBlock = document.createElement('div');
     tileBlock.className = 'paramRow';
-    tileBlock.innerHTML = `
-      <div class="paramTop">
-        <div class="paramLabel">Размер модуля (мм) <span class="paramHelp" title="Физический размер плитки. Влияет на повтор текстуры (repeat) и на реалистичность масштаба в AR.">i</span></div>
-        <div class="paramMeta">${tileOverride ? 'Переопределено' : 'По умолчанию'} • default: ${defaults.tileSizeMm.w}×${defaults.tileSizeMm.h}</div>
-      </div>
-      <div class="paramControls">
-        <div style="display:flex; gap:10px; align-items:center;">
-          <label class="field" style="margin:0;">
-            <span class="muted">Ширина</span>
-            <input id="texTileW" type="number" min="10" max="1000" step="1" value="${escapeHtml(tileEffective.w)}" />
-          </label>
-          <label class="field" style="margin:0;">
-            <span class="muted">Высота</span>
-            <input id="texTileH" type="number" min="10" max="1000" step="1" value="${escapeHtml(tileEffective.h)}" />
-          </label>
-        </div>
-        <div></div>
-      </div>
-      <div class="paramNote">Рекомендация: используйте реальные размеры плитки из ТЗ/каталога. Для квадрата 115×115 мм — это базовый дефолт.</div>
-    `;
+    const tileTop = document.createElement('div');
+    tileTop.className = 'paramTop';
+    const tileLabel = document.createElement('div');
+    tileLabel.className = 'paramLabel';
+    tileLabel.append(document.createTextNode('Размер модуля (мм) '));
+    const tileHelp = document.createElement('span');
+    tileHelp.className = 'paramHelp';
+    tileHelp.title = 'Физический размер плитки. Влияет на повтор текстуры (repeat) и на реалистичность масштаба в AR.';
+    tileHelp.textContent = 'i';
+    tileLabel.appendChild(tileHelp);
+    const tileMeta = document.createElement('div');
+    tileMeta.className = 'paramMeta';
+    tileMeta.textContent = `${tileOverride ? 'Переопределено' : 'По умолчанию'} • default: ${defaults.tileSizeMm.w}×${defaults.tileSizeMm.h}`;
+    tileTop.append(tileLabel, tileMeta);
+
+    const tileControls = document.createElement('div');
+    tileControls.className = 'paramControls';
+    const tileControlWrap = document.createElement('div');
+    tileControlWrap.style.display = 'flex';
+    tileControlWrap.style.gap = '10px';
+    tileControlWrap.style.alignItems = 'center';
+
+    const fieldW = document.createElement('label');
+    fieldW.className = 'field';
+    fieldW.style.margin = '0';
+    const fieldWLabel = document.createElement('span');
+    fieldWLabel.className = 'muted';
+    fieldWLabel.textContent = 'Ширина';
+    const inputW = document.createElement('input');
+    inputW.id = 'texTileW';
+    inputW.type = 'number';
+    inputW.min = '10';
+    inputW.max = '1000';
+    inputW.step = '1';
+    inputW.value = String(tileEffective.w);
+    fieldW.append(fieldWLabel, inputW);
+
+    const fieldH = document.createElement('label');
+    fieldH.className = 'field';
+    fieldH.style.margin = '0';
+    const fieldHLabel = document.createElement('span');
+    fieldHLabel.className = 'muted';
+    fieldHLabel.textContent = 'Высота';
+    const inputH = document.createElement('input');
+    inputH.id = 'texTileH';
+    inputH.type = 'number';
+    inputH.min = '10';
+    inputH.max = '1000';
+    inputH.step = '1';
+    inputH.value = String(tileEffective.h);
+    fieldH.append(fieldHLabel, inputH);
+
+    tileControlWrap.append(fieldW, fieldH);
+    tileControls.append(tileControlWrap, document.createElement('div'));
+
+    const tileNote = document.createElement('div');
+    tileNote.className = 'paramNote';
+    tileNote.textContent = 'Рекомендация: используйте реальные размеры плитки из ТЗ/каталога. Для квадрата 115×115 мм — это базовый дефолт.';
+
+    tileBlock.append(tileTop, tileControls, tileNote);
     elTexParams.appendChild(tileBlock);
 
     // Params
@@ -3913,7 +4155,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
 
   function closeBulkModal() {
     bulkSnapshot = null;
-    if (elBulkParams) elBulkParams.innerHTML = '';
+    if (elBulkParams) elBulkParams.replaceChildren();
     setStatus(elBulkModalStatus, '', '');
     showBulkModal(false);
   }
@@ -4076,7 +4318,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
 
     // Source dropdown
     if (elBulkSourceTexture) {
-      elBulkSourceTexture.innerHTML = '';
+      elBulkSourceTexture.replaceChildren();
       const frag = document.createDocumentFragment();
       for (const it of items) {
         const id = it?.id || it?.textureId;
@@ -4096,7 +4338,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
     if (elBulkTileH) elBulkTileH.value = String(defs.tileSizeMm.h);
 
     // Param rows
-    elBulkParams.innerHTML = '';
+    elBulkParams.replaceChildren();
     for (const schema of TEXTURE_PARAM_SCHEMA) {
       const defVal = defs[schema.key];
       const row = buildBulkParamRow(schema, defVal, defVal);
@@ -4238,7 +4480,7 @@ function buildPaletteItemFromUpload(shapeId, textureId, name, quality, tasks, ti
       const shape = findShapeById(shapeId);
       if (!shape) {
         setStatus(elStatus, 'warn', `Форма "${shapeId}" не найдена в shapes.json. Обновите список.`);
-        elShapeHeader.innerHTML = '';
+        elShapeHeader.replaceChildren();
       } else {
         renderShapeHeader(shape);
       }

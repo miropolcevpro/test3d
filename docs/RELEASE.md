@@ -21,7 +21,10 @@ This project uses a simple repeatable release ritual so every fix or improvement
 - critical runtime files exist
 - core JSON files parse correctly
 - no macOS junk or temp files are bundled
+- forbidden release artifacts (for example `test_*`, `tmp_*`, scratch files, `.bak/.tmp/.orig/.rej`) are blocked
 - all JavaScript files parse with Node.js
+- admin critical helpers and key admin flow wiring are still present
+- guarded public helper files do not regress to unsafe DOM patterns
 - module structure docs are present and in sync with the modular layout
 - release docs exist
 - core content files still contain tiles and shapes

@@ -1,3 +1,9 @@
+## 20260421-f24cu — admin dom/url hardening
+- Release token: `20260421-f24cu`
+- Closed content-driven `innerHTML` usage in admin shape cards, texture cards, bucket cards, and texture settings preview UI by rebuilding those sections with DOM APIs (`createElement`, `textContent`, `appendChild`).
+- Added safe admin URL normalization and image-source assignment for admin cards and preview surfaces, so invalid or unsupported URLs fail closed instead of being injected into `img.src`.
+- Hardened texture preview loading and modal cleanup paths without changing public frontend, AR pipeline, multizone, curb logic, or backend semantics.
+
 ## 20260421-f24ct — admin status ux polish
 - Release token: `20260421-f24ct`
 - Improved admin status UX for delete/sync/upload flows with structured status cards and clearer partial-success messages.
@@ -446,3 +452,21 @@ Release token: `20260411-f24g`
 - Added safe normalization for content-driven image/background URLs in public helpers.
 - Applied guarded URL handling to detail hero, catalog cards, shape picker, quick AR rail, and palette swatches.
 - Invalid or unsupported content URLs now fail closed instead of being injected into src/backgroundImage directly.
+
+## 2026-04-21 — Patch f24cv
+- Усилен release artifact hygiene: `release_check.py` теперь валит релиз при наличии лишних артефактов вроде `test_write.txt`, файлов с префиксами `test_/tmp_/scratch_` и файлов с суффиксами `.tmp/.bak/.orig/.rej`.
+- Удалён лишний `test_write.txt` из release-дерева.
+- Усилен packaging guard: `package_release.py` теперь не только исключает запрещённые артефакты из архива, но и дополнительно проверяет готовый zip на их отсутствие.
+- Release token: `20260421-f24cv`
+
+## 2026-04-21 — Patch f24cw
+- README.md синхронизирован с фактическим состоянием продукта: многозонный AR, active curb layer, quick AR rail с текущим порядком приоритета, CTA под лентой, актуальные ограничения Android/iPhone и текущая роль корневого `palette-validator.html`.
+- `admin/README_STEP1.md` переписан из устаревшего step-1 skeleton в актуальное описание рабочего admin runtime: auth, palette/bucket flows, upload/sync/delete, telemetry и admin-only validator.
+- `docs/RELEASE.md` обновлён под текущий release-check: forbidden artifact hygiene, admin critical helper guard и public DOM safety guard.
+- Release token: `20260421-f24cw`
+
+## 2026-04-21 — Patch f24cx
+- Смягчена политика обновления service worker: новая версия больше не перезагружает страницу немедленно во время активной AR-сессии или недавнего взаимодействия пользователя.
+- Обновление теперь откладывается до безопасного момента и показывает мягкий update-prompt с действиями «Обновить» и «Позже».
+- Добавлены guards для активного AR-экрана, fullscreen/immersive состояний, splash-экрана и короткого idle-окна после действий пользователя.
+- Release token: `20260421-f24cx`

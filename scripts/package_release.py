@@ -9,8 +9,9 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parent.parent
 EXCLUDE_PARTS = {'.git', 'dist', '__MACOSX'}
-EXCLUDE_NAMES = {'.DS_Store', 'app_texture_block.txt'}
-EXCLUDE_PREFIXES = ('._',)
+EXCLUDE_NAMES = {'.DS_Store', 'app_texture_block.txt', 'test_write.txt'}
+EXCLUDE_PREFIXES = ('._', 'test_', 'tmp_', 'scratch_')
+EXCLUDE_SUFFIXES = ('.tmp', '.bak', '.orig', '.rej')
 
 
 def should_skip(path: Path) -> bool:
@@ -21,7 +22,29 @@ def should_skip(path: Path) -> bool:
         return True
     if any(path.name.startswith(prefix) for prefix in EXCLUDE_PREFIXES):
         return True
+    if any(path.name.endswith(suffix) for suffix in EXCLUDE_SUFFIXES):
+        return True
     return False
+
+
+def verify_archive(output_path: Path) -> None:
+    forbidden_entries: list[str] = []
+    with ZipFile(output_path, 'r') as zf:
+        for name in zf.namelist():
+            base = Path(name).name
+            if not base:
+                continue
+            if base in EXCLUDE_NAMES:
+                forbidden_entries.append(name)
+                continue
+            if any(base.startswith(prefix) for prefix in EXCLUDE_PREFIXES):
+                forbidden_entries.append(name)
+                continue
+            if any(base.endswith(suffix) for suffix in EXCLUDE_SUFFIXES):
+                forbidden_entries.append(name)
+                continue
+    if forbidden_entries:
+        raise SystemExit('[FAIL] Packaged archive contains forbidden artifact files: ' + ', '.join(sorted(set(forbidden_entries))))
 
 
 def build_archive(output_path: Path) -> None:
@@ -46,6 +69,7 @@ def main() -> None:
     if output_path.exists():
         output_path.unlink()
     build_archive(output_path)
+    verify_archive(output_path)
     size_mb = output_path.stat().st_size / (1024 * 1024)
     print(f'[OK]   Packaged release: {output_path} ({size_mb:.1f} MB)')
 
