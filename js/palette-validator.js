@@ -44,6 +44,42 @@ function getAdminToken() {
   }
 }
 
+function isAdminValidatorPage() {
+  try {
+    return /\/admin\/palette-validator\.html(?:$|[?#])/.test(String(window.location.pathname || ''));
+  } catch {
+    return false;
+  }
+}
+
+function redirectToAdminLogin(reason) {
+  try {
+    sessionStorage.setItem('admin_validator_redirect_reason', String(reason || 'auth_required'));
+    sessionStorage.setItem('admin_validator_redirect', window.location.href);
+  } catch (_) {}
+  const target = isAdminValidatorPage() ? './index.html' : 'admin/';
+  window.location.replace(target);
+}
+
+async function ensureAdminValidatorAccess() {
+  if (!isAdminValidatorPage()) return;
+  const token = getAdminToken();
+  if (!token) {
+    redirectToAdminLogin('missing_token');
+    throw new Error('admin_auth_required');
+  }
+  try {
+    await apiFetchJson('/api/shapes');
+  } catch (e) {
+    const status = Number(e && e.status);
+    if (status === 401 || status === 403 || status === 0 || /token|auth|401|403/i.test(String((e && e.message) || ''))) {
+      redirectToAdminLogin('invalid_token');
+      throw new Error('admin_auth_required');
+    }
+    throw e;
+  }
+}
+
 async function apiFetchJson(path) {
   const apiBase = getApiBaseUrl();
   if (!apiBase) throw new Error('api_base_url_not_set');
@@ -742,6 +778,7 @@ function updatePaletteUrlFromShape() {
 }
 
 async function initShapes() {
+  await ensureAdminValidatorAccess();
   // Try to load runtime config from backend (preferred). This allows the validator to
   // work across deployments without hardcoded storage URLs.
   try {

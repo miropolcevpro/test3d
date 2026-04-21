@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 const EPS = 1e-4;
-const DEFAULT_CURB_WIDTH = 0.022;
+const DEFAULT_CURB_WIDTH = 0.0264;
 const DEFAULT_CURB_HEIGHT = 0.01;
 const DEFAULT_CURB_Y_OFFSET = -0.0006;
 const DEFAULT_CURB_CONTACT_OVERLAP = 0.0022;

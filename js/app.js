@@ -707,9 +707,9 @@ ensureSingleActiveZone();
 
 const AR_FILL_SURFACE_Y_OFFSET = 0.003;
 const AR_CURB_PRESETS = {
-  standard: { id: 'standard', label: 'Стандартный', width: 0.022, exposedHeight: 0.0055, embeddedDepth: 0.0022 },
-  garden: { id: 'garden', label: 'Садовый', width: 0.02, exposedHeight: 0.0048, embeddedDepth: 0.002 },
-  tall: { id: 'tall', label: 'Высокий', width: 0.026, exposedHeight: 0.007, embeddedDepth: 0.0024 },
+  standard: { id: 'standard', label: 'Стандартный', width: 0.0264, exposedHeight: 0.0055, embeddedDepth: 0.0022 },
+  garden: { id: 'garden', label: 'Садовый', width: 0.024, exposedHeight: 0.0048, embeddedDepth: 0.002 },
+  tall: { id: 'tall', label: 'Высокий', width: 0.0312, exposedHeight: 0.007, embeddedDepth: 0.0024 },
 };
 const AR_CURB_MATERIALS = {
   gray: { id: 'gray', label: 'Серый', color: 0xb3b8c2, roughness: 0.86, metalness: 0.04 },

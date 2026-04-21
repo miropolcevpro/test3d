@@ -1,8 +1,14 @@
-## 20260420-f24ce — admin texture delete and sync api helpers restore
-- Release token: `20260420-f24ce`
-- Restored the missing admin API helper layer for texture maintenance: `apiGetConfig`, `apiDeleteTexture`, and `apiSyncTexture` are now defined again, so delete and sync actions no longer crash with `ReferenceError`.
-- Added safe endpoint probing with fallback behavior: if the backend does not expose dedicated delete/sync routes, admin now falls back to palette-level sync/delete using the existing palette and bucket index APIs instead of failing immediately.
-- Preserved the existing admin flows, upload pipeline, palette save logic, AR runtime, multizone, curb behavior, telemetry packaging, and backend upload bundle layout.
+## 20260421-f24cg — ar curb width realism plus20
+- Release token: `20260421-f24cg`
+- Increased curb thickness by 20% across the AR curb presets so curbs remain readable and realistic on larger paving areas without changing the existing zone, seam, or curb workflow.
+- Updated the curb helper fallback width to the same thicker baseline so restored/runtime curbs without an explicit stored width stay visually consistent with the new preset profile.
+- Kept curb heights, seam-safe stitching logic, edge selection flow, AR geometry pipeline, admin behavior, telemetry, and backend packaging unchanged.
+
+## 20260421-f24cf — admin palette validator access hardening
+- Release token: `20260421-f24cf`
+- Админка: валидатор палитр скрыт из публичной части и перенесён во внутренний admin-entry.
+- Валидатор палитр требует активную admin-сессию; без JWT или с истекшим токеном выполняется возврат на страницу входа в админку.
+- Ссылка на валидатор в шапке админки показывается только после успешного входа.
 
 ## 20260420-f24cd — ar admin calibration tab touch fix
 - Release token: `20260420-f24cd`
