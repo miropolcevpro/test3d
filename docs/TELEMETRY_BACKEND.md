@@ -38,6 +38,10 @@
 - `TELEMETRY_MAX_EVENTS=50`
 - `TELEMETRY_MAX_DAYS=365`
 - `TELEMETRY_MAX_OBJECTS_PER_DAY=250`
+- `TELEMETRY_SUMMARY_DEFAULT_OBJECTS_PER_DAY=80`
+- `TELEMETRY_SUMMARY_MAX_OBJECTS_PER_DAY=120`
+- `TELEMETRY_SUMMARY_MAX_BATCHES_TOTAL=240`
+- `TELEMETRY_SUMMARY_TIME_BUDGET_MS=8500`
 
 ## Что нужно настроить в API Gateway
 
@@ -58,6 +62,8 @@
 ## Ограничения текущей версии
 
 - remote summary сейчас считается на чтении из batch objects
+- в режиме summary collector теперь работает с бюджетом по времени и количеству batch objects, чтобы не упираться в gateway timeout
+- при превышении бюджета summary возвращается в облегчённом partial-режиме с scan-метаданными вместо 504
 - это безопасно и стабильно для ранней стадии, но при большом трафике позже лучше перейти на pre-aggregated summary или БД
 - raw remote recent list намеренно не публикуется, чтобы не светить лишние подробности событий
 

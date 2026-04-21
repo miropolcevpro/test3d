@@ -1,3 +1,11 @@
+## 2026-04-21 — Patch f24dh: telemetry summary timeout hardening
+
+- База: `webar_patch_telemetry_auth_hardening_candidate_f24dg.zip` (не подтверждён как новая стабильная база; патч собран поверх кандидата P24 по явному продолжению работ над telemetry).
+- Что сделано: облегчён default summary scan на сервере, добавлен budget/timebox для `mode=summary`, введён partial summary вместо gateway-timeout, админка теперь делает fallback на меньший limit и понятнее деградирует на локальные данные при недоступной серверной сводке.
+- Что не трогали: public telemetry ingestion, AR runtime, multizone, curb, snapshot, texture flows, palette validator, service worker.
+- Проверка: `node --check` для изменённых JS, `python3 scripts/release_check.py`, `python3 scripts/package_release.py`, проверка telemetry ZIP и release token alignment.
+- Release token: `20260421-f24dh`
+
 ## 2026-04-21 — Patch f24dg: telemetry admin auth hardening
 
 - Closed protected telemetry modes behind admin Bearer auth in `backend_yc_functions/telemetry_collector/index.js`: `summary`, `errors`, and `clear_errors` now require a valid HS256 admin JWT verified with `TELEMETRY_ADMIN_JWT_SECRET` / `ADMIN_JWT_SECRET` / `JWT_SECRET`.

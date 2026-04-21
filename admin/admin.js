@@ -1,5 +1,5 @@
 // BUILD: v28 2026-01-16f (runtime-config)
-const __BUILD_ID__ = "20260421-f24dg";
+const __BUILD_ID__ = "20260421-f24dh";
 console.log("[Admin] build", __BUILD_ID__);
 /* Admin (Step 3 start) — shapes list + shape details (read-only palette), router scaffold */
 (async () => {
@@ -1432,6 +1432,8 @@ function setTelemetryStatus(message, kind) {
     const remoteReady = !!(remote && remote.ok);
     const remoteGeneratedAt = remote && remote.generatedAt ? formatTelemetryDateTime(remote.generatedAt) : '—';
     const remoteLatestEventAt = remote && remote.latestEventAt ? formatTelemetryDateTime(remote.latestEventAt) : '—';
+    const remotePartial = !!(remote && (remote.partial || (remote.scan && remote.scan.stopReason)));
+    const remoteRetryInfo = remote && remote.requestedByAdmin && remote.requestedByAdmin.degradedRetry ? 'Да' : 'Нет';
     const localLast = formatTelemetryDateTime(local.latestLocalEventAt || '');
     const localPendingLast = formatTelemetryDateTime(local.latestPendingEventAt || '');
     const localFlushOk = formatTelemetryDateTime(local.lastFlushSuccessAt || '');
@@ -1477,7 +1479,9 @@ function setTelemetryStatus(message, kind) {
       ['Пакетов данных в хранилище', remote && remote.totals ? (remote.totals.batches || 0) : 0],
       ['Последнее полученное действие', remoteLatestEventAt],
       ['Последнее обновление общей сводки', remoteGeneratedAt],
-      ['Статус серверной аналитики', remoteReady ? 'Подключён' : 'Нет ответа'],
+      ['Статус серверной аналитики', remoteReady ? (remotePartial ? 'Подключён (облегчённый режим)' : 'Подключён') : 'Нет ответа'],
+      ['Режим серверной сводки', remoteReady ? (remotePartial ? 'Частичная выборка с ограничением нагрузки' : 'Полная выборка в рамках текущего лимита') : '—'],
+      ['Повторный облегчённый запрос', remoteReady ? remoteRetryInfo : '—'],
     ].forEach(([label, value]) => remoteList.appendChild(createAdminPanelItem(label, value)));
     appendAdminChildren(
       remotePanel,
@@ -1609,7 +1613,8 @@ function setTelemetryStatus(message, kind) {
 
   const TELEMETRY_ERROR_CATEGORY_ORDER = ['ar_session', 'textures_materials', 'palette_content', 'snapshot_export', 'analytics_backend', 'admin_save', 'ui_flow', 'runtime_js'];
   const TELEMETRY_ERROR_SEVERITY_ORDER = ['critical', 'medium', 'low', 'diagnostic'];
-  const TELEMETRY_REMOTE_BATCH_LIMIT = 250;
+  const TELEMETRY_REMOTE_SUMMARY_LIMITS = [80, 40, 20];
+  const TELEMETRY_REMOTE_ERROR_LIMIT = 120;
   const TELEMETRY_ERROR_MODAL_ITEM_LIMIT = 300;
   const TELEMETRY_ERROR_EXPORT_ITEM_LIMIT = 1200;
 
@@ -1667,6 +1672,49 @@ function setTelemetryStatus(message, kind) {
       source: normalizeTelemetryErrorSelect(elTelemetryErrorSourceSelect && elTelemetryErrorSourceSelect.value, ['all', 'site', 'admin'], 'all')
     };
     return Object.assign({}, telemetryErrorReportFiltersState);
+  }
+
+  function isTelemetrySummaryRetryable(result) {
+    if (!result || result.ok) return false;
+    const status = Number(result.status || 0) || 0;
+    const code = String(result.code || '').toLowerCase();
+    return status === 504 || status === 503 || status === 502 || code === 'network_error' || code === 'timeout';
+  }
+
+  function formatTelemetrySummaryFailureMessage(result) {
+    const status = Number(result && result.status || 0) || 0;
+    const message = String(result && result.message || '').trim();
+    if (status === 504) return 'Серверная сводка превысила лимит времени. Показаны локальные данные этого браузера.';
+    if (status === 503) return 'Серверная сводка временно недоступна. Проверьте настройки telemetry backend.';
+    if (status === 401) return 'Серверная сводка требует повторного входа в админку.';
+    if (status === 0 && message) return 'Серверная сводка недоступна по сети. Показаны локальные данные этого браузера.';
+    if (message) return message;
+    return 'Серверная сводка временно недоступна.';
+  }
+
+  async function loadRemoteTelemetrySummary(baseFilters) {
+    const canLoadRemote = !!(telemetry && telemetry.getRemoteSummaryDetailed);
+    if (!canLoadRemote) {
+      return { ok: false, data: null, result: { ok: false, message: 'Telemetry summary is not available', code: 'no_summary', status: 0 }, attempts: [] };
+    }
+    const attempts = [];
+    for (const limit of TELEMETRY_REMOTE_SUMMARY_LIMITS) {
+      const result = await telemetry.getRemoteSummaryDetailed({
+        days: baseFilters.days,
+        deviceType: (baseFilters.deviceType === 'all' ? '' : baseFilters.deviceType),
+        limit
+      });
+      attempts.push({ limit, result });
+      if (result && result.ok) {
+        if (result.data && typeof result.data === 'object') {
+          result.data.requestedByAdmin = { limit, attempts: attempts.length, degradedRetry: attempts.length > 1 };
+        }
+        return { ok: true, data: result.data || null, result, attempts };
+      }
+      if (!isTelemetrySummaryRetryable(result)) break;
+    }
+    const last = attempts.length ? attempts[attempts.length - 1].result : { ok: false, message: 'Telemetry summary is not available', code: 'no_summary', status: 0 };
+    return { ok: false, data: null, result: last, attempts };
   }
 
   function getProp(obj, keys) {
@@ -1960,7 +2008,7 @@ function setTelemetryStatus(message, kind) {
     const cfg = options || {};
     const baseFilters = getTelemetryFilters();
     const uiFilters = getTelemetryErrorReportFilters();
-    const batchLimit = TELEMETRY_REMOTE_BATCH_LIMIT;
+    const batchLimit = TELEMETRY_REMOTE_ERROR_LIMIT;
     const itemLimit = Math.max(1, Math.min(TELEMETRY_ERROR_EXPORT_ITEM_LIMIT, Number(cfg.itemLimit || TELEMETRY_ERROR_MODAL_ITEM_LIMIT) || TELEMETRY_ERROR_MODAL_ITEM_LIMIT));
     const remoteParams = {
       days: baseFilters.days,
@@ -1974,9 +2022,9 @@ function setTelemetryStatus(message, kind) {
     const canLoadRemote = !!(telemetry && telemetry.getRemoteErrorsDetailed);
     const [remoteErrorsResult, remoteSummaryResult] = await Promise.all([
       canLoadRemote ? telemetry.getRemoteErrorsDetailed(remoteParams) : Promise.resolve({ ok: false, data: null, message: 'Telemetry endpoint is not configured', code: 'no_endpoint' }),
-      telemetry && telemetry.getRemoteSummaryDetailed
-        ? telemetry.getRemoteSummaryDetailed({ days: baseFilters.days, deviceType: (baseFilters.deviceType === 'all' ? '' : baseFilters.deviceType), limit: batchLimit })
-        : Promise.resolve({ ok: false, data: null, message: 'Telemetry summary is not available', code: 'no_summary' })
+      loadRemoteTelemetrySummary(baseFilters).then((payload) => payload && payload.ok
+        ? { ok: true, data: payload.data, message: '', code: '', detail: payload }
+        : { ok: false, data: null, message: formatTelemetrySummaryFailureMessage(payload && payload.result), code: (payload && payload.result && payload.result.code) || 'no_summary', detail: payload })
     ]);
 
     const remoteFeed = remoteErrorsResult && remoteErrorsResult.ok && remoteErrorsResult.data && Array.isArray(remoteErrorsResult.data.items)
@@ -2560,13 +2608,9 @@ function setTelemetryStatus(message, kind) {
     let remote = null;
     let remoteSummaryFailureMessage = '';
     try {
-      if (telemetry.getRemoteSummaryDetailed) {
-        const remoteResult = await telemetry.getRemoteSummaryDetailed({ days: filters.days, deviceType: (filters.deviceType === 'all' ? '' : filters.deviceType), limit: 400 });
-        if (remoteResult && remoteResult.ok) remote = remoteResult.data || null;
-        else remoteSummaryFailureMessage = remoteResult && remoteResult.message ? String(remoteResult.message) : 'серверная сводка временно недоступна';
-      } else {
-        remote = telemetry.getRemoteSummary ? await telemetry.getRemoteSummary({ days: filters.days, deviceType: (filters.deviceType === 'all' ? '' : filters.deviceType), limit: 400 }) : null;
-      }
+      const remotePayload = await loadRemoteTelemetrySummary(filters);
+      if (remotePayload && remotePayload.ok) remote = remotePayload.data || null;
+      else remoteSummaryFailureMessage = formatTelemetrySummaryFailureMessage(remotePayload && remotePayload.result);
     } catch (err) {
       remote = null;
       remoteSummaryFailureMessage = err && err.message ? String(err.message) : 'серверная сводка временно недоступна';
@@ -2671,6 +2715,7 @@ function setTelemetryStatus(message, kind) {
     }
 
     const telemetryStatusBits = [`Сейчас показаны данные: ${sourceLabel}.`, `Не передано с этого устройства: ${summary.pending || 0}.`, `Последнее обновление общей сводки: ${remote && remote.generatedAt ? formatTelemetryDateTime(remote.generatedAt) : 'нет данных'}.`];
+    if (remote && (remote.partial || (remote.scan && remote.scan.stopReason))) telemetryStatusBits.push('Серверная сводка собрана в облегчённом режиме, чтобы не упираться в timeout.');
     if (!remote && remoteSummaryFailureMessage) telemetryStatusBits.push(`Причина недоступности серверной сводки: ${remoteSummaryFailureMessage}.`);
     setTelemetryStatus(telemetryStatusBits.join(' '), ((!remote && remoteSummaryFailureMessage) || (summary.pending || 0) > 0) ? 'warn' : '');
 
@@ -2682,6 +2727,10 @@ function setTelemetryStatus(message, kind) {
         hint.appendChild(createAdminNode('b', { text: 'Сводка с сервера' }));
         hint.appendChild(createAdminNode('br'));
         hint.append(`Пакеты данных: ${remoteBatchCount || 0}`);
+        if (remote && remote.scan && remote.scan.scannedBatches) {
+          hint.appendChild(createAdminNode('br'));
+          hint.append(`Скан по серверу: ${remote.scan.scannedBatches} пакетов, лимит на день ${remote.scan.appliedLimitPerDay || '—'}`);
+        }
         hint.appendChild(createAdminNode('br'));
         hint.append(`Главные события: ${remoteTop || '—'}`);
         hint.appendChild(createAdminNode('br'));
