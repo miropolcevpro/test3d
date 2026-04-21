@@ -12,6 +12,7 @@
   var FLUSH_DEBOUNCE_MS = 1800;
   var AUTO_FLUSH_INTERVAL_MS = 12000;
   var endpointDisabledForSession = false;
+  var ADMIN_SESSION_TOKEN_KEY = 'admin_jwt';
   var flushTimer = 0;
   var pageViewSent = false;
   var errorDedupe = Object.create(null);
@@ -788,6 +789,29 @@
   }
 
 
+  function getAdminSessionToken() {
+    try {
+      return safeString(global.sessionStorage && global.sessionStorage.getItem(ADMIN_SESSION_TOKEN_KEY)).trim();
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function shouldUseAdminAuthForRemoteMode(mode) {
+    var key = safeString(mode || '').toLowerCase();
+    return key === 'summary' || key === 'errors' || key === 'clear_errors';
+  }
+
+  function buildRemoteHeaders(mode, extraHeaders) {
+    var headers = Object.assign({}, extraHeaders || {});
+    if (!headers.Accept) headers.Accept = 'application/json';
+    if (shouldUseAdminAuthForRemoteMode(mode)) {
+      var token = getAdminSessionToken();
+      if (token) headers.Authorization = 'Bearer ' + token;
+    }
+    return headers;
+  }
+
   function buildRemoteUrl(mode, params) {
     var endpoint = pickEndpoint();
     if (!endpoint) return '';
@@ -806,7 +830,7 @@
     }
   }
 
-  function fetchRemoteResult(url) {
+  function fetchRemoteResult(url, mode) {
     if (!url) {
       return Promise.resolve({ ok: false, status: 0, data: null, url: '', message: 'Telemetry endpoint is not configured', code: 'no_endpoint' });
     }
@@ -814,7 +838,7 @@
       method: 'GET',
       cache: 'no-store',
       credentials: 'omit',
-      headers: { 'Accept': 'application/json' }
+      headers: buildRemoteHeaders(mode, { 'Accept': 'application/json' })
     }).then(function (res) {
       if (!res) return { ok: false, status: 0, data: null, url: url, message: 'Empty response from telemetry endpoint', code: 'empty_response' };
       return res.text().then(function (bodyText) {
@@ -847,13 +871,13 @@
     });
   }
 
-  function fetchRemoteJson(url) {
-    return fetchRemoteResult(url).then(function (result) {
+  function fetchRemoteJson(url, mode) {
+    return fetchRemoteResult(url, mode).then(function (result) {
       return result && result.ok ? result.data : null;
     });
   }
 
-  function postRemoteResult(url, payload) {
+  function postRemoteResult(url, payload, mode) {
     if (!url) {
       return Promise.resolve({ ok: false, status: 0, data: null, url: '', message: 'Telemetry endpoint is not configured', code: 'no_endpoint' });
     }
@@ -861,10 +885,10 @@
       method: 'POST',
       cache: 'no-store',
       credentials: 'omit',
-      headers: {
+      headers: buildRemoteHeaders(mode, {
         'Accept': 'application/json',
         'Content-Type': 'application/json'
-      },
+      }),
       body: JSON.stringify(payload || {})
     }).then(function (res) {
       if (!res) return { ok: false, status: 0, data: null, url: url, message: 'Empty response from telemetry endpoint', code: 'empty_response' };
@@ -899,27 +923,27 @@
   }
 
   function getRemoteSummary(params) {
-    return fetchRemoteJson(buildRemoteUrl('summary', params || {}));
+    return fetchRemoteJson(buildRemoteUrl('summary', params || {}), 'summary');
   }
 
   function getRemoteSummaryDetailed(params) {
-    return fetchRemoteResult(buildRemoteUrl('summary', params || {}));
+    return fetchRemoteResult(buildRemoteUrl('summary', params || {}), 'summary');
   }
 
   function getRemoteErrors(params) {
-    return fetchRemoteJson(buildRemoteUrl('errors', params || {}));
+    return fetchRemoteJson(buildRemoteUrl('errors', params || {}), 'errors');
   }
 
   function getRemoteErrorsDetailed(params) {
-    return fetchRemoteResult(buildRemoteUrl('errors', params || {}));
+    return fetchRemoteResult(buildRemoteUrl('errors', params || {}), 'errors');
   }
 
   function getRemoteHealth() {
-    return fetchRemoteJson(buildRemoteUrl('health', {}));
+    return fetchRemoteJson(buildRemoteUrl('health', {}), 'health');
   }
 
   function clearRemoteErrorsDetailed(payload) {
-    return postRemoteResult(buildRemoteUrl('clear_errors', {}), Object.assign({ action: 'clear_errors', mode: 'clear_errors' }, payload || {}));
+    return postRemoteResult(buildRemoteUrl('clear_errors', {}), Object.assign({ action: 'clear_errors', mode: 'clear_errors' }, payload || {}), 'clear_errors');
   }
 
   function getSyncStatus() {

@@ -5,7 +5,9 @@
 ## Что делает
 
 - `POST /api/telemetry` — принимает клиентские батчи событий и сохраняет их в Object Storage как immutable batch objects.
-- `GET /api/telemetry?mode=summary&days=7` — собирает сводку по батчам за последние N дней.
+- `GET /api/telemetry?mode=summary&days=7` — собирает сводку по батчам за последние N дней. Требует Bearer token админки.
+- `GET /api/telemetry?mode=errors&days=7` — детальный отчёт по ошибкам. Требует Bearer token админки.
+- `POST /api/telemetry?mode=clear_errors` — пометка текущих ошибок как очищенных. Требует Bearer token админки.
 - `GET /api/telemetry?mode=health` — быстрый health-check.
 
 ## Почему хранение сделано пакетами, а не в одном summary.json
@@ -31,6 +33,7 @@
 
 Опционально:
 
+- `TELEMETRY_ADMIN_JWT_SECRET` или `ADMIN_JWT_SECRET` или `JWT_SECRET` — секрет для проверки admin JWT в protected telemetry режимах (`summary`, `errors`, `clear_errors`)
 - `TELEMETRY_PREFIX=telemetry`
 - `TELEMETRY_MAX_EVENTS=50`
 - `TELEMETRY_MAX_DAYS=365`
@@ -43,6 +46,8 @@
 - `POST /api/telemetry`
 - `GET /api/telemetry`
 - `OPTIONS /api/telemetry`
+
+Важно: `summary`, `errors` и `clear_errors` теперь должны доходить до той же функции вместе с `Authorization: Bearer <admin_jwt>`. Публичный ingestion `POST /api/telemetry` остаётся без auth, чтобы не ломать сбор клиентской аналитики.
 
 ## Что меняется на фронте
 

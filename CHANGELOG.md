@@ -1,3 +1,12 @@
+## 2026-04-21 — Patch f24dg: telemetry admin auth hardening
+
+- Closed protected telemetry modes behind admin Bearer auth in `backend_yc_functions/telemetry_collector/index.js`: `summary`, `errors`, and `clear_errors` now require a valid HS256 admin JWT verified with `TELEMETRY_ADMIN_JWT_SECRET` / `ADMIN_JWT_SECRET` / `JWT_SECRET`.
+- Kept public telemetry ingestion unchanged: `POST /api/telemetry` remains public so site-side event delivery and browser queue flushing do not regress.
+- Forwarded the current admin session token from `js/telemetry.js` only for protected remote telemetry requests, without attaching auth to public event ingestion or health-check calls.
+- Improved admin telemetry panel messaging so missing/invalid auth or missing backend secret shows up as a clear server-summary warning instead of silently looking like “no data”.
+- Updated telemetry collector health version and backend docs to reflect the hardened access model.
+- Release token: `20260421-f24dg`
+
 ## 2026-04-21 — Patch f24df
 - AR-показ площади больше не исчезает после заливки: `arArea` сохраняется и продолжает показывать площадь в финальном режиме.
 - Для многозонного сценария площадь теперь считается суммарно по всем зонам и обновляется во время построения новой зоны, чтобы пользователь всегда видел общий расчёт площади.

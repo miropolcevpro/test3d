@@ -1,5 +1,5 @@
 // BUILD: v28 2026-01-16f (runtime-config)
-const __BUILD_ID__ = "20260421-f24df";
+const __BUILD_ID__ = "20260421-f24dg";
 console.log("[Admin] build", __BUILD_ID__);
 /* Admin (Step 3 start) — shapes list + shape details (read-only palette), router scaffold */
 (async () => {
@@ -2558,10 +2558,18 @@ function setTelemetryStatus(message, kind) {
     const topNames = Object.entries(summary.byName || {}).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([name, count]) => `${telemetryEventLabel(name)} × ${count}`).join(' · ');
 
     let remote = null;
+    let remoteSummaryFailureMessage = '';
     try {
-      remote = telemetry.getRemoteSummary ? await telemetry.getRemoteSummary({ days: filters.days, deviceType: (filters.deviceType === 'all' ? '' : filters.deviceType), limit: 400 }) : null;
-    } catch (_) {
+      if (telemetry.getRemoteSummaryDetailed) {
+        const remoteResult = await telemetry.getRemoteSummaryDetailed({ days: filters.days, deviceType: (filters.deviceType === 'all' ? '' : filters.deviceType), limit: 400 });
+        if (remoteResult && remoteResult.ok) remote = remoteResult.data || null;
+        else remoteSummaryFailureMessage = remoteResult && remoteResult.message ? String(remoteResult.message) : 'серверная сводка временно недоступна';
+      } else {
+        remote = telemetry.getRemoteSummary ? await telemetry.getRemoteSummary({ days: filters.days, deviceType: (filters.deviceType === 'all' ? '' : filters.deviceType), limit: 400 }) : null;
+      }
+    } catch (err) {
       remote = null;
+      remoteSummaryFailureMessage = err && err.message ? String(err.message) : 'серверная сводка временно недоступна';
     }
 
     const remoteEventCount = remote && remote.totals ? Number(remote.totals.events || 0) : 0;
@@ -2662,7 +2670,9 @@ function setTelemetryStatus(message, kind) {
       elTelemetryDevices.replaceChildren(renderTelemetryDevices(dashboard && dashboard.deviceSegments, sourceLabel));
     }
 
-    setTelemetryStatus(`Сейчас показаны данные: ${sourceLabel}. Не передано с этого устройства: ${summary.pending || 0}. Последнее обновление общей сводки: ${remote && remote.generatedAt ? formatTelemetryDateTime(remote.generatedAt) : 'нет данных'}.`, (summary.pending || 0) > 0 ? 'warn' : '');
+    const telemetryStatusBits = [`Сейчас показаны данные: ${sourceLabel}.`, `Не передано с этого устройства: ${summary.pending || 0}.`, `Последнее обновление общей сводки: ${remote && remote.generatedAt ? formatTelemetryDateTime(remote.generatedAt) : 'нет данных'}.`];
+    if (!remote && remoteSummaryFailureMessage) telemetryStatusBits.push(`Причина недоступности серверной сводки: ${remoteSummaryFailureMessage}.`);
+    setTelemetryStatus(telemetryStatusBits.join(' '), ((!remote && remoteSummaryFailureMessage) || (summary.pending || 0) > 0) ? 'warn' : '');
 
     if (elTelemetryList) {
       const parts = [];
