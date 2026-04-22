@@ -3,28 +3,18 @@
 
   var CONFIG = global.__AG_CALCULATOR_CONFIG__ || {};
   var ORIGIN = (function(){ try { return global.location.origin; } catch (_) { return '*'; } })();
-  var SEARCH = safeText(global.location && global.location.search);
-  var EMBEDDED_MODE = /(?:^|[?&])embedded=1(?:&|$)/.test(SEARCH);
   var HEIGHT_MESSAGE = 'ag-calc-height';
   var READY_MESSAGE = 'ag-calc-ready';
   var SUBMIT_MESSAGE = 'ag-calc-submit-ready';
-  var MOBILE_STATE_MESSAGE = 'ag-calc-mobile-state';
-  var HOST_ACTION_MESSAGE = 'ag-calc-host-action';
   var STATUS_ERROR = '#b91c1c';
   var STATUS_OK = '#166534';
   var statusTimer = 0;
-  var mobileStateTimer = 0;
-  var lastMobileStateJson = '';
 
   function $(selector, root){ return (root || doc).querySelector(selector); }
   function safeText(value){ return value == null ? '' : String(value); }
   function nowIso(){ try { return new Date().toISOString(); } catch (_) { return ''; } }
   function digits(value){ return safeText(value).replace(/\D/g, ''); }
   function cloneJson(value){ try { return JSON.parse(JSON.stringify(value)); } catch (_) { return null; } }
-  function num(value, fallback){
-    var parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : (fallback || 0);
-  }
 
   function postMessageToParent(type, payload){
     if (!global.parent || global.parent === global) return;
@@ -65,7 +55,6 @@
       }, 5200);
     }
     scheduleHeight();
-    scheduleMobileState();
   }
 
   function patchPrivacyLink(){
@@ -230,178 +219,24 @@
     btn.onclick = handleStandaloneSubmit;
   }
 
-  function isElementVisible(el){
-    if (!el) return false;
-    if (el.hidden) return false;
-    if (el.getAttribute && el.getAttribute('aria-hidden') === 'true') return false;
-    var style = null;
-    try { style = global.getComputedStyle(el); } catch (_) {}
-    if (!style) return true;
-    return style.display !== 'none' && style.visibility !== 'hidden' && num(style.opacity, 1) > 0.01;
-  }
-
-  function docOffsetTop(el){
-    if (!el || !el.getBoundingClientRect) return 0;
-    var rect = el.getBoundingClientRect();
-    return Math.max(0, Math.round(rect.top + (global.pageYOffset || 0)));
-  }
-
-  function getPreviewState(prefix){
-    var btn = $('[data-role="' + prefix + 'PreviewBtn"]');
-    var img = $('[data-role="' + prefix + 'PreviewImg"]');
-    var empty = !!(btn && btn.classList && btn.classList.contains('is-empty'));
-    return {
-      src: img && img.getAttribute('src') ? safeText(img.src || img.getAttribute('src')) : '',
-      alt: safeText(img && (img.getAttribute('alt') || img.alt)),
-      empty: empty
-    };
-  }
-
-  function detectStageKey(hintText, buttonText){
-    var text = (safeText(hintText) + ' ' + safeText(buttonText)).toLowerCase();
-    if (text.indexOf('заяв') !== -1) return 'lead';
-    if (text.indexOf('корзин') !== -1) return 'cart';
-    if (text.indexOf('м²') !== -1 || text.indexOf('м2') !== -1 || text.indexOf('площад') !== -1) return 'quantity';
-    if (text.indexOf('цвет') !== -1) return 'color';
-    if (text.indexOf('технолог') !== -1) return 'technology';
-    return 'form';
-  }
-
-  function getStageTarget(stageKey){
-    if (stageKey === 'technology') return $('[data-role="techTabs"]');
-    if (stageKey === 'color') return $('[data-role="colors"]');
-    if (stageKey === 'quantity') return $('[data-role="qty"]');
-    if (stageKey === 'cart') return $('[data-role="cartAddBtn"]') || $('[data-role="cartBlock"]');
-    if (stageKey === 'lead') return doc.getElementById('paverLeadForm');
-    return $('[data-role="forms"]');
-  }
-
-  function collectMobileState(){
-    var mbar = $('[data-role="mbar"]');
-    var hint = safeText($('[data-role="mbarHint"]') && $('[data-role="mbarHint"]').textContent).trim();
-    var buttonText = safeText($('[data-role="mbarMainBtn"]') && $('[data-role="mbarMainBtn"]').textContent).trim();
-    var stageKey = detectStageKey(hint, buttonText);
-    var countEl = $('[data-role="mbarCount"]');
-    var cartSumEl = $('[data-role="mbarCartSum"]');
-    return {
-      visible: isElementVisible(mbar),
-      hint: hint,
-      name: safeText($('[data-role="mbarName"]') && $('[data-role="mbarName"]').textContent).trim(),
-      count: safeText(countEl && countEl.textContent).trim(),
-      countVisible: isElementVisible(countEl),
-      sub: safeText($('[data-role="mbarSub"]') && $('[data-role="mbarSub"]').textContent).trim(),
-      cartSum: safeText(cartSumEl && cartSumEl.textContent).trim(),
-      cartSumVisible: isElementVisible(cartSumEl),
-      buttonText: buttonText,
-      stageKey: stageKey,
-      targetOffset: docOffsetTop(getStageTarget(stageKey)),
-      previews: {
-        form: getPreviewState('mbarForm'),
-        color: getPreviewState('mbarColor')
-      }
-    };
-  }
-
-  function postMobileState(force){
-    if (!EMBEDDED_MODE) return;
-    var payload = collectMobileState();
-    var json = '';
-    try { json = JSON.stringify(payload); } catch (_) { json = ''; }
-    if (!force && json && json === lastMobileStateJson) return;
-    lastMobileStateJson = json;
-    postMessageToParent(MOBILE_STATE_MESSAGE, payload);
-  }
-
-  function scheduleMobileState(){
-    if (!EMBEDDED_MODE) return;
-    if (mobileStateTimer) return;
-    mobileStateTimer = global.setTimeout(function(){
-      mobileStateTimer = 0;
-      postMobileState(false);
-    }, 40);
-  }
-
-  function ensureEmbeddedModeStyles(){
-    if (!EMBEDDED_MODE) return;
-    if (doc.getElementById('agCalcEmbeddedMobileBridgeStyles')) return;
-    var style = doc.createElement('style');
-    style.id = 'agCalcEmbeddedMobileBridgeStyles';
-    style.textContent = [
-      '@media (max-width: 820px){',
-      '  .pcMobileBar{display:none !important;}',
-      '  #paverConf2026.has-mbar{padding-bottom:0 !important;}',
-      '}',
-      '.pcHostFocusPulse{',
-      '  outline:3px solid rgba(37,99,235,.78) !important;',
-      '  outline-offset:4px !important;',
-      '  border-radius:16px !important;',
-      '  animation:pcHostFocusPulse .8s ease 0s 2;',
-      '  box-shadow:0 0 0 4px rgba(59,130,246,.16) !important;',
-      '}',
-      '@keyframes pcHostFocusPulse{',
-      '  0%{transform:translateY(0);}',
-      '  50%{transform:translateY(-2px);}',
-      '  100%{transform:translateY(0);}',
-      '}'
-    ].join('\n');
-    (doc.head || doc.documentElement).appendChild(style);
-  }
-
-  function pulseTarget(stageKey){
-    var target = getStageTarget(stageKey || detectStageKey('', ''));
-    if (!target || !target.classList) return;
-    target.classList.add('pcHostFocusPulse');
-    if (stageKey === 'quantity') {
-      try { target.focus(); } catch (_) {}
-    }
-    global.setTimeout(function(){
-      try { target.classList.remove('pcHostFocusPulse'); } catch (_) {}
-    }, 1800);
-  }
-
-  function handleHostMessage(event){
-    if (!EMBEDDED_MODE) return;
-    if (!event || event.origin !== ORIGIN) return;
-    var data = event.data || {};
-    if (data.type !== HOST_ACTION_MESSAGE) return;
-    var payload = data.payload || {};
-    if (payload.action === 'focus-current-stage') {
-      pulseTarget(safeText(payload.stageKey) || collectMobileState().stageKey);
-      scheduleMobileState();
-      return;
-    }
-    if (payload.action === 'mobile-state-request') {
-      postMobileState(true);
-    }
-  }
-
   function initResizeReporting(){
     postMessageToParent(READY_MESSAGE, { version: safeText(CONFIG.version || '') });
     scheduleHeight();
-    postMobileState(true);
     try {
       if (global.ResizeObserver) {
-        var ro = new global.ResizeObserver(function(){ scheduleHeight(); scheduleMobileState(); });
+        var ro = new global.ResizeObserver(function(){ scheduleHeight(); });
         ro.observe(doc.documentElement);
         if (doc.body) ro.observe(doc.body);
       }
     } catch (_) {}
-    try {
-      if (global.MutationObserver) {
-        var mo = new global.MutationObserver(function(){ scheduleHeight(); scheduleMobileState(); });
-        mo.observe(doc.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
-      }
-    } catch (_) {}
-    global.addEventListener('load', function(){ scheduleHeight(); postMobileState(true); });
-    global.addEventListener('resize', function(){ scheduleHeight(); scheduleMobileState(); });
-    global.addEventListener('message', handleHostMessage);
-    doc.addEventListener('input', function(){ scheduleHeight(); scheduleMobileState(); }, true);
-    doc.addEventListener('change', function(){ scheduleHeight(); scheduleMobileState(); }, true);
-    doc.addEventListener('click', function(){ global.setTimeout(function(){ scheduleHeight(); scheduleMobileState(); }, 32); }, true);
-    global.setInterval(function(){ postHeight(); postMobileState(false); }, 1200);
+    global.addEventListener('load', scheduleHeight);
+    global.addEventListener('resize', scheduleHeight);
+    doc.addEventListener('input', scheduleHeight, true);
+    doc.addEventListener('change', scheduleHeight, true);
+    doc.addEventListener('click', function(){ global.setTimeout(scheduleHeight, 32); }, true);
+    global.setInterval(postHeight, 1200);
   }
 
-  ensureEmbeddedModeStyles();
   patchPrivacyLink();
   initStandaloneSubmit();
   initResizeReporting();

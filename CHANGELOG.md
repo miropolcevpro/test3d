@@ -1,3 +1,11 @@
+## 20260422-f24do
+
+- Base: `webar_patch_sw_update_prompt_calc_scroll_readability_candidate_f24dn.zip`
+- Fix: final readability hardening for calculator additional info.
+- Cause: late premium/cart CSS overrides still muted labels and secondary calculation text inside additional info (`.pcCartInfo__k`, `.pcCartNote`, `.pcCartItem__sub`, related rows), so values were partially fixed but the block still looked faded.
+- Change: added final tail override in `calculator_module/paver-configurator-core.js` to force black text and full opacity for additional-info labels and values without touching formulas, cart logic, AR runtime, or telemetry.
+- Release token: `20260422-f24do`
+
 ## 2026-04-22 — Patch f24dk: calculator module integration hardening
 
 - База: `webar_patch_telemetry_summary_timeout_hardening_candidate_f24dh.zip` (текущая подтверждённая стабильная база).
