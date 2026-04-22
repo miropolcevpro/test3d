@@ -691,6 +691,14 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   white-space:nowrap;
 }
 .patternTab.active{background:rgba(90,167,255,0.92);}
+.patternTab--calc{
+  background:rgba(90,167,255,0.18);
+  box-shadow:inset 0 0 0 1px rgba(90,167,255,0.28);
+}
+.patternTab--calc:hover,
+.patternTab--calc:focus-visible{
+  background:rgba(90,167,255,0.24);
+}
 .patternTab--admin{display:none;}
 .patternTab--admin.is-enabled{display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;}
 .patternTab--snapshot{white-space:nowrap;}

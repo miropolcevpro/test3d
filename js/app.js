@@ -242,6 +242,7 @@ const UI = {
   arZoneActions: document.getElementById('arZoneActions'),
   btnArZoneBarClose: document.getElementById('btnArZoneBarClose'),
   btnArZoneAddAction: document.getElementById('btnArZoneAddAction'),
+  btnArCalc: document.getElementById('btnArCalc'),
   btnArZoneEdit: document.getElementById('btnArZoneEdit'),
   btnArZoneCutout: document.getElementById('btnArZoneCutout'),
   btnArZoneCurb: document.getElementById('btnArZoneCurb'),
@@ -2726,6 +2727,42 @@ function getPrimaryQuickLaunchItem() {
   return list.length ? list[0] : null;
 }
 
+function scrollCatalogToCalculator(opts = {}) {
+  const mount = document.getElementById('calculatorModuleCatalogMount');
+  const wrap = UI.screenCatalog?.querySelector('.catalogWrap') || document.querySelector('#screenCatalog .catalogWrap');
+  const behavior = opts.behavior || 'smooth';
+  if (!mount) return;
+  const run = () => {
+    try {
+      if (wrap && typeof wrap.scrollTo === 'function') {
+        const wrapRect = wrap.getBoundingClientRect();
+        const mountRect = mount.getBoundingClientRect();
+        const delta = mountRect.top - wrapRect.top;
+        const top = Math.max(0, wrap.scrollTop + delta - 12);
+        wrap.scrollTo({ top, behavior });
+        return;
+      }
+    } catch (_) {}
+    try { mount.scrollIntoView({ block: 'start', behavior }); } catch (_) {}
+  };
+  requestAnimationFrame(() => requestAnimationFrame(run));
+}
+
+async function routeFromArToCalculator() {
+  telemetryTrack('ar_calc_click', telemetryCtx({ source: 'ar_final_bar' }));
+  setCalibrationPanelOpen(false);
+  setArZoneDeleteConfirmOpen(false);
+  setArCurbSheetOpen(false);
+  setArZonePanelOpen(false);
+  if (state.xrSession) {
+    await stopAR();
+  }
+  setActiveScreen('catalog', UI);
+  state.phase = 'catalog';
+  telemetryPage('catalog', telemetryCtx({ source: 'ar_calc_cta' }));
+  scrollCatalogToCalculator({ behavior: 'smooth' });
+}
+
 function syncQuickArLaunchButton() {
   if (!UI.btnQuickArLaunch) return;
   const primaryItem = getPrimaryQuickLaunchItem();
@@ -4931,6 +4968,13 @@ function ensureArFinalControlsBound() {
       beginAddArZone();
     });
     UI.btnArZoneAddAction.__arBound = true;
+  }
+
+  if (UI.btnArCalc && !UI.btnArCalc.__arBound) {
+    UI.btnArCalc.addEventListener('click', async () => {
+      await routeFromArToCalculator();
+    });
+    UI.btnArCalc.__arBound = true;
   }
 
   if (UI.rotationSlider && !UI.rotationSlider.__arBound) {
