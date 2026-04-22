@@ -10,6 +10,7 @@ import { getConnInfo, updateTexLoadMaxParallel, loadTexSmartCached, applyMapToTi
 import { makeTileMaterial } from './app-shader-material-helpers.js';
 import { distXZ, computeAreaM2FromContours, rebuildMarkersAndLine, rebuildFillMesh, clearMeasureLabels as clearMeasureLabelsHelper, updateMeasureLabels as updateMeasureLabelsHelper, updateAreaUI as updateAreaUIHelper } from './app-geometry-helpers.js';
 import { getArEnv, showArHelp, updateArEntryUI } from './app-ar-entry-helpers.js';
+import { createLeadFormHelpers } from './app-lead-form-helpers.js';
 import { createArSessionHelpers } from './app-ar-session-helpers.js';
 import { createSelectionHelpers } from './app-selection-helpers.js';
 import { createArZoneHelpers } from './app-ar-zone-helpers.js';
@@ -672,6 +673,16 @@ const state = {
   },
 
 };
+
+const leadFormHelpers = createLeadFormHelpers({
+  doc: document,
+  UI,
+  managerPhone: '+79780224411',
+  privacyPolicyUrl: 'https://ag-ru.com/',
+  telemetryTrack,
+  telemetryCtx,
+  getState: () => state,
+});
 
 const arZoneHelpers = createArZoneHelpers({ state });
 const {
@@ -4636,13 +4647,11 @@ UI.btnDetailBack?.addEventListener('click', () => {
   state.phase = 'catalog';
 });
 
-UI.btnManagerCall?.addEventListener('click', () => {
-  telemetryTrack('cta_manager_call', telemetryCtx({ phone: '+79780224411' }));
-});
-
 UI.btnProducerSite?.addEventListener('click', () => {
   telemetryTrack('cta_site_click', telemetryCtx({ destination: 'https://ag-ru.com/' }));
 });
+
+leadFormHelpers.init();
 
 // Аккордеон характеристик (по умолчанию скрыто)
 UI.btnTechToggle?.addEventListener('click', (e) => {

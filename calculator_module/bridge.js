@@ -15,6 +15,8 @@
   function nowIso(){ try { return new Date().toISOString(); } catch (_) { return ''; } }
   function digits(value){ return safeText(value).replace(/\D/g, ''); }
   function cloneJson(value){ try { return JSON.parse(JSON.stringify(value)); } catch (_) { return null; } }
+  function trimTrailingSlashes(value){ return safeText(value).replace(/\/+$/, ''); }
+  function buildTransactionId(){ return String(Date.now()) + ':' + String(Math.floor(Math.random() * 1e10)).padStart(10, '0'); }
 
   function postMessageToParent(type, payload){
     if (!global.parent || global.parent === global) return;
@@ -68,7 +70,7 @@
     var btn = doc.getElementById('pcSubmitLeadBtn') || doc.getElementById('pcSubmitToTildaBtn');
     if (!btn) return null;
     btn.id = 'pcSubmitStandaloneBtn';
-    btn.textContent = safeText((CONFIG.submitEndpoint || CONFIG.telegramShareBaseUrl || CONFIG.telegramUsername) ? 'Отправить заявку' : 'Подготовить заявку');
+    btn.textContent = safeText((resolveSubmitEndpoint() || CONFIG.telegramShareBaseUrl || CONFIG.telegramUsername) ? 'Отправить заявку' : 'Подготовить заявку');
     return btn;
   }
 
@@ -89,12 +91,34 @@
     return payload;
   }
 
+  function resolveSubmitEndpoint(){
+    var endpoint = safeText(CONFIG.submitEndpoint || '').trim();
+    if (endpoint) return endpoint;
+    try {
+      var runtime = global.__RUNTIME_CONFIG__ || null;
+      if (runtime && typeof runtime.resolvePublicApiBaseUrl === 'function') {
+        var base = trimTrailingSlashes(runtime.resolvePublicApiBaseUrl() || '');
+        if (base) return base + '/api/telemetry?mode=lead_submit';
+      }
+    } catch (_) {}
+    try {
+      var direct = trimTrailingSlashes(global.__API_BASE_URL__ || '');
+      if (direct) return direct + '/api/telemetry?mode=lead_submit';
+    } catch (_) {}
+    return '';
+  }
+
   function collectLeadPayload(){
     try { if (typeof global.cartUpdateHiddenFields === 'function') global.cartUpdateHiddenFields(); } catch (_) {}
     var cartRef = global.__pcCart || null;
+    var hidden = collectHiddenValues();
     return {
       submitted_at: nowIso(),
-      source: 'visualizer_calculator_module',
+      source: 'visualizer_calc_cart_v1',
+      form_type: 'calculator',
+      transaction_id: buildTransactionId(),
+      block_id: 'calculator_module',
+      page_url: (function(){ try { return global.location.href; } catch (_) { return ''; } })(),
       contacts: {
         name: safeText(findField('name') && findField('name').value).trim(),
         phone: safeText(findField('phone') && findField('phone').value).trim(),
@@ -102,10 +126,12 @@
         comment: safeText(findField('comment') && findField('comment').value).trim()
       },
       consent: !!(findField('personal_data_consent') && findField('personal_data_consent').checked),
-      summary: collectHiddenValues(),
+      personal_data_consent: (findField('personal_data_consent') && findField('personal_data_consent').checked) ? 'yes' : 'no',
+      summary: hidden,
       cart: cloneJson(cartRef && cartRef.positions ? cartRef.positions : []),
-      cart_positions_count: cartRef && cartRef.positions ? cartRef.positions.length : 0,
-      cart_grand_total: safeText(collectHiddenValues().order_cart_grand_total)
+      order_positions_count: cartRef && cartRef.positions ? cartRef.positions.length : 0,
+      order_cart_grand_total: safeText(hidden.order_cart_grand_total),
+      order_source: 'visualizer_calc_cart_v1'
     };
   }
 
@@ -119,13 +145,16 @@
     }
     if (!base) return '';
     var text = '';
-    text += 'Новая заявка из калькулятора%0A';
-    text += 'Имя: ' + encodeURIComponent(payload.contacts.name || '—') + '%0A';
-    text += 'Телефон: ' + encodeURIComponent(payload.contacts.phone || '—') + '%0A';
-    text += 'Email: ' + encodeURIComponent(payload.contacts.email || '—') + '%0A';
-    if (payload.contacts.comment) text += 'Комментарий: ' + encodeURIComponent(payload.contacts.comment) + '%0A';
-    if (payload.summary && payload.summary.order_positions_text) text += '%0A' + encodeURIComponent(payload.summary.order_positions_text);
-    if (payload.summary && payload.summary.order_cart_grand_total) text += '%0AИтог: ' + encodeURIComponent(payload.summary.order_cart_grand_total);
+    text += 'Request details:%0A';
+    text += 'name: ' + encodeURIComponent(payload.contacts.name || '—') + '%0A';
+    text += 'email: ' + encodeURIComponent(payload.contacts.email || '—') + '%0A';
+    text += 'phone: ' + encodeURIComponent(payload.contacts.phone || '—') + '%0A';
+    text += 'comment: ' + encodeURIComponent(payload.contacts.comment || '—') + '%0A';
+    if (payload.summary && payload.summary.order_positions_text) text += 'order_positions_text: ' + encodeURIComponent(payload.summary.order_positions_text) + '%0A';
+    if (payload.order_cart_grand_total) text += 'order_cart_grand_total: ' + encodeURIComponent(payload.order_cart_grand_total) + '%0A';
+    text += 'order_positions_count: ' + encodeURIComponent(String(payload.order_positions_count || 0)) + '%0A';
+    text += 'order_source: ' + encodeURIComponent(payload.order_source || 'visualizer_calc_cart_v1') + '%0A';
+    text += 'personal_data_consent: ' + encodeURIComponent(payload.personal_data_consent || 'no');
     return base + text;
   }
 
@@ -170,7 +199,7 @@
   }
 
   function submitToEndpoint(payload){
-    var endpoint = safeText(CONFIG.submitEndpoint || '').trim();
+    var endpoint = resolveSubmitEndpoint();
     if (!endpoint) return Promise.resolve({ mode: 'draft' });
     return global.fetch(endpoint, {
       method: 'POST',
@@ -198,7 +227,7 @@
 
     submitToEndpoint(payload).then(function(result){
       if (result && result.mode === 'endpoint') {
-        setStatus('Заявка отправлена.', true);
+        setStatus('Заявка отправлена. Мы свяжемся с вами в ближайшее время.', true);
         return;
       }
       var telegramUrl = buildTelegramShareUrl(payload);
@@ -207,7 +236,7 @@
         setStatus('Черновик заявки подготовлен и открыт в Telegram.', true);
         return;
       }
-      setStatus(safeText(CONFIG.successMessage || 'Заявка подготовлена.'), true);
+      setStatus(safeText(CONFIG.successMessage || 'Заявка отправлена.'), true);
     }).catch(function(error){
       setStatus('Не удалось отправить заявку: ' + (error && error.message ? error.message : 'network error'), false);
     });
