@@ -2874,6 +2874,11 @@ async function startAR() {
   try {
 
   const env = getArEnv();
+  if (env.isDesktopLike) {
+    telemetryTrack('ar_session_blocked', telemetryCtx({ reason: 'desktop_device' }));
+    showArHelp('DESKTOP_DEVICE');
+    return;
+  }
   if (env.isAndroid && !env.isChrome) {
     telemetryTrack('ar_session_blocked', telemetryCtx({ reason: 'need_chrome' }));
     showArHelp('NEED_CHROME');
@@ -4654,7 +4659,12 @@ UI.btnTechClose?.addEventListener('click', (e) => {
 });
 UI.btnViewAR?.addEventListener('click', async (ev) => {
   const env = getArEnv();
-  telemetryTrack('ar_launch_click', telemetryCtx({ isAndroid: !!env.isAndroid, isChrome: !!env.isChrome }));
+  telemetryTrack('ar_launch_click', telemetryCtx({ isAndroid: !!env.isAndroid, isChrome: !!env.isChrome, isDesktopLike: !!env.isDesktopLike, isTabletLike: !!env.isTabletLike }));
+  if (env.isDesktopLike) {
+    telemetryTrack('ar_launch_blocked', telemetryCtx({ reason: 'desktop_device' }));
+    showArHelp('DESKTOP_DEVICE');
+    return;
+  }
   if (env.isAndroid && !env.isChrome) {
     telemetryTrack('ar_launch_blocked', telemetryCtx({ reason: 'need_chrome' }));
     showArHelp('NEED_CHROME');

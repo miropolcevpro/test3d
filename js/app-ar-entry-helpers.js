@@ -1,11 +1,64 @@
+function getViewportMetrics() {
+  const vv = (typeof window !== 'undefined' && window.visualViewport) ? window.visualViewport : null;
+  const docEl = (typeof document !== 'undefined' && document.documentElement) ? document.documentElement : null;
+  const width = Math.max(
+    0,
+    Math.round(Number((vv && vv.width) || 0) || 0),
+    Math.round(Number((typeof window !== 'undefined' && window.innerWidth) || 0) || 0),
+    Math.round(Number((docEl && docEl.clientWidth) || 0) || 0),
+    Math.round(Number((typeof screen !== 'undefined' && screen.width) || 0) || 0),
+  );
+  const height = Math.max(
+    0,
+    Math.round(Number((vv && vv.height) || 0) || 0),
+    Math.round(Number((typeof window !== 'undefined' && window.innerHeight) || 0) || 0),
+    Math.round(Number((docEl && docEl.clientHeight) || 0) || 0),
+    Math.round(Number((typeof screen !== 'undefined' && screen.height) || 0) || 0),
+  );
+  return {
+    width,
+    height,
+    shortSide: Math.max(0, Math.min(width || 0, height || 0)),
+    longSide: Math.max(width || 0, height || 0),
+  };
+}
+
 function getArEnv() {
   const ua = navigator.userAgent || '';
   const isAndroid = /Android/i.test(ua);
   const hasChrome = /Chrome\/\d+/i.test(ua);
-  const isWebView = /\bwv\b/i.test(ua) || (/Version\/\d+/i.test(ua) && hasChrome);
+  const isWebView = /wv/i.test(ua) || (/Version\/\d+/i.test(ua) && hasChrome);
   const isAlt = /(EdgA|OPR|YaBrowser|SamsungBrowser|MiuiBrowser|UCBrowser|DuckDuckGo|Brave|Vivaldi|Firefox|FxiOS)/i.test(ua);
   const isChrome = isAndroid && hasChrome && !isWebView && !isAlt;
-  return { ua, isAndroid, isChrome, isWebView };
+  const coarsePointer = (() => {
+    try { return !!(window.matchMedia && (window.matchMedia('(pointer: coarse)').matches || window.matchMedia('(any-pointer: coarse)').matches)); } catch (_) { return false; }
+  })();
+  const finePointer = (() => {
+    try { return !!(window.matchMedia && (window.matchMedia('(pointer: fine)').matches || window.matchMedia('(any-pointer: fine)').matches)); } catch (_) { return false; }
+  })();
+  const maxTouchPoints = Number(navigator.maxTouchPoints || 0) || 0;
+  const metrics = getViewportMetrics();
+  const hasTouch = maxTouchPoints > 0 || coarsePointer || /Mobile|Tablet|iPad|Android/i.test(ua);
+  const isTabletLike = !!hasTouch && metrics.shortSide >= 700;
+  const isPhoneLike = !!hasTouch && metrics.shortSide > 0 && metrics.shortSide < 700;
+  const isDesktopLike = !isPhoneLike && !isTabletLike && !hasTouch && (metrics.longSide >= 900 || finePointer);
+  return {
+    ua,
+    isAndroid,
+    isChrome,
+    isWebView,
+    coarsePointer,
+    finePointer,
+    maxTouchPoints,
+    hasTouch,
+    viewportWidth: metrics.width,
+    viewportHeight: metrics.height,
+    shortSide: metrics.shortSide,
+    longSide: metrics.longSide,
+    isTabletLike,
+    isPhoneLike,
+    isDesktopLike,
+  };
 }
 
 const ARCORE_PLAY_URL = 'https://play.google.com/store/apps/details?id=com.google.ar.core';
@@ -222,7 +275,10 @@ function showArHelp(kind, err, opts = {}) {
   let title = 'Не удалось запустить AR';
   let msg = 'Попробуйте ещё раз.';
 
-  if (kind === 'NEED_CHROME') {
+  if (kind === 'DESKTOP_DEVICE') {
+    title = 'AR-визуализация доступна на телефоне';
+    msg = 'Режим дополненной реальности и визуализации доступен на телефоне, который поддерживает ARCore.\nТехнология работает через браузер Google Chrome.\nОткройте эту ссылку через телефон.\n\nНа совместимых планшетах AR тоже может работать, если устройство поддерживает ARCore и WebXR.';
+  } else if (kind === 'NEED_CHROME') {
     title = 'AR работает только в Google Chrome';
     msg = 'Откройте этот сайт в Google Chrome на Android.\nВо встроенных браузерах (Telegram/WhatsApp/и т.п.) AR обычно не запускается.';
     btnChrome.style.display = env.isAndroid ? 'inline-block' : 'none';
