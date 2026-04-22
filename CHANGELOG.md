@@ -1,10 +1,10 @@
-## 2026-04-22 — Patch f24dk: calculator module integration hardening
+## 2026-04-22 — Patch f24dl: calculator mobile guide sticky sync
 
-- База: `webar_patch_telemetry_summary_timeout_hardening_candidate_f24dh.zip` (текущая подтверждённая стабильная база).
-- Что сделано: встроен автономный модуль калькулятора на главную и на страницы форм, сохранён мобильный guided-flow исходного калькулятора, технический поясняющий текст внутри iframe убран, а fixed CTA `Режим визуализации` на detail-screen теперь автоматически скрывается, когда калькулятор попадает в viewport, и возвращается после выхода из калькулятора.
-- Что не трогали: AR pipeline, multizone, curb, telemetry ingestion/summary, admin texture flows, palette validator, service worker.
+- База: `webar_patch_calculator_module_mobile_embed_safehide_candidate_f24dk.zip` (калькуляторный кандидат поверх подтверждённой стабильной базы `f24dh`).
+- Что сделано: исправлена именно мобильная нижняя панель калькулятора в embedded-режиме — теперь она синхронизируется на стороне хоста, реально прилипает к нижнему краю экрана, показывает актуальные подсказки/выбранные параметры/счётчик корзины/итог/preview формы и цвета, а кнопка безопасно ведёт по текущему сценарию без вмешательства в расчётное ядро.
+- Что не трогали: AR pipeline, multizone, curb, telemetry ingestion/summary, admin texture flows, palette validator, service worker и расчётную логику калькулятора.
 - Проверка: `node --check` для изменённых JS, `python3 scripts/release_check.py`, `python3 scripts/package_release.py`, проверка telemetry ZIP и release token alignment.
-- Release token: `20260422-f24dk`
+- Release token: `20260422-f24dl`
 
 ## 2026-04-21 — Patch f24dh: telemetry summary timeout hardening
 
