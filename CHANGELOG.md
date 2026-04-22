@@ -1,10 +1,18 @@
+## 2026-04-22 — Patch f24dq: calculator foreground text visibility follow-up
+
+- База: `webar_patch_calculator_parameter_readability_candidate_f24dp.zip` (текущий калькуляторный кандидат по явному продолжению правок читаемости).
+- Что сделано: добавлен отдельный final foreground-tail override для проблемных текстовых зон калькулятора: заголовка блока `Демонстрация выбранной формы и цвета`, подписи/подсказок превью формы и цвета, названия выбранной позиции и всех строк внутри блока preview, `Цена вместе с тарой`, текста согласия и строки `Мы свяжемся с вами для уточнения заказа`; для этих зон зафиксированы чёрный цвет, полная непрозрачность и выведение текста поверх поздних визуальных слоёв.
+- Что не трогали: AR pipeline, multizone, curb, telemetry, service worker, расчётные формулы, корзину и guided-flow калькулятора.
+- Проверка: `node --check` для изменённого JS, `python3 scripts/release_check.py`, `python3 scripts/package_release.py`, проверка telemetry ZIP и release token alignment.
+- Release token: `20260422-f24dq`
+
 ## 2026-04-22 — Patch f24dp: calculator parameter text readability hardening
 
 - База: `webar_patch_sw_update_prompt_calc_scroll_readability_candidate_f24dn.zip` (текущая подтверждённая стабильная база).
 - Что сделано: финально усилена читаемость текстов внутри параметров калькулятора и доп. информации через tail-override с повышенным приоритетом; зафиксированы чёрный цвет, полная непрозрачность и отсутствие визуальных приглушающих эффектов для названий форм, меток расчёта, текста блока заявки и вторичных поясняющих строк.
 - Что не трогали: AR pipeline, multizone, curb, telemetry, service worker, расчётные формулы, корзину и guided-flow калькулятора.
 - Проверка: `node --check` для изменённых JS, `python3 scripts/release_check.py`, `python3 scripts/package_release.py`, проверка telemetry ZIP и release token alignment.
-- Release token: `20260422-f24dp`
+- Release token: `20260422-f24dq`
 
 ## 2026-04-22 — Patch f24dk: calculator module integration hardening
 

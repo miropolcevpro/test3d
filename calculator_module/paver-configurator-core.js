@@ -283,6 +283,39 @@
       '}'
     ].join('');
     document.head.appendChild(readabilityStyle);
+    var frontTextStyle = document.createElement('style');
+    frontTextStyle.id = 'paverConf2026-front-text-tail';
+    frontTextStyle.textContent = [
+      '#paverConf2026 .pcChoicePreviewHead,',
+      '#paverConf2026 .pcFormPreview__label,',
+      '#paverConf2026 .pcFormPreview__caption,',
+      '#paverConf2026 .pcFormPreview__hint,',
+      '#paverConf2026 .pcPreview__title,',
+      '#paverConf2026 .pcPreview__empty,',
+      '#paverConf2026 .pcPreview__body,',
+      '#paverConf2026 .pcPreview__body *,',
+      '#paverConf2026 .pcCalc__pickedLine,',
+      '#paverConf2026 .pcCalc__pickedLine *,',
+      '#paverConf2026 .pcForm__consent,',
+      '#paverConf2026 .pcForm__consent *,',
+      '#paverConf2026 .pcForm__sub{',
+      'color:#111 !important;',
+      'opacity:1 !important;',
+      'filter:none !important;',
+      'text-shadow:none !important;',
+      '-webkit-text-fill-color:#111 !important;',
+      'position:relative !important;',
+      'z-index:2 !important;',
+      '}',
+      '#paverConf2026 .pcFormPreview__frame,',
+      '#paverConf2026 .pcPreview,',
+      '#paverConf2026 .pcPreview__body .pcPreview__item,',
+      '#paverConf2026 .pcPreview__body .pcPreview__item *{',
+      'position:relative !important;',
+      'z-index:1 !important;',
+      '}'
+    ].join('');
+    document.head.appendChild(frontTextStyle);
   }
 
   var script = document.createElement('script');
