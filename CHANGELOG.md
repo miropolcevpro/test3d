@@ -1,3 +1,11 @@
+## 2026-04-22 — Patch f24di: embedded calculator module preparation
+
+- Integrated the external paving calculator as an isolated module under `calculator_module/` inside the visualizer release, without mixing its pricing/cart logic into the AR runtime.
+- Added a singleton embedded calculator shell that appears at the bottom of the main catalog screen and at the bottom of each detail/form screen, reusing one iframe instance to avoid duplicated runtime state.
+- Localized calculator assets/data under the product bundle so price/content updates can be made by editing calculator JSON/previews without touching core WebAR files.
+- Replaced direct Tilda-only dependence with a standalone bridge layer that prepares lead payloads, supports future endpoint/Telegram wiring, and keeps current calculation/cart behavior intact.
+- Release token: `20260422-f24di`
+
 ## 2026-04-21 — Patch f24dh: telemetry summary timeout hardening
 
 - База: `webar_patch_telemetry_auth_hardening_candidate_f24dg.zip` (не подтверждён как новая стабильная база; патч собран поверх кандидата P24 по явному продолжению работ над telemetry).

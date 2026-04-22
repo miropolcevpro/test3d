@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="color-scheme" content="light only" />
+  <title>Калькулятор стоимости</title>
+  <style>
+    html,body{margin:0;padding:0;background:#f5f7fb;color:#111827;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;}
+    body{padding:12px;}
+    .calcStandalone{max-width:1240px;margin:0 auto;}
+    .calcStandalone__hint{margin:0 0 10px;font-size:13px;line-height:1.4;color:#475569;}
+    .calcStandalone__privacy{display:none;}
+  </style>
+</head>
+<body>
+  <div class="calcStandalone">
+    <p class="calcStandalone__hint">Модуль расчёта встроен в визуализатор как отдельный независимый блок. Обновление цен и данных выполняется внутри каталога <code>calculator_module/</code> без изменения AR-логики.</p>
+    <div id="paverConf2026"></div>
+  </div>
+  <script src="./config.js"></script>
+  <script src="./paver-configurator-core.js"></script>
+  <script src="./bridge.js"></script>
+</body>
+</html>

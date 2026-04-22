@@ -17,6 +17,9 @@ export function setActiveScreen(name, ui, showFn = show) {
     el.classList.toggle('screen--active', isActive);
     showFn(el, isActive);
   }
+  try {
+    window.dispatchEvent(new CustomEvent('ag:screen-change', { detail: { screen: name } }));
+  } catch (_) {}
 }
 
 export function fmtMeters(m) {

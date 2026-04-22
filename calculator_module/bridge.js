@@ -1,0 +1,243 @@
+(function(global, doc){
+  'use strict';
+
+  var CONFIG = global.__AG_CALCULATOR_CONFIG__ || {};
+  var ORIGIN = (function(){ try { return global.location.origin; } catch (_) { return '*'; } })();
+  var HEIGHT_MESSAGE = 'ag-calc-height';
+  var READY_MESSAGE = 'ag-calc-ready';
+  var SUBMIT_MESSAGE = 'ag-calc-submit-ready';
+  var STATUS_ERROR = '#b91c1c';
+  var STATUS_OK = '#166534';
+  var statusTimer = 0;
+
+  function $(selector, root){ return (root || doc).querySelector(selector); }
+  function safeText(value){ return value == null ? '' : String(value); }
+  function nowIso(){ try { return new Date().toISOString(); } catch (_) { return ''; } }
+  function digits(value){ return safeText(value).replace(/\D/g, ''); }
+  function cloneJson(value){ try { return JSON.parse(JSON.stringify(value)); } catch (_) { return null; } }
+
+  function postMessageToParent(type, payload){
+    if (!global.parent || global.parent === global) return;
+    try { global.parent.postMessage({ type: type, payload: payload || {} }, ORIGIN); } catch (_) {}
+  }
+
+  function postHeight(){
+    var root = doc.documentElement;
+    var body = doc.body;
+    var height = Math.max(
+      root ? root.scrollHeight : 0,
+      root ? root.offsetHeight : 0,
+      body ? body.scrollHeight : 0,
+      body ? body.offsetHeight : 0,
+      900
+    );
+    postMessageToParent(HEIGHT_MESSAGE, { height: height });
+  }
+
+  function scheduleHeight(){
+    try { global.requestAnimationFrame(postHeight); } catch (_) { postHeight(); }
+  }
+
+  function setStatus(message, ok){
+    var box = $('[data-role="leadError"]');
+    if (!box) return;
+    if (statusTimer) {
+      try { global.clearTimeout(statusTimer); } catch (_) {}
+      statusTimer = 0;
+    }
+    box.textContent = safeText(message);
+    box.style.display = message ? '' : 'none';
+    box.style.color = ok ? STATUS_OK : STATUS_ERROR;
+    if (message && ok) {
+      statusTimer = global.setTimeout(function(){
+        box.textContent = '';
+        box.style.display = 'none';
+      }, 5200);
+    }
+    scheduleHeight();
+  }
+
+  function patchPrivacyLink(){
+    var link = $('.pcForm__consent a');
+    if (!link) return;
+    var href = safeText(CONFIG.privacyPolicyUrl || '').trim();
+    if (href) link.href = href;
+  }
+
+  function patchSubmitButton(){
+    var btn = doc.getElementById('pcSubmitToTildaBtn');
+    if (!btn) return null;
+    btn.id = 'pcSubmitStandaloneBtn';
+    btn.textContent = safeText((CONFIG.submitEndpoint || CONFIG.telegramShareBaseUrl || CONFIG.telegramUsername) ? 'Отправить заявку' : 'Подготовить заявку');
+    return btn;
+  }
+
+  function findField(name){
+    return $('#paverLeadForm [name="' + name + '"]');
+  }
+
+  function collectHiddenValues(){
+    var names = [
+      'order_form','order_technology','order_color','order_thickness_mm','order_area_m2','order_m2_per_pallet','order_pallets',
+      'order_ship_m2','order_over_m2','order_weight_kg','order_unit_price','order_total_price','order_positions_text','order_cart_grand_total'
+    ];
+    var payload = {};
+    for (var i = 0; i < names.length; i += 1) {
+      var el = findField(names[i]);
+      payload[names[i]] = el ? safeText(el.value) : '';
+    }
+    return payload;
+  }
+
+  function collectLeadPayload(){
+    try { if (typeof global.cartUpdateHiddenFields === 'function') global.cartUpdateHiddenFields(); } catch (_) {}
+    var cartRef = global.__pcCart || null;
+    return {
+      submitted_at: nowIso(),
+      source: 'visualizer_calculator_module',
+      contacts: {
+        name: safeText(findField('name') && findField('name').value).trim(),
+        phone: safeText(findField('phone') && findField('phone').value).trim(),
+        email: safeText(findField('email') && findField('email').value).trim(),
+        comment: safeText(findField('comment') && findField('comment').value).trim()
+      },
+      consent: !!(findField('personal_data_consent') && findField('personal_data_consent').checked),
+      summary: collectHiddenValues(),
+      cart: cloneJson(cartRef && cartRef.positions ? cartRef.positions : []),
+      cart_positions_count: cartRef && cartRef.positions ? cartRef.positions.length : 0,
+      cart_grand_total: safeText(collectHiddenValues().order_cart_grand_total)
+    };
+  }
+
+  function buildTelegramShareUrl(payload){
+    var base = safeText(CONFIG.telegramShareBaseUrl || '').trim();
+    if (!base) {
+      var username = safeText(CONFIG.telegramUsername || '').trim().replace(/^@/, '');
+      if (username) {
+        base = 'https://t.me/' + encodeURIComponent(username) + '?text=';
+      }
+    }
+    if (!base) return '';
+    var text = '';
+    text += 'Новая заявка из калькулятора%0A';
+    text += 'Имя: ' + encodeURIComponent(payload.contacts.name || '—') + '%0A';
+    text += 'Телефон: ' + encodeURIComponent(payload.contacts.phone || '—') + '%0A';
+    text += 'Email: ' + encodeURIComponent(payload.contacts.email || '—') + '%0A';
+    if (payload.contacts.comment) text += 'Комментарий: ' + encodeURIComponent(payload.contacts.comment) + '%0A';
+    if (payload.summary && payload.summary.order_positions_text) text += '%0A' + encodeURIComponent(payload.summary.order_positions_text);
+    if (payload.summary && payload.summary.order_cart_grand_total) text += '%0AИтог: ' + encodeURIComponent(payload.summary.order_cart_grand_total);
+    return base + text;
+  }
+
+  function validateBeforeSubmit(){
+    var name = safeText(findField('name') && findField('name').value).trim();
+    var phone = safeText(findField('phone') && findField('phone').value).trim();
+    var emailField = findField('email');
+    var consent = findField('personal_data_consent');
+    var cartRef = global.__pcCart || null;
+    if (name.length < 2) {
+      setStatus('Пожалуйста, укажите имя.', false);
+      try { findField('name').focus(); } catch (_) {}
+      return false;
+    }
+    if (!(digits(phone).length === 11 && digits(phone).charAt(0) === '7')) {
+      setStatus('Пожалуйста, укажите корректный телефон в формате +7.', false);
+      try { findField('phone').focus(); } catch (_) {}
+      return false;
+    }
+    if (emailField && typeof emailField.checkValidity === 'function' && !emailField.checkValidity()) {
+      setStatus('Пожалуйста, укажите корректный email.', false);
+      try { emailField.focus(); } catch (_) {}
+      return false;
+    }
+    if (!cartRef || !cartRef.positions || !cartRef.positions.length) {
+      setStatus('Корзина пуста. Добавьте хотя бы одну позицию.', false);
+      return false;
+    }
+    if (consent && !consent.checked) {
+      setStatus('Подтвердите согласие на обработку персональных данных.', false);
+      try { consent.focus(); } catch (_) {}
+      return false;
+    }
+    setStatus('', false);
+    return true;
+  }
+
+  function saveDraft(payload){
+    try {
+      global.localStorage.setItem('ag_calculator_last_draft_v1', JSON.stringify(payload));
+    } catch (_) {}
+  }
+
+  function submitToEndpoint(payload){
+    var endpoint = safeText(CONFIG.submitEndpoint || '').trim();
+    if (!endpoint) return Promise.resolve({ mode: 'draft' });
+    return global.fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      credentials: 'omit',
+      cache: 'no-store'
+    }).then(function(response){
+      if (!response.ok) throw new Error('submit-http-' + response.status);
+      return response.json().catch(function(){ return { ok: true }; }).then(function(data){
+        return { mode: 'endpoint', response: data || {} };
+      });
+    });
+  }
+
+  function handleStandaloneSubmit(ev){
+    if (ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+    }
+    if (!validateBeforeSubmit()) return;
+    var payload = collectLeadPayload();
+    saveDraft(payload);
+    postMessageToParent(SUBMIT_MESSAGE, payload);
+
+    submitToEndpoint(payload).then(function(result){
+      if (result && result.mode === 'endpoint') {
+        setStatus('Заявка отправлена.', true);
+        return;
+      }
+      var telegramUrl = buildTelegramShareUrl(payload);
+      if (telegramUrl) {
+        try { global.open(telegramUrl, '_blank', 'noopener'); } catch (_) {}
+        setStatus('Черновик заявки подготовлен и открыт в Telegram.', true);
+        return;
+      }
+      setStatus(safeText(CONFIG.successMessage || 'Заявка подготовлена.'), true);
+    }).catch(function(error){
+      setStatus('Не удалось отправить заявку: ' + (error && error.message ? error.message : 'network error'), false);
+    });
+  }
+
+  function initStandaloneSubmit(){
+    var btn = patchSubmitButton();
+    if (!btn) return;
+    btn.onclick = handleStandaloneSubmit;
+  }
+
+  function initResizeReporting(){
+    postMessageToParent(READY_MESSAGE, { version: safeText(CONFIG.version || '') });
+    scheduleHeight();
+    try {
+      if (global.ResizeObserver) {
+        var ro = new global.ResizeObserver(function(){ scheduleHeight(); });
+        ro.observe(doc.documentElement);
+        if (doc.body) ro.observe(doc.body);
+      }
+    } catch (_) {}
+    global.addEventListener('load', scheduleHeight);
+    global.addEventListener('resize', scheduleHeight);
+    doc.addEventListener('input', scheduleHeight, true);
+    doc.addEventListener('change', scheduleHeight, true);
+    doc.addEventListener('click', function(){ global.setTimeout(scheduleHeight, 32); }, true);
+    global.setInterval(postHeight, 1200);
+  }
+
+  patchPrivacyLink();
+  initStandaloneSubmit();
+  initResizeReporting();
+})(window, document);
