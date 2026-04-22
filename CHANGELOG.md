@@ -558,6 +558,13 @@ Release token: `20260411-f24g`
 - Release check теперь валит релиз, если эти зоны снова возвращаются к `innerHTML`, `outerHTML` или `insertAdjacentHTML`, и проверяет ожидаемый безопасный DOM render-path.
 - `docs/RELEASE.md` синхронизирован с новым coverage release-check.
 - Release token: `20260421-f24de`
+## 20260422-f24dn
+- Service Worker update prompt hardened: the in-app update card no longer appears on entry just because the current page already contains the latest build while the previous controller is being replaced in background; prompt remains only for genuinely newer versions that appear during the live session. Snooze window increased to reduce repeated interruptions.
+- Calculator mobile guide fixed without touching the calculation core: internal guided-step buttons now scroll the actual product scroll container (`catalogWrap` / `detailScroll`) instead of trying to scroll the global window.
+- Calculator calculation values made fully readable again: the main computed numbers now render in solid black with full opacity in the embedded product context.
+- What was not touched: AR pipeline, multizone, curb logic, telemetry ingestion/summary, admin flows, palette validator, service worker caching model.
+- Release token: `20260422-f24dn`
+
 ## 20260422-f24dm
 - calculator: отказ от iframe-embedded mobile bridge; калькулятор снова встраивается inline, поэтому возвращены исходные мобильные подсказки, превью и sticky-панель внутри самого калькулятора.
 - detail: CTA «Режим визуализации» по-прежнему скрывается при входе в область калькулятора на странице формы.

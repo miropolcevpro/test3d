@@ -47,7 +47,7 @@
   var pendingReloadSnoozeUntil = 0;
   var applyTimer = 0;
   var idleGraceMs = 2800;
-  var snoozeMs = 60000;
+  var snoozeMs = 1800000;
   var lastUserInteractionAt = Date.now();
   var updatePrompt = null;
   var updatePromptText = null;
@@ -432,6 +432,19 @@
     if (suppressNextActivationReload) {
       setAckVersion(nextVersion);
       suppressNextActivationReload = false;
+      return;
+    }
+
+    // If the activated worker already matches the build version of the current page,
+    // the user opened the latest page while the previous controller was being replaced.
+    // In this startup-upgrade case we silently acknowledge the version without prompting.
+    if (nextVersion === SW_VERSION) {
+      pendingReloadVersion = '';
+      pendingReloadSource = '';
+      pendingReloadQueuedAt = 0;
+      pendingReloadSnoozeUntil = 0;
+      setAckVersion(nextVersion);
+      hideUpdatePrompt();
       return;
     }
 
