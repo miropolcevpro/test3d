@@ -1,3 +1,8 @@
+## 20260422-f24dv
+- AR: кнопка «Расчёт стоимости» из AR теперь открывает текущую страницу формы и после выхода из AR стабильно прокручивает к блоку калькулятора.
+- Calculator embed: синхронизировано скругление внешнего контейнера и внутреннего блока калькулятора для цельного визуального фрейма.
+- Release token: `20260422-f24dv`
+
 ## 20260422-f24du
 - AR: added safe `Расчёт стоимости` CTA to the lower AR bar.
 - CTA exits AR, returns to catalog, and scrolls to the calculator block without touching AR fill/multizone logic.

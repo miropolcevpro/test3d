@@ -2727,25 +2727,38 @@ function getPrimaryQuickLaunchItem() {
   return list.length ? list[0] : null;
 }
 
-function scrollCatalogToCalculator(opts = {}) {
-  const mount = document.getElementById('calculatorModuleCatalogMount');
-  const wrap = UI.screenCatalog?.querySelector('.catalogWrap') || document.querySelector('#screenCatalog .catalogWrap');
+function scrollCalculatorMountIntoView(mount, scroller, opts = {}) {
   const behavior = opts.behavior || 'smooth';
+  const offset = typeof opts.offset === 'number' ? opts.offset : 12;
+  const attempts = Math.max(1, Number(opts.attempts) || 10);
   if (!mount) return;
-  const run = () => {
+  const run = (left) => {
     try {
-      if (wrap && typeof wrap.scrollTo === 'function') {
-        const wrapRect = wrap.getBoundingClientRect();
+      if (scroller && typeof scroller.scrollTo === 'function') {
+        const scrollerRect = scroller.getBoundingClientRect();
         const mountRect = mount.getBoundingClientRect();
-        const delta = mountRect.top - wrapRect.top;
-        const top = Math.max(0, wrap.scrollTop + delta - 12);
-        wrap.scrollTo({ top, behavior });
+        const delta = mountRect.top - scrollerRect.top;
+        const top = Math.max(0, scroller.scrollTop + delta - offset);
+        scroller.scrollTo({ top, behavior });
         return;
       }
     } catch (_) {}
     try { mount.scrollIntoView({ block: 'start', behavior }); } catch (_) {}
+    if (left > 1) requestAnimationFrame(() => run(left - 1));
   };
-  requestAnimationFrame(() => requestAnimationFrame(run));
+  requestAnimationFrame(() => requestAnimationFrame(() => run(attempts)));
+}
+
+function scrollCatalogToCalculator(opts = {}) {
+  const mount = document.getElementById('calculatorModuleCatalogMount');
+  const wrap = UI.screenCatalog?.querySelector('.catalogWrap') || document.querySelector('#screenCatalog .catalogWrap');
+  scrollCalculatorMountIntoView(mount, wrap, opts);
+}
+
+function scrollDetailToCalculator(opts = {}) {
+  const mount = document.getElementById('calculatorModuleDetailMount');
+  const wrap = UI.screenDetail?.querySelector('.detailScroll') || document.querySelector('#screenDetail .detailScroll');
+  scrollCalculatorMountIntoView(mount, wrap, opts);
 }
 
 async function routeFromArToCalculator() {
@@ -2754,13 +2767,25 @@ async function routeFromArToCalculator() {
   setArZoneDeleteConfirmOpen(false);
   setArCurbSheetOpen(false);
   setArZonePanelOpen(false);
+  const selectedShapeId = state.selectedShape && state.selectedShape.id ? String(state.selectedShape.id) : '';
+  const selectedTileId = state.selectedTile && state.selectedTile.id ? String(state.selectedTile.id) : '';
   if (state.xrSession) {
     await stopAR();
   }
+  if (selectedShapeId) {
+    await openDetail(selectedShapeId, {
+      preferredTileId: selectedTileId,
+      keepCurrentTile: true,
+      changeSource: 'ar_calc_cta',
+    });
+    state.phase = 'detail';
+    scrollDetailToCalculator({ behavior: 'smooth', attempts: 12, offset: 16 });
+    return;
+  }
   setActiveScreen('catalog', UI);
   state.phase = 'catalog';
-  telemetryPage('catalog', telemetryCtx({ source: 'ar_calc_cta' }));
-  scrollCatalogToCalculator({ behavior: 'smooth' });
+  telemetryPage('catalog', telemetryCtx({ source: 'ar_calc_cta_fallback' }));
+  scrollCatalogToCalculator({ behavior: 'smooth', attempts: 10, offset: 12 });
 }
 
 function syncQuickArLaunchButton() {

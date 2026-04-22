@@ -15,7 +15,7 @@
   }
 
   existing.outerHTML = `<div id="paverConf2026" class="paverConf2026"
-  data-cdn="${(window.__AG_CALCULATOR_ASSET_BASE__ || 'calculator_module/').replace(/\/?$/,'/')}" data-assets-ver="20260422-f24du" data-cdn-commit="">
+  data-cdn="${(window.__AG_CALCULATOR_ASSET_BASE__ || 'calculator_module/').replace(/\/?$/,'/')}" data-assets-ver="20260422-f24dv" data-cdn-commit="">
 
   <div class="paverConf2026__head">
     <div class="paverConf2026__title">Быстрый расчет стоимости</div>

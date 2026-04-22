@@ -1819,6 +1819,13 @@ to   { transform: scale(1.12); }
   background:linear-gradient(180deg, rgba(241,245,249,.92), rgba(255,255,255,.72));
 }
 
+.calculatorEmbed__body{
+  padding:0;
+  background:#f8fafc;
+  border-radius:0 0 22px 22px;
+  overflow:hidden;
+}
+
 .calculatorEmbed__title{
   font-size:22px;
   line-height:1.1;
@@ -1852,6 +1859,9 @@ to   { transform: scale(1.12); }
   }
   .calculatorEmbed{
     border-radius:18px;
+  }
+  .calculatorEmbed__body{
+    border-radius:0 0 18px 18px;
   }
   .calculatorEmbed__head{
     padding:14px 14px 10px;
