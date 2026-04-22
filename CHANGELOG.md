@@ -1,4 +1,4 @@
-## 20260422-f24dt
+## 20260422-f24du
 - AR: added safe `Расчёт стоимости` CTA to the lower AR bar.
 - CTA exits AR, returns to catalog, and scrolls to the calculator block without touching AR fill/multizone logic.
 - Styling: added compact auto-layout-safe visual treatment for the calculator CTA in AR final bar.
@@ -9,7 +9,7 @@
 - Что сделано: синхронизированы `backend_yc_functions/telemetry_collector` и `backend_yc_function_upload/telemetry_collector.zip`, `RELEASE_VERSION` collector приведён к текущему релизному токену, `scripts/release_check.py` усилен проверками синхронизации source/upload ZIP и token alignment калькулятора; из `calculator_module/paver-configurator-core.js` удалён legacy Tilda submit слой, кнопка отправки и transport boundary переведены на standalone-модель через `calculator_module/bridge.js`.
 - Что не трогали: AR pipeline, multizone, curb logic, seam-safe stitching, calculator formulas/cart, telemetry ingest/summary behavior, admin flows и service worker behavior.
 - Проверка: `node --check` для изменённых JS, `python3 scripts/release_check.py`, `python3 scripts/package_release.py`, проверка финального telemetry ZIP и release token alignment.
-- Release token: `20260422-f24dt`
+- Release token: `20260422-f24du`
 
 ## 2026-04-22 — Patch f24dq: calculator foreground text visibility follow-up
 
