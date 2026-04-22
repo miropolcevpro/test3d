@@ -346,6 +346,12 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   padding:12px 14px calc(12px + var(--safe-bottom));
   background:rgba(255,255,255,0.92);
   border-top:1px solid rgba(0,0,0,0.06);
+  transition:transform .18s ease, opacity .18s ease;
+}
+.detailCta--calculatorHidden{
+  opacity:0;
+  pointer-events:none;
+  transform:translateY(calc(100% + 12px));
 }
 .btnPrimary {
   width: 100%;
