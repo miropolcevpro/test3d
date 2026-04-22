@@ -67,9 +67,8 @@
   }
 
   function patchSubmitButton(){
-    var btn = doc.getElementById('pcSubmitLeadBtn') || doc.getElementById('pcSubmitToTildaBtn');
+    var btn = doc.getElementById('pcSubmitLeadBtn') || doc.getElementById('pcSubmitStandaloneBtn') || doc.getElementById('pcSubmitToTildaBtn');
     if (!btn) return null;
-    btn.id = 'pcSubmitStandaloneBtn';
     btn.textContent = safeText((resolveSubmitEndpoint() || CONFIG.telegramShareBaseUrl || CONFIG.telegramUsername) ? 'Отправить заявку' : 'Подготовить заявку');
     return btn;
   }
@@ -91,18 +90,38 @@
     return payload;
   }
 
+  function appendLeadSubmitMode(url){
+    var raw = trimTrailingSlashes(url || '');
+    if (!raw) return '';
+    return raw + (raw.indexOf('?') >= 0 ? '&mode=lead_submit' : '?mode=lead_submit');
+  }
+
   function resolveSubmitEndpoint(){
     var endpoint = safeText(CONFIG.submitEndpoint || '').trim();
     if (endpoint) return endpoint;
     try {
       var runtime = global.__RUNTIME_CONFIG__ || null;
-      if (runtime && typeof runtime.resolvePublicApiBaseUrl === 'function') {
-        var base = trimTrailingSlashes(runtime.resolvePublicApiBaseUrl() || '');
+      if (runtime && typeof runtime.resolveTelemetryEndpoint === 'function') {
+        var telemetry = trimTrailingSlashes(runtime.resolveTelemetryEndpoint() || '');
+        if (telemetry) return appendLeadSubmitMode(telemetry);
+      }
+    } catch (_) {}
+    try {
+      var runtime2 = global.__RUNTIME_CONFIG__ || null;
+      if (runtime2 && typeof runtime2.resolvePublicApiBaseUrl === 'function') {
+        var base = trimTrailingSlashes(runtime2.resolvePublicApiBaseUrl() || '');
         if (base) return base + '/api/telemetry?mode=lead_submit';
       }
     } catch (_) {}
     try {
-      var direct = trimTrailingSlashes(global.__API_BASE_URL__ || '');
+      var runtime3 = global.__RUNTIME_CONFIG__ || null;
+      if (runtime3 && typeof runtime3.resolveAdminApiBaseUrl === 'function') {
+        var adminBase = trimTrailingSlashes(runtime3.resolveAdminApiBaseUrl() || '');
+        if (adminBase) return adminBase + '/api/telemetry?mode=lead_submit';
+      }
+    } catch (_) {}
+    try {
+      var direct = trimTrailingSlashes(global.__API_BASE_URL__ || global.API_BASE_URL || '');
       if (direct) return direct + '/api/telemetry?mode=lead_submit';
     } catch (_) {}
     return '';
@@ -244,8 +263,41 @@
 
   function initStandaloneSubmit(){
     var btn = patchSubmitButton();
-    if (!btn) return;
-    btn.onclick = handleStandaloneSubmit;
+    if (!btn) return false;
+    if (!btn.__agStandaloneSubmitBound) {
+      btn.__agStandaloneSubmitBound = true;
+      btn.addEventListener('click', handleStandaloneSubmit);
+    }
+    return true;
+  }
+
+  function bootStandaloneSubmit(){
+    patchPrivacyLink();
+    if (initStandaloneSubmit()) return true;
+    return false;
+  }
+
+  function waitForStandaloneForm(){
+    if (bootStandaloneSubmit()) return;
+    var attempts = 0;
+    var maxAttempts = 80;
+    var timer = global.setInterval(function(){
+      attempts += 1;
+      if (bootStandaloneSubmit() || attempts >= maxAttempts) {
+        try { global.clearInterval(timer); } catch (_) {}
+      }
+    }, 250);
+    try {
+      if (global.MutationObserver) {
+        var mo = new global.MutationObserver(function(){
+          if (bootStandaloneSubmit()) {
+            try { mo.disconnect(); } catch (_) {}
+            try { global.clearInterval(timer); } catch (_) {}
+          }
+        });
+        mo.observe(doc.documentElement || doc.body, { childList: true, subtree: true });
+      }
+    } catch (_) {}
   }
 
   function initResizeReporting(){
@@ -266,7 +318,10 @@
     global.setInterval(postHeight, 1200);
   }
 
-  patchPrivacyLink();
-  initStandaloneSubmit();
+  global.initStandaloneLeadTransport = function(){
+    return bootStandaloneSubmit();
+  };
+
+  waitForStandaloneForm();
   initResizeReporting();
 })(window, document);

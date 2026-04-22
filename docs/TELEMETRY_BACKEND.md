@@ -73,25 +73,3 @@ The collector summary now includes a `dashboard` object with KPI metrics, AR fun
 
 
 - Summary windows now support up to 365 days by default, which allows building monthly, quarterly and yearly product analytics views from the same raw telemetry batches.
-
-
-## Telegram lead relay
-
-Telemetry collector теперь также поддерживает публичный lead endpoint через тот же API Gateway путь:
-
-- `POST /api/telemetry?mode=lead_submit`
-
-Назначение:
-- принимать заявки из калькулятора;
-- принимать заявки из формы связи;
-- пересылать их в Telegram без раскрытия bot token во фронтенде.
-
-Обязательные env-переменные collector:
-- `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_CHAT_ID`
-
-Формат:
-- frontend отправляет JSON payload;
-- backend валидирует имя / телефон / consent;
-- backend формирует сообщение вида `Request details` + `Additional information`;
-- backend отправляет сообщение в Telegram Bot API.

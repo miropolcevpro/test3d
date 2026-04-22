@@ -20,7 +20,20 @@ function buildTransactionId() {
   return `${ts}:${rnd}`;
 }
 
+function appendLeadSubmitMode(url) {
+  const raw = trimTrailingSlashes(url || '');
+  if (!raw) return '';
+  return raw + (raw.includes('?') ? '&mode=lead_submit' : '?mode=lead_submit');
+}
+
 function resolveLeadSubmitEndpoint() {
+  try {
+    const runtime = (typeof window !== 'undefined' && window.__RUNTIME_CONFIG__) ? window.__RUNTIME_CONFIG__ : null;
+    if (runtime && typeof runtime.resolveTelemetryEndpoint === 'function') {
+      const endpoint = trimTrailingSlashes(runtime.resolveTelemetryEndpoint() || '');
+      if (endpoint) return appendLeadSubmitMode(endpoint);
+    }
+  } catch (_) {}
   try {
     const runtime = (typeof window !== 'undefined' && window.__RUNTIME_CONFIG__) ? window.__RUNTIME_CONFIG__ : null;
     if (runtime && typeof runtime.resolvePublicApiBaseUrl === 'function') {
@@ -29,7 +42,14 @@ function resolveLeadSubmitEndpoint() {
     }
   } catch (_) {}
   try {
-    const base = trimTrailingSlashes(window.__API_BASE_URL__ || '');
+    const runtime = (typeof window !== 'undefined' && window.__RUNTIME_CONFIG__) ? window.__RUNTIME_CONFIG__ : null;
+    if (runtime && typeof runtime.resolveAdminApiBaseUrl === 'function') {
+      const base = trimTrailingSlashes(runtime.resolveAdminApiBaseUrl() || '');
+      if (base) return `${base}/api/telemetry?mode=lead_submit`;
+    }
+  } catch (_) {}
+  try {
+    const base = trimTrailingSlashes(window.__API_BASE_URL__ || window.API_BASE_URL || '');
     if (base) return `${base}/api/telemetry?mode=lead_submit`;
   } catch (_) {}
   return '';
