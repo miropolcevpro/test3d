@@ -1,7 +1,7 @@
 (function(global){
   'use strict';
   global.__AG_CALCULATOR_CONFIG__ = Object.freeze({
-    version: '20260422-f24dv',
+    version: '20260422-f24dw',
     submitMode: 'standalone',
     submitEndpoint: '',
     telegramShareBaseUrl: '',

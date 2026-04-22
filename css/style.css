@@ -34,6 +34,7 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
 
 /* Main (catalog) screen background */
 #screenCatalog{background: rgb(51,51,51);} /* #333333 */
+#screenDetail{background:linear-gradient(180deg, #f3f5f8 0%, #eef2f7 100%);}
 
 /* Header */
 .appHeader{
@@ -248,7 +249,7 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
   color:#0a0c10;
 }
 .detailTopTitle{flex:1;font-weight:800;font-size:18px;opacity:0.9;}
-.detailScroll{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;}
+.detailScroll{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;background:transparent;}
 .detailHero{height:240px;background:#ddd;background-position:center;background-size:cover;}
 .detailBody{flex:none;overflow:visible;background:#fff;color:#0a0c10;padding:16px 14px 110px;}
 .detailRow{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px;}
@@ -1366,7 +1367,68 @@ html,body{margin:0;padding:0;background:#000;color:var(--fg);font-family:system-
 @media (min-width: 820px){
   .catalogCards{max-width:780px;margin:0 auto;padding-bottom:24px;}
   .catalogFooterCta{max-width:780px;margin:0 auto;}
-  .detailBody{max-width:520px;margin:0 auto;}
+}
+
+@media (min-width: 980px){
+  .detailTop{
+    width:min(1240px, calc(100% - 32px));
+    margin:0 auto 14px;
+    padding:calc(14px + var(--safe-top)) 18px 14px;
+    border-radius:0 0 22px 22px;
+    background:rgba(255,255,255,0.9);
+    box-shadow:0 12px 30px rgba(15,23,42,0.08);
+    backdrop-filter:saturate(1.05) blur(6px);
+  }
+  .detailTopTitle{
+    min-width:0;
+    font-size:clamp(19px, 2vw, 24px);
+    line-height:1.18;
+    opacity:0.92;
+  }
+  .detailHero{
+    width:min(1240px, calc(100% - 32px));
+    margin:0 auto;
+    height:clamp(320px, 31vw, 500px);
+    border-radius:30px;
+    background:#eef2f6;
+    box-shadow:0 18px 52px rgba(15,23,42,0.12);
+  }
+  .heroTrack,
+  .heroSlide{height:100%;}
+  .heroSlide img{
+    object-fit:contain;
+    background:#eef2f6;
+  }
+  .detailBody{
+    max-width:1240px;
+    margin:0 auto;
+    padding:22px 18px 126px;
+    background:transparent;
+  }
+  .detailBody > *{
+    width:min(100%, 560px);
+    margin-left:auto;
+    margin-right:auto;
+  }
+  .detailRow{
+    align-items:flex-end;
+    margin-bottom:14px;
+  }
+  .detailName{font-size:clamp(38px, 4vw, 56px);}
+  .detailSub{font-size:clamp(18px, 1.8vw, 24px);opacity:0.72;}
+  .calculatorMount{
+    width:min(1240px, calc(100% - 32px));
+    margin:28px auto 40px;
+  }
+  .calculatorEmbed{
+    border-radius:30px;
+    box-shadow:0 22px 58px rgba(15,23,42,0.12);
+  }
+  .calculatorEmbed__head{
+    padding:18px 22px 14px;
+    border-radius:30px 30px 0 0;
+  }
+  .calculatorEmbed__body{border-radius:0 0 30px 30px;}
 }
 
 
