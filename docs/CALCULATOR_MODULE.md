@@ -29,3 +29,10 @@ The calculator currently runs in `draft` mode by default. It prepares the payloa
 - Telegram share/deep link via `telegramShareBaseUrl` / `telegramUsername`
 
 without changing calculation logic.
+
+
+## Standalone transport boundary
+- Legacy Tilda submit transport has been removed from the calculator core.
+- Calculator core keeps calculation state, UI, previews, cart and hidden summary fields only.
+- Standalone submit transport now lives in `calculator_module/bridge.js`.
+- Future Telegram / CRM integration must extend the standalone bridge, not the core runtime.

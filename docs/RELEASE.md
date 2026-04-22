@@ -48,3 +48,8 @@ Ship one root change per archive. Do not combine unrelated fixes into one releas
 - Keep the current release token in `RELEASE_STAMP.txt`.
 - Keep all local HTML asset `?v=` tokens equal to `RELEASE_STAMP.txt`.
 - Record the same token in the `## Unreleased` section of `CHANGELOG.md` before packaging.
+
+
+## Additional release hardening
+- telemetry collector source and upload ZIP must stay byte-identical; release_check validates both `index.js` and `package.json` in `backend_yc_function_upload/telemetry_collector.zip`.
+- calculator loader tokens in `js/calculator-embed.js` must match `calculator_module/config.js` and `RELEASE_STAMP.txt`.

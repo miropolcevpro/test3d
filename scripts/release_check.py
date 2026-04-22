@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -253,6 +254,76 @@ def read_admin_build_id() -> str:
         fail('Could not read __BUILD_ID__ from admin/admin.js')
     return m.group(1)
 
+
+
+def read_calculator_loader_versions() -> list[str]:
+    text = (ROOT / 'js/calculator-embed.js').read_text(encoding='utf-8')
+    versions = re.findall(r"calculator_module/(?:config|paver-configurator-core|bridge)\.js\?v=([^'\")]+)", text)
+    if len(versions) < 3:
+        fail('Could not read all calculator asset versions from js/calculator-embed.js')
+    return versions
+
+
+def read_calculator_config_version() -> str:
+    text = (ROOT / 'calculator_module/config.js').read_text(encoding='utf-8')
+    m = re.search(r"version:\s*'([^']+)'", text)
+    if not m:
+        fail('Could not read version from calculator_module/config.js')
+    return m.group(1)
+
+
+def read_telemetry_source_version() -> str:
+    text = (ROOT / 'backend_yc_functions/telemetry_collector/index.js').read_text(encoding='utf-8')
+    m = re.search(r"const RELEASE_VERSION = '([^']+)';", text)
+    if not m:
+        fail('Could not read RELEASE_VERSION from backend_yc_functions/telemetry_collector/index.js')
+    return m.group(1)
+
+
+def read_telemetry_upload_zip() -> tuple[str, bytes, bytes]:
+    zip_path = ROOT / 'backend_yc_function_upload/telemetry_collector.zip'
+    if not zip_path.exists():
+        fail('Missing backend_yc_function_upload/telemetry_collector.zip')
+    with zipfile.ZipFile(zip_path, 'r') as zf:
+        names = set(zf.namelist())
+        if 'index.js' not in names or 'package.json' not in names:
+            fail('telemetry_collector.zip must contain index.js and package.json in archive root')
+        index_bytes = zf.read('index.js')
+        package_bytes = zf.read('package.json')
+    m = re.search(rb"const RELEASE_VERSION = '([^']+)';", index_bytes)
+    if not m:
+        fail('Could not read RELEASE_VERSION from telemetry_collector.zip:index.js')
+    return m.group(1).decode('utf-8'), index_bytes, package_bytes
+
+
+def check_calculator_token_alignment(stamp: str) -> None:
+    versions = sorted(set(read_calculator_loader_versions()))
+    if len(versions) != 1:
+        fail('js/calculator-embed.js contains mixed calculator asset tokens: ' + ', '.join(versions))
+    loader_version = versions[0]
+    config_version = read_calculator_config_version()
+    if loader_version != stamp:
+        fail(f'Calculator loader token ({loader_version}) does not match RELEASE_STAMP.txt ({stamp})')
+    if config_version != stamp:
+        fail(f'calculator_module/config.js version ({config_version}) does not match RELEASE_STAMP.txt ({stamp})')
+    ok('Calculator asset token matches loader and config (' + stamp + ')')
+
+
+def check_telemetry_upload_sync(stamp: str) -> None:
+    src_index = ROOT / 'backend_yc_functions/telemetry_collector/index.js'
+    src_pkg = ROOT / 'backend_yc_functions/telemetry_collector/package.json'
+    src_version = read_telemetry_source_version()
+    zip_version, zip_index_bytes, zip_package_bytes = read_telemetry_upload_zip()
+    if src_version != stamp:
+        fail(f'Telemetry source RELEASE_VERSION ({src_version}) does not match RELEASE_STAMP.txt ({stamp})')
+    if zip_version != stamp:
+        fail(f'Telemetry upload ZIP RELEASE_VERSION ({zip_version}) does not match RELEASE_STAMP.txt ({stamp})')
+    if src_index.read_bytes() != zip_index_bytes:
+        fail('Telemetry upload ZIP index.js does not match backend_yc_functions/telemetry_collector/index.js')
+    if src_pkg.read_bytes() != zip_package_bytes:
+        fail('Telemetry upload ZIP package.json does not match backend_yc_functions/telemetry_collector/package.json')
+    ok('Telemetry collector source and upload ZIP are synchronized (' + stamp + ')')
+
 def check_release_token_alignment() -> None:
     stamp = read_release_stamp()
     token = read_html_asset_token()
@@ -269,7 +340,9 @@ def check_release_token_alignment() -> None:
     changelog = (ROOT / 'CHANGELOG.md').read_text(encoding='utf-8')
     if f'Release token: `{stamp}`' not in changelog:
         fail('CHANGELOG.md does not record the current release token: ' + stamp)
-    ok('Release token matches HTML entrypoints, RELEASE_STAMP.txt, runtime-config.js, admin/admin.js, and CHANGELOG.md (' + stamp + ')')
+    check_calculator_token_alignment(stamp)
+    check_telemetry_upload_sync(stamp)
+    ok('Release token matches HTML entrypoints, RELEASE_STAMP.txt, runtime-config.js, admin/admin.js, CHANGELOG.md, calculator loader/config, and telemetry collector sync (' + stamp + ')')
 
 
 

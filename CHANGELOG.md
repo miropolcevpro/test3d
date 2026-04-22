@@ -1,3 +1,11 @@
+## 2026-04-22 — Patch f24ds: telemetry sync hardening + calculator transport cleanup
+
+- База: `webar_patch_telemetry_zip_source_sync_hardening_candidate_f24dr.zip` (подтверждённая стабильная база; в этой сессии патч пересобран поверх `f24dq` с повторным включением утверждённого P1, потому что артефакт `f24dr` недоступен в контейнере).
+- Что сделано: синхронизированы `backend_yc_functions/telemetry_collector` и `backend_yc_function_upload/telemetry_collector.zip`, `RELEASE_VERSION` collector приведён к текущему релизному токену, `scripts/release_check.py` усилен проверками синхронизации source/upload ZIP и token alignment калькулятора; из `calculator_module/paver-configurator-core.js` удалён legacy Tilda submit слой, кнопка отправки и transport boundary переведены на standalone-модель через `calculator_module/bridge.js`.
+- Что не трогали: AR pipeline, multizone, curb logic, seam-safe stitching, calculator formulas/cart, telemetry ingest/summary behavior, admin flows и service worker behavior.
+- Проверка: `node --check` для изменённых JS, `python3 scripts/release_check.py`, `python3 scripts/package_release.py`, проверка финального telemetry ZIP и release token alignment.
+- Release token: `20260422-f24ds`
+
 ## 2026-04-22 — Patch f24dq: calculator foreground text visibility follow-up
 
 - База: `webar_patch_calculator_parameter_readability_candidate_f24dp.zip` (текущий калькуляторный кандидат по явному продолжению правок читаемости).

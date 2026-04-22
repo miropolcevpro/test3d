@@ -65,7 +65,7 @@
   }
 
   function patchSubmitButton(){
-    var btn = doc.getElementById('pcSubmitToTildaBtn');
+    var btn = doc.getElementById('pcSubmitLeadBtn') || doc.getElementById('pcSubmitToTildaBtn');
     if (!btn) return null;
     btn.id = 'pcSubmitStandaloneBtn';
     btn.textContent = safeText((CONFIG.submitEndpoint || CONFIG.telegramShareBaseUrl || CONFIG.telegramUsername) ? 'Отправить заявку' : 'Подготовить заявку');
@@ -165,7 +165,7 @@
 
   function saveDraft(payload){
     try {
-      global.localStorage.setItem('ag_calculator_last_draft_v1', JSON.stringify(payload));
+      global.localStorage.setItem(safeText(CONFIG.draftStorageKey || 'ag_calculator_last_draft_v1'), JSON.stringify(payload));
     } catch (_) {}
   }
 
