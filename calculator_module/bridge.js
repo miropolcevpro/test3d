@@ -15,90 +15,6 @@
   function nowIso(){ try { return new Date().toISOString(); } catch (_) { return ''; } }
   function digits(value){ return safeText(value).replace(/\D/g, ''); }
   function cloneJson(value){ try { return JSON.parse(JSON.stringify(value)); } catch (_) { return null; } }
-  function toNum(value){
-    if (value == null || value === '') return NaN;
-    var num = Number(String(value).replace(/\s+/g, '').replace(',', '.'));
-    return isFinite(num) ? num : NaN;
-  }
-
-  function fmtNumber(value, digits){
-    var num = toNum(value);
-    if (!isFinite(num)) return '—';
-    try {
-      return new Intl.NumberFormat('ru-RU', { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(num);
-    } catch (_) {
-      return num.toFixed(digits);
-    }
-  }
-
-  function fmtRub(value, digits){
-    var num = toNum(value);
-    if (!isFinite(num)) return value === 'по запросу' ? 'по запросу' : '—';
-    return fmtNumber(num, digits) + ' ₽';
-  }
-
-  function fmtQty(value, unit){
-    var suffix = unit === 'lm' ? 'пог. м' : 'м²';
-    if (value === 'по запросу') return 'по запросу';
-    var num = toNum(value);
-    if (!isFinite(num)) return '— ' + suffix;
-    return fmtNumber(num, 2) + ' ' + suffix;
-  }
-
-  function fmtKg(value){
-    if (value === 'по запросу') return 'по запросу';
-    var num = toNum(value);
-    if (!isFinite(num)) return '— кг';
-    return fmtNumber(num, 0) + ' кг';
-  }
-
-  function buildCartLeadSnapshot(cartPositions){
-    var positions = Array.isArray(cartPositions) ? cartPositions : [];
-    var blocks = [];
-    var sum = 0;
-    var hasRequest = false;
-    for (var i = 0; i < positions.length; i += 1) {
-      var pos = positions[i] || {};
-      var unit = pos.qty_unit === 'lm' ? 'lm' : 'm2';
-      var sizeLabel = '';
-      if (pos.type === 'curb') sizeLabel = safeText(pos.curb_label || pos.curb_size || '').trim();
-      else sizeLabel = safeText(pos.thickness_label || (pos.thickness_value ? String(pos.thickness_value) + ' мм' : '')).trim();
-      var pallets = pos.pallets === 'по запросу' ? 'по запросу' : (isFinite(toNum(pos.pallets)) ? String(Math.round(toNum(pos.pallets))) : '—');
-      var lines = [];
-      lines.push('Позиция ' + (i + 1) + ': ' + (safeText(pos.form_name).trim() || '—') + (sizeLabel ? (' · ' + sizeLabel) : ''));
-      lines.push((safeText(pos.tech_name).trim() || '—') + ' · ' + (safeText(pos.color_name).trim() || '—'));
-      lines.push('Количество (ввод): ' + fmtQty(pos.qty_value, unit));
-      lines.push('Цена за 1 ' + (unit === 'lm' ? 'пог. м' : 'м²') + ': ' + fmtRub(pos.unit_price, 2));
-      lines.push('В 1 поддоне: ' + fmtQty(pos.per_pallet_qty, unit));
-      lines.push('Поддонов: ' + pallets);
-      lines.push('Отгрузка (кратно поддону): ' + fmtQty(pos.ship_qty, unit));
-      lines.push('Запас: ' + fmtQty(pos.over_qty, unit));
-      lines.push('Вес 1 поддона: ' + fmtKg(pos.pallet_weight_kg));
-      lines.push('Вес общий: ' + fmtKg(pos.weight_kg || pos.ship_weight_kg));
-      lines.push('Стоимость 1 поддона: ' + fmtRub(pos.pallet_empty_price, 2));
-      lines.push('Стоимость поддонов: ' + fmtRub(pos.pallet_empty_total, 2));
-      lines.push('Стоимость материала: ' + fmtRub(pos.goods_total, 2));
-      lines.push('Итого по позиции: ' + fmtRub(pos.grand_total, 2));
-      blocks.push(lines.join('\n'));
-      if (pos.grand_total === 'по запросу') hasRequest = true;
-      else {
-        var gt = toNum(pos.grand_total);
-        if (isFinite(gt)) sum += gt;
-      }
-    }
-    var grandLabel = '';
-    if (positions.length) {
-      grandLabel = hasRequest ? ('ИТОГО ПО КОРЗИНЕ: ' + fmtRub(sum, 0) + ' + позиции по запросу') : ('ИТОГО ПО КОРЗИНЕ: ' + fmtRub(sum, 0));
-      grandLabel += '\nПозиции: ' + String(positions.length);
-    }
-    var orderPositionsText = blocks.length ? (blocks.join('\n\n────────\n\n') + (grandLabel ? ('\n\n' + grandLabel) : '')) : '';
-    return {
-      order_positions_text: orderPositionsText,
-      order_cart_grand_total: positions.length ? (hasRequest ? (fmtRub(sum, 0) + ' + запрос') : fmtRub(sum, 0)) : '',
-      order_positions_count: positions.length,
-      order_source: 'tilda_calc_cart_v1'
-    };
-  }
   function trimTrailingSlashes(value){ return safeText(value).replace(/\/+$/, ''); }
   function buildTransactionId(){ return String(Date.now()) + ':' + String(Math.floor(Math.random() * 1e10)).padStart(10, '0'); }
 
@@ -164,7 +80,7 @@
   function collectHiddenValues(){
     var names = [
       'order_form','order_technology','order_color','order_thickness_mm','order_area_m2','order_m2_per_pallet','order_pallets',
-      'order_ship_m2','order_over_m2','order_weight_kg','order_unit_price','order_total_price','order_positions_text','order_cart_grand_total','order_positions_count','order_source'
+      'order_ship_m2','order_over_m2','order_weight_kg','order_unit_price','order_total_price','order_positions_text','order_cart_grand_total'
     ];
     var payload = {};
     for (var i = 0; i < names.length; i += 1) {
@@ -211,24 +127,123 @@
     return '';
   }
 
+  function fmtNum(value, digits){
+    var num = Number(value || 0);
+    var places = Number.isFinite(digits) ? digits : 0;
+    return num.toLocaleString('ru-RU', {
+      minimumFractionDigits: places,
+      maximumFractionDigits: places
+    });
+  }
+
+  function fmtRub(value){
+    var num = Number(value || 0);
+    return fmtNum(num, 0) + ' ₽';
+  }
+
+  function fmtRub2(value){
+    var num = Number(value || 0);
+    return fmtNum(num, 2) + ' ₽';
+  }
+
+  function safeNumber(value){
+    return (typeof value === 'number' && isFinite(value)) ? value : NaN;
+  }
+
+  function calcCartTotals(positions){
+    var sum = 0;
+    var hasRequest = false;
+    for (var i = 0; i < positions.length; i += 1) {
+      var pos = positions[i] || {};
+      if (pos.grand_total === 'по запросу') {
+        hasRequest = true;
+        continue;
+      }
+      if (typeof pos.grand_total === 'number' && isFinite(pos.grand_total)) {
+        sum += pos.grand_total;
+      }
+    }
+    return { sum: sum, hasRequest: hasRequest };
+  }
+
+  function formatCartQty(value, unitLabel){
+    if (value === 'по запросу') return 'по запросу';
+    if (!(typeof value === 'number' && isFinite(value))) return '— ' + unitLabel;
+    return fmtNum(value, 2) + ' ' + unitLabel;
+  }
+
+  function formatCartKg(value){
+    if (value === 'по запросу') return 'по запросу';
+    if (!(typeof value === 'number' && isFinite(value))) return '— кг';
+    return fmtNum(value, 0) + ' кг';
+  }
+
+  function formatCartMoney(value, keepDecimals){
+    if (value === 'по запросу') return 'по запросу';
+    if (!(typeof value === 'number' && isFinite(value))) return '—';
+    return keepDecimals ? fmtRub2(value) : fmtRub(value);
+  }
+
+  function buildManagerTextFromCart(positions){
+    if (!positions || !positions.length) return '';
+    var blocks = [];
+    for (var i = 0; i < positions.length; i += 1) {
+      var pos = positions[i] || {};
+      var unitLabel = pos.qty_unit === 'lm' ? 'пог. м' : 'м²';
+      var sizeLabel = pos.type === 'curb'
+        ? (safeText(pos.curb_label || pos.curb_size || '').trim())
+        : (safeText(pos.thickness_label || (pos.thickness_value ? String(pos.thickness_value) + ' мм' : '')).trim());
+      var lines = [];
+      var title = 'Позиция ' + (i + 1) + ': ' + (safeText(pos.form_name || '—'));
+      if (sizeLabel) title += ' · ' + sizeLabel;
+      lines.push(title);
+      lines.push((safeText(pos.tech_name || '—')) + ' · ' + (safeText(pos.color_name || '—')));
+      lines.push('Количество (ввод): ' + formatCartQty(safeNumber(pos.qty_value), unitLabel));
+      lines.push('Цена за 1 ' + unitLabel + ': ' + formatCartMoney(pos.unit_price, true));
+      lines.push('В 1 поддоне: ' + formatCartQty(safeNumber(pos.per_pallet_qty), unitLabel));
+      lines.push('Поддонов: ' + (pos.pallets === 'по запросу' ? 'по запросу' : (typeof pos.pallets === 'number' && isFinite(pos.pallets) ? String(pos.pallets) : '—')));
+      lines.push('Отгрузка (кратно поддону): ' + formatCartQty(safeNumber(pos.ship_qty), unitLabel));
+      lines.push('Запас: ' + formatCartQty(safeNumber(pos.over_qty), unitLabel));
+      lines.push('Вес 1 поддона: ' + formatCartKg(safeNumber(pos.pallet_weight_kg)));
+      lines.push('Вес общий: ' + formatCartKg(safeNumber(pos.weight_kg || pos.ship_weight_kg)));
+      lines.push('Стоимость 1 поддона: ' + formatCartMoney(pos.pallet_empty_price, true));
+      lines.push('Стоимость поддонов: ' + formatCartMoney(pos.pallet_empty_total, true));
+      lines.push('Стоимость материала: ' + formatCartMoney(pos.goods_total, true));
+      lines.push('Итого по позиции: ' + formatCartMoney(pos.grand_total, true));
+      blocks.push(lines.join('\n'));
+    }
+    var totals = calcCartTotals(positions);
+    var grandText = '';
+    if (positions.length) {
+      grandText = totals.hasRequest ? ('ИТОГО ПО КОРЗИНЕ: ' + fmtRub(totals.sum) + ' + позиции по запросу') : ('ИТОГО ПО КОРЗИНЕ: ' + fmtRub(totals.sum));
+      grandText += '\nПозиции: ' + String(positions.length);
+    }
+    return blocks.join('\n\n────────\n\n') + (grandText ? ('\n\n' + grandText) : '');
+  }
+
+  function deriveSummaryFromCart(cartPositions, hidden){
+    var positions = Array.isArray(cartPositions) ? cartPositions : [];
+    var derivedText = buildManagerTextFromCart(positions);
+    var totals = calcCartTotals(positions);
+    return {
+      order_positions_text: derivedText || safeText(hidden.order_positions_text),
+      order_cart_grand_total: positions.length ? (totals.hasRequest ? (fmtRub(totals.sum) + ' + запрос') : fmtRub(totals.sum)) : safeText(hidden.order_cart_grand_total),
+      order_positions_count: positions.length,
+      order_source: 'tilda_calc_cart_v1'
+    };
+  }
+
   function collectLeadPayload(){
     try { if (typeof global.cartUpdateHiddenFields === 'function') global.cartUpdateHiddenFields(); } catch (_) {}
     var cartRef = global.__pcCart || null;
+    var cartPositions = cloneJson(cartRef && cartRef.positions ? cartRef.positions : []) || [];
     var hidden = collectHiddenValues();
-    var snapshot = buildCartLeadSnapshot(cartRef && cartRef.positions ? cartRef.positions : []);
-    var orderPositionsText = safeText(hidden.order_positions_text || snapshot.order_positions_text);
-    var orderCartGrandTotal = safeText(hidden.order_cart_grand_total || snapshot.order_cart_grand_total);
-    var orderPositionsCount = Number(hidden.order_positions_count || snapshot.order_positions_count || (cartRef && cartRef.positions ? cartRef.positions.length : 0)) || 0;
-    var orderSource = safeText(hidden.order_source || snapshot.order_source || 'tilda_calc_cart_v1');
-    var summary = Object.assign({}, hidden, snapshot, {
-      order_positions_text: orderPositionsText,
-      order_cart_grand_total: orderCartGrandTotal,
-      order_positions_count: String(orderPositionsCount),
-      order_source: orderSource
-    });
+    var derived = deriveSummaryFromCart(cartPositions, hidden);
+    hidden.order_positions_text = derived.order_positions_text;
+    hidden.order_cart_grand_total = derived.order_cart_grand_total;
     return {
       submitted_at: nowIso(),
-      source: orderSource,
+      source: 'tilda_calc_cart_v1',
       form_type: 'calculator',
       transaction_id: buildTransactionId(),
       block_id: 'calculator_module',
@@ -241,12 +256,12 @@
       },
       consent: !!(findField('personal_data_consent') && findField('personal_data_consent').checked),
       personal_data_consent: (findField('personal_data_consent') && findField('personal_data_consent').checked) ? 'yes' : 'no',
-      summary: summary,
-      cart: cloneJson(cartRef && cartRef.positions ? cartRef.positions : []),
-      order_positions_text: orderPositionsText,
-      order_cart_grand_total: orderCartGrandTotal,
-      order_positions_count: orderPositionsCount,
-      order_source: orderSource
+      summary: hidden,
+      cart: cartPositions,
+      order_positions_text: derived.order_positions_text,
+      order_positions_count: derived.order_positions_count,
+      order_cart_grand_total: derived.order_cart_grand_total,
+      order_source: 'tilda_calc_cart_v1'
     };
   }
 
@@ -268,7 +283,7 @@
     if (payload.summary && payload.summary.order_positions_text) text += 'order_positions_text: ' + encodeURIComponent(payload.summary.order_positions_text) + '%0A';
     if (payload.order_cart_grand_total) text += 'order_cart_grand_total: ' + encodeURIComponent(payload.order_cart_grand_total) + '%0A';
     text += 'order_positions_count: ' + encodeURIComponent(String(payload.order_positions_count || 0)) + '%0A';
-    text += 'order_source: ' + encodeURIComponent(payload.order_source || 'visualizer_calc_cart_v1') + '%0A';
+    text += 'order_source: ' + encodeURIComponent(payload.order_source || 'tilda_calc_cart_v1') + '%0A';
     text += 'personal_data_consent: ' + encodeURIComponent(payload.personal_data_consent || 'no');
     return base + text;
   }
