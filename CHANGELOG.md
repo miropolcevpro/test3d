@@ -1,7 +1,12 @@
-## 20260422-f24ec
+## 20260422-f24ed
+- Telemetry summary/errors compatibility hardening: read-only telemetry modes now work in compatibility mode with Bearer-token presence when telemetry JWT secret is not configured, while `clear_errors` remains strict.
+- Telemetry collector health now reports auth compatibility state.
+- Telemetry collector upload ZIP resynced with source and release stamp updated to `20260422-f24ed`.
+
+## 20260422-f24ed
 - AR entry: на desktop/PC попытка запуска AR теперь показывает понятное уведомление о том, что визуализация доступна на телефоне с поддержкой ARCore и в Google Chrome; совместимые планшеты не блокируются жёстко и продолжают идти в обычный AR-flow.
 - AR device detection: добавлена безопасная device-классификация по touch/pointer/viewport (desktop / phone / tablet-like) без запрета для планшетов, которые потенциально поддерживают ARCore и WebXR.
-- Release token: `20260422-f24ec`
+- Release token: `20260422-f24ed`
 
 ## 20260422-f24dw
 - AR: кнопка «Расчёт стоимости» из AR теперь открывает текущую страницу формы и после выхода из AR стабильно прокручивает к блоку калькулятора.

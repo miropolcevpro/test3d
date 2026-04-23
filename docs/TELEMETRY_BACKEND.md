@@ -33,7 +33,8 @@
 
 Опционально:
 
-- `TELEMETRY_ADMIN_JWT_SECRET` или `ADMIN_JWT_SECRET` или `JWT_SECRET` — секрет для проверки admin JWT в protected telemetry режимах (`summary`, `errors`, `clear_errors`)
+- `TELEMETRY_ADMIN_JWT_SECRET` или `ADMIN_JWT_SECRET` или `JWT_SECRET` — секрет для строгой проверки admin JWT в protected telemetry режимах (`summary`, `errors`, `clear_errors`).
+  Если секрет не задан, read-only режимы `summary` и `errors` продолжают работать в совместимом режиме по наличию Bearer token, а `clear_errors` остаётся строго защищённым и требует секрет.
 - `TELEMETRY_PREFIX=telemetry`
 - `TELEMETRY_MAX_EVENTS=50`
 - `TELEMETRY_MAX_DAYS=365`
