@@ -943,7 +943,7 @@
   }
 
   function clearRemoteErrorsDetailed(payload) {
-    return postRemoteResult(buildRemoteUrl('clear_errors', {}), Object.assign({ action: 'clear_errors', mode: 'clear_errors' }, payload || {}), 'clear_errors', { 'X-Telemetry-Admin-Action': 'clear_errors' });
+    return postRemoteResult(buildRemoteUrl('clear_errors', {}), Object.assign({ action: 'clear_errors', mode: 'clear_errors' }, payload || {}), 'clear_errors');
   }
 
   function getSyncStatus() {

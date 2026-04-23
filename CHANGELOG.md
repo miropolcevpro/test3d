@@ -1,3 +1,8 @@
+## 20260423-f24ef
+- telemetry: removed custom `X-Telemetry-Admin-Action` dependency from admin `clear_errors` flow so browser CORS preflight no longer blocks error clearing.
+- telemetry: `clear_errors` compatibility mode now relies on the existing Bearer-token presence and explicit `mode/action=clear_errors` payload already sent by admin telemetry UI.
+- Release token: `20260423-f24ef`
+
 ## 20260422-f24ee
 - telemetry: restored admin clear_errors in compatibility mode when JWT secret is absent by requiring bearer presence plus explicit admin action header
 - telemetry: keep summary/errors compatibility fallback and preserve strict JWT path when secret is configured
