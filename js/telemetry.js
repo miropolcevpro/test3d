@@ -877,7 +877,7 @@
     });
   }
 
-  function postRemoteResult(url, payload, mode) {
+  function postRemoteResult(url, payload, mode, extraHeaders) {
     if (!url) {
       return Promise.resolve({ ok: false, status: 0, data: null, url: '', message: 'Telemetry endpoint is not configured', code: 'no_endpoint' });
     }
@@ -885,10 +885,10 @@
       method: 'POST',
       cache: 'no-store',
       credentials: 'omit',
-      headers: buildRemoteHeaders(mode, {
+      headers: buildRemoteHeaders(mode, Object.assign({
         'Accept': 'application/json',
         'Content-Type': 'application/json'
-      }),
+      }, extraHeaders || {})),
       body: JSON.stringify(payload || {})
     }).then(function (res) {
       if (!res) return { ok: false, status: 0, data: null, url: url, message: 'Empty response from telemetry endpoint', code: 'empty_response' };
@@ -943,7 +943,7 @@
   }
 
   function clearRemoteErrorsDetailed(payload) {
-    return postRemoteResult(buildRemoteUrl('clear_errors', {}), Object.assign({ action: 'clear_errors', mode: 'clear_errors' }, payload || {}), 'clear_errors');
+    return postRemoteResult(buildRemoteUrl('clear_errors', {}), Object.assign({ action: 'clear_errors', mode: 'clear_errors' }, payload || {}), 'clear_errors', { 'X-Telemetry-Admin-Action': 'clear_errors' });
   }
 
   function getSyncStatus() {
