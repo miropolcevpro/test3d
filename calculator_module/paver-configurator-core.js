@@ -15,7 +15,7 @@
   }
 
   existing.outerHTML = `<div id="paverConf2026" class="paverConf2026"
-  data-cdn="${(window.__AG_CALCULATOR_ASSET_BASE__ || 'calculator_module/').replace(/\/?$/,'/')}" data-assets-ver="20260422-f24eb" data-cdn-commit="">
+  data-cdn="${(window.__AG_CALCULATOR_ASSET_BASE__ || 'calculator_module/').replace(/\/?$/,'/')}" data-assets-ver="20260422-f24ec" data-cdn-commit="">
 
   <div class="paverConf2026__head">
     <div class="paverConf2026__title">Быстрый расчет стоимости</div>
@@ -296,6 +296,12 @@
       '#paverConf2026 .pcPreview__body *,',
       '#paverConf2026 .pcCalc__pickedLine,',
       '#paverConf2026 .pcCalc__pickedLine *,',
+      '#paverConf2026 .pcCart__titleText,',
+      '#paverConf2026 .pcCartItem__title,',
+      '#paverConf2026 .pcCartItem__sum,',
+      '#paverConf2026 .pcCartTotalTab__label,',
+      '#paverConf2026 .pcCartTotalTab__value,',
+      '#paverConf2026 .pcCartInfo__v,',
       '#paverConf2026 .pcForm__consent,',
       '#paverConf2026 .pcForm__consent *,',
       '#paverConf2026 .pcForm__sub{',
