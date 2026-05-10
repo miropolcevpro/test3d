@@ -1,7 +1,8 @@
-## 20260510-f24eg
+## 20260510-f24eh
+- AR admin calibration: expanded texture size calibration range from 0.70–1.50 to 0.40–2.00 without changing runtime logic.
 - AR zone compact bar: removed the misleading “Текстура не выбрана” subtitle from the lower zone card when a texture is already selected.
 - AR zone compact bar: the subtitle now shows duplicated area information for the active zone as `Примерная площадь зоны: X,XX м²` without changing zone, texture, rotation, calculator, or telemetry logic.
-- Release token: `20260510-f24eg`
+- Release token: `20260510-f24eh`
 
 ## 20260423-f24ef
 - telemetry: removed custom `X-Telemetry-Admin-Action` dependency from admin `clear_errors` flow so browser CORS preflight no longer blocks error clearing.

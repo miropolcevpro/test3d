@@ -2041,9 +2041,19 @@ function comparableTextureKey(shapeId, value) {
   return String(value || '').trim().toLowerCase().replace(/[^a-z0-9_\-]+/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
 }
 
+const ADMIN_CALIBRATION_SCALE_MIN = 0.40;
+const ADMIN_CALIBRATION_SCALE_MAX = 2.00;
+
 function formatCalibrationScale(value) {
   const n = Number(value);
   return `${Number.isFinite(n) ? n.toFixed(2) : '1.00'}x`;
+}
+
+function syncCalibrationScaleSliderBounds() {
+  if (!UI.calibrationScaleSlider) return;
+  UI.calibrationScaleSlider.min = ADMIN_CALIBRATION_SCALE_MIN.toFixed(2);
+  UI.calibrationScaleSlider.max = ADMIN_CALIBRATION_SCALE_MAX.toFixed(2);
+  UI.calibrationScaleSlider.step = '0.01';
 }
 
 const ADMIN_VISUAL_CALIBRATION_SCHEMA = [
@@ -2116,7 +2126,7 @@ function getSelectedTileVisualParamValue(key) {
 }
 
 function getAdminCalibrationSnapshot() {
-  const out = { uvScale: clamp(getSelectedTileUvScaleValue(), 0.70, 1.50) };
+  const out = { uvScale: clamp(getSelectedTileUvScaleValue(), ADMIN_CALIBRATION_SCALE_MIN, ADMIN_CALIBRATION_SCALE_MAX) };
   for (const schema of ADMIN_VISUAL_CALIBRATION_SCHEMA) {
     out[schema.key] = getSelectedTileVisualParamValue(schema.key);
   }
@@ -2133,8 +2143,9 @@ function getCalibrationVisualControl(schemaOrKey) {
 }
 
 function updateCalibrationUiValue(value) {
-  const safe = clamp(Number(value) || 1, 0.70, 1.50);
+  const safe = clamp(Number(value) || 1, ADMIN_CALIBRATION_SCALE_MIN, ADMIN_CALIBRATION_SCALE_MAX);
   state.adminCalibrationScale = safe;
+  syncCalibrationScaleSliderBounds();
   if (UI.calibrationScaleValue) UI.calibrationScaleValue.textContent = formatCalibrationScale(safe);
   if (UI.calibrationScaleSlider) UI.calibrationScaleSlider.value = safe.toFixed(2);
 }
@@ -2169,7 +2180,7 @@ function setAdminCalibrationTab(tab) {
 function patchSelectedTileAdminCalibrationParams(patch = {}) {
   const snapshot = getAdminCalibrationSnapshot();
   const next = { ...snapshot };
-  if (Object.prototype.hasOwnProperty.call(patch, 'uvScale')) next.uvScale = clamp(Number(patch.uvScale) || 1, 0.70, 1.50);
+  if (Object.prototype.hasOwnProperty.call(patch, 'uvScale')) next.uvScale = clamp(Number(patch.uvScale) || 1, ADMIN_CALIBRATION_SCALE_MIN, ADMIN_CALIBRATION_SCALE_MAX);
   for (const schema of ADMIN_VISUAL_CALIBRATION_SCHEMA) {
     if (!Object.prototype.hasOwnProperty.call(patch, schema.key)) continue;
     next[schema.key] = clamp(Number(patch[schema.key]) || schema.defaultValue, schema.min, schema.max);
@@ -2190,7 +2201,7 @@ function applySelectedTileAdminCalibrationLive(snapshot = null) {
   const fill = fillMesh;
   const preview = previewPlane;
   const size = (state.selectedTile && state.selectedTile.tileSizeM) ? state.selectedTile.tileSizeM : { w: 0.2, h: 0.2 };
-  const uvScale = clamp(Number(next.uvScale) || 1, 0.70, 1.50);
+  const uvScale = clamp(Number(next.uvScale) || 1, ADMIN_CALIBRATION_SCALE_MIN, ADMIN_CALIBRATION_SCALE_MAX);
   const repeatX = (3 / Math.max(0.001, Number(size.w) || 0.2)) * uvScale;
   const repeatY = (3 / Math.max(0.001, Number(size.h) || 0.2)) * uvScale;
   const exposureMult = clamp(Number(next.exposureMult) || 1, 0.60, 1.60);
@@ -2368,7 +2379,7 @@ function resetAdminCalibrationCurrentTab() {
 }
 
 function stepAdminCalibrationScale(delta) {
-  const next = clamp((Number(state.adminCalibrationScale) || 1) + Number(delta || 0), 0.70, 1.50);
+  const next = clamp((Number(state.adminCalibrationScale) || 1) + Number(delta || 0), ADMIN_CALIBRATION_SCALE_MIN, ADMIN_CALIBRATION_SCALE_MAX);
   updateCalibrationUiValue(applySelectedTileUvScaleLive(next));
   scheduleAdminCalibrationSave();
 }
