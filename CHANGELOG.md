@@ -1,3 +1,8 @@
+## 20260510-f24eg
+- AR zone compact bar: removed the misleading “Текстура не выбрана” subtitle from the lower zone card when a texture is already selected.
+- AR zone compact bar: the subtitle now shows duplicated area information for the active zone as `Примерная площадь зоны: X,XX м²` without changing zone, texture, rotation, calculator, or telemetry logic.
+- Release token: `20260510-f24eg`
+
 ## 20260423-f24ef
 - telemetry: removed custom `X-Telemetry-Admin-Action` dependency from admin `clear_errors` flow so browser CORS preflight no longer blocks error clearing.
 - telemetry: `clear_errors` compatibility mode now relies on the existing Bearer-token presence and explicit `mode/action=clear_errors` payload already sent by admin telemetry UI.

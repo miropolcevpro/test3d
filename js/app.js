@@ -982,12 +982,16 @@ function getArZonePluralLabel(totalZones) {
   return `${n} зон`;
 }
 
+function getArZoneAreaM2(zone) {
+  if (zone && Array.isArray(zone.points) && zone.points.length >= 3) {
+    return Math.max(0, computeAreaM2FromContours(zone.points, zone.holes));
+  }
+  return Math.max(0, computeAreaM2());
+}
+
 function getArZoneCompactMeta(zone) {
-  const tileLabel = getArZoneTileLabel(zone);
-  const rotationLabel = formatArZoneRotationLabel(zone ? zone.textureRotationDeg : state.textureRotationDeg);
-  const totalZones = getZones().length;
-  const zoneLabel = getArZonePluralLabel(totalZones);
-  return `${tileLabel} · ${rotationLabel} · ${zoneLabel}`;
+  const areaM2 = getArZoneAreaM2(zone);
+  return `Примерная площадь зоны: ${fmtArea(areaM2)}`;
 }
 
 function getArCurbPreset(presetId) {

@@ -35,7 +35,7 @@
     return '';
   }
   global.__AG_CALCULATOR_CONFIG__ = Object.freeze({
-    version: '20260423-f24ef',
+    version: '20260510-f24eg',
     submitMode: 'standalone',
     submitEndpoint: resolveLeadSubmitEndpoint(),
     telegramShareBaseUrl: '',

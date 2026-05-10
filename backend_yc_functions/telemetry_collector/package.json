@@ -1,0 +1,10 @@
+{
+  "name": "webar-telemetry-collector",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.js",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.637.0"
+  }
+}
